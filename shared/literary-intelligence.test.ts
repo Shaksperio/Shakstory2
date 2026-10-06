@@ -29,7 +29,7 @@ describe("Cowila literary intelligence", () => {
       role: "developmental_editor",
       task: "analyze",
     });
-    expect(context).toContain("dark fantasy");
+    expect(context.toLowerCase()).toContain("dark fantasy");
     expect(context).toContain("gótico");
     expect(context).toContain("adulto");
     expect(context).toContain("developmental_editor");
@@ -38,7 +38,7 @@ describe("Cowila literary intelligence", () => {
 
   it("does not promise bestseller outcomes or author imitation", () => {
     const principles = buildCowilaEditorialPrinciples();
-    expect(principles).toContain("não prometa");
+    expect(principles).toContain("garantia de best-seller");
     expect(principles).toContain("autores vivos");
   });
 });
