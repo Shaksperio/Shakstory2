@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shakstory.app/schemas/semantic-book.schema.json",
+  "title": "Shakstory Semantic Book 1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "title", "parts", "migratedFromLegacy"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "migratedFromLegacy": { "type": "boolean" },
+    "parts": { "type": "array", "items": { "$ref": "#/$defs/part" } }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "text", "sortOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["paragraph", "quote", "scene_break", "heading"] },
+        "text": { "type": "string" },
+        "sortOrder": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "blocks", "characterIds", "locationIds", "sortOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
+        "characterIds": { "type": "array", "items": { "type": "string" } },
+        "locationIds": { "type": "array", "items": { "type": "string" } },
+        "sortOrder": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "scenes", "sortOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "scenes": { "type": "array", "items": { "$ref": "#/$defs/scene" } },
+        "sortOrder": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "chapters", "sortOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "chapters": { "type": "array", "items": { "$ref": "#/$defs/chapter" } },
+        "sortOrder": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

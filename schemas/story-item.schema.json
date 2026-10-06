@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shakstory.app/schemas/story-item.schema.json",
+  "title": "Shakstory Story Item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "bookId", "type", "name", "version", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^item_[a-zA-Z0-9_-]+$" },
+    "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+    "type": { "type": "string", "enum": ["character", "location", "object", "event", "idea", "note"] },
+    "name": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "summary": { "type": ["string", "null"], "maxLength": 3000 },
+    "content": { "type": ["string", "null"] },
+    "relatedNodeIds": { "type": "array", "items": { "type": "string", "pattern": "^node_[a-zA-Z0-9_-]+$" }, "uniqueItems": true },
+    "tags": { "type": "array", "items": { "type": "string", "maxLength": 80 }, "uniqueItems": true },
+    "version": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
+

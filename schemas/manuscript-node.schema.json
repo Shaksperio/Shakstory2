@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shakstory.app/schemas/manuscript-node.schema.json",
+  "title": "Shakstory Manuscript Node",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "bookId", "kind", "title", "content", "sortOrder", "version", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^node_[a-zA-Z0-9_-]+$" },
+    "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+    "parentId": { "type": ["string", "null"], "pattern": "^node_[a-zA-Z0-9_-]+$" },
+    "kind": { "type": "string", "enum": ["front_matter", "part", "chapter", "scene", "back_matter"] },
+    "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "content": { "type": "string" },
+    "sortOrder": { "type": "integer", "minimum": 0 },
+    "wordCount": { "type": "integer", "minimum": 0 },
+    "version": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
+
