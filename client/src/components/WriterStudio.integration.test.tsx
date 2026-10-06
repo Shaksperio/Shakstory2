@@ -147,12 +147,21 @@ describe("WriterStudio integrated literary assistance", () => {
     fireEvent.change(screen.getByLabelText("Título"), { target: { value: "Caderno revisado" } });
     fireEvent.change(screen.getByLabelText("Autor"), { target: { value: "Autora QA" } });
     fireEvent.change(screen.getByLabelText("ISBN"), { target: { value: "978-qa" } });
+    fireEvent.change(screen.getByLabelText("Universo"), { target: { value: "Universo Editado" } });
+    fireEvent.change(screen.getByLabelText("Série"), { target: { value: "Série Editada" } });
     fireEvent.change(screen.getByLabelText("Status editorial"), { target: { value: "completed" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar alterações" }));
     expect(await screen.findByText("Caderno revisado")).toBeTruthy();
     expect(screen.getByText("Autora QA")).toBeTruthy();
     expect(screen.getByText("ISBN 978-qa")).toBeTruthy();
     expect(screen.getAllByText("Concluído").length).toBeGreaterThan(0);
+    const editedLibrary = JSON.parse(localStorage.getItem("shakstory:library") ?? "{}") as { books?: Array<{ title?: string; hierarchy?: { universeId?: string; universeName?: string; seriesId?: string; seriesName?: string } }> };
+    expect(editedLibrary.books?.find(book => book.title === "Caderno revisado")?.hierarchy).toMatchObject({
+      universeId: "universe-universo-editado",
+      universeName: "Universo Editado",
+      seriesId: "series-serie-editada",
+      seriesName: "Série Editada",
+    });
     fireEvent.change(screen.getByRole("combobox", { name: "Filtrar por status" }), { target: { value: "completed" } });
     expect(screen.getByText("Caderno revisado")).toBeTruthy();
     fireEvent.change(screen.getByRole("combobox", { name: "Ordenar biblioteca" }), { target: { value: "progress" } });
