@@ -16,6 +16,7 @@ import { AlertCircle, BookOpen, BookMarked, Check, CheckCircle2, ChevronDown, Ch
 import React, { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { AntivirusSecurityView } from "./AntivirusSecurityView";
+import { PlanningBoards, type PlanningBoard } from "./PlanningBoards";
 
 type View = "library" | "project" | "planning" | "editor" | "prepare" | "security";
 type EditorialStatus = "planning" | "draft" | "editing" | "revision" | "completed";
@@ -23,12 +24,12 @@ type Node = { id: string; title: string; kind: "chapter" | "scene" | "part"; con
 type Character = { id: string; name: string; role: string; notes: string; tags?: string[]; status?: EditorialStatus };
 type Location = { id: string; name: string; atmosphere: string; notes: string; tags?: string[]; status?: EditorialStatus };
 type TimelineEvent = { id: string; title: string; date: string; description: string; tags?: string[]; status?: EditorialStatus };
-type PlanningData = { characters: Character[]; locations: Location[]; timeline: TimelineEvent[] };
+type PlanningData = { characters: Character[]; locations: Location[]; timeline: TimelineEvent[]; boards?: PlanningBoard[] };
 type StoryCard = { id: string; title: string; description: string; status?: EditorialStatus };
 type StoryRelation = { id: string; from: string; to: string; fromId?: string; toId?: string; label: string; status?: EditorialStatus };
 type StoryScene = { id: string; title: string; objective: string; conflict: string; notes: string; status?: EditorialStatus };
 type StoryData = { objectives: StoryCard[]; conflicts: StoryCard[]; relations: StoryRelation[]; notes: string[]; noteIds?: string[]; noteStatuses?: EditorialStatus[]; scenes: StoryScene[] };
-type PlanningTab = keyof PlanningData | "story";
+type PlanningTab = "characters" | "locations" | "timeline" | "boards" | "story";
 type PublicationData = { author: string; genre: string; category?: string; language: string; description: string; isbn?: string; publicationDate?: string; coverImageUrl?: string; includeToc?: boolean; typography?: TypographyPreset; trimSize?: "a5" | "6x9" | "a4"; marginPreset?: "narrow" | "normal" | "wide"; dropCap?: boolean; headerText?: string; footerText?: string; frontMatter?: Array<{ id: string; title: string; content: string; enabled?: boolean }>; backMatter?: Array<{ id: string; title: string; content: string; enabled?: boolean }>; };
 type Book = { id: string; title: string; subtitle?: string; status: EditorialStatus; targetWordCount: number; dailyGoalWords?: number; deadline?: string; nodes: Node[]; updatedAt: number; startedAt?: number; lastOpenedAt?: number; editSeconds?: number; planning?: PlanningData; story?: StoryData; publication?: PublicationData; nextSteps?: string[]; semanticBook?: SemanticBook; hierarchy?: BookHierarchy };
 type LibraryDocument = { version: 1; versionId?: string; books: Book[] };
