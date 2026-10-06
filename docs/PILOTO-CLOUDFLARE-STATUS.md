@@ -4,6 +4,8 @@ Estado consolidado em 5 de outubro de 2026.
 
 ## Produção
 
+- Versão validada: `2026-10-05.11`
+
 - Worker: `shakstory-pilot`
 - URL: https://shakstory-pilot.antonyopintor.workers.dev
 - D1: `shakstory-pilot`
