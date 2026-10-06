@@ -367,6 +367,41 @@ function EditorView({ book, nodes, activeNode, draft, richContent, onDraftChange
   const [findReplace, setFindReplace] = useState(false);
   const [findTerm, setFindTerm] = useState("");
   const [replaceTerm, setReplaceTerm] = useState("");
+  const [inspectorTab, setInspectorTab] = useState<"assistant" | "context" | "goals">("assistant");
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const sessionStart = React.useRef(Date.now());
+  const sessionWordBaseline = React.useRef(countWords(draft));
+
+  useEffect(() => {
+    sessionWordBaseline.current = countWords(draft);
+    sessionStart.current = Date.now();
+    setSessionNow(Date.now());
+  }, [activeNode?.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setSessionNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); }
+      if (mod && event.shiftKey && event.key.toLowerCase() === "f") { event.preventDefault(); setDistractionFree(value => !value); }
+      if (mod && event.key.toLowerCase() === "k") { event.preventDefault(); setFindReplace(value => !value); }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [onSave]);
+
+  const manuscriptWords = nodes.reduce((sum, node) => sum + countWords(node.content), 0) - countWords(activeNode?.content ?? "") + countWords(draft);
+  const targetWords = Math.max(0, book.targetWordCount || 0);
+  const progress = targetWords ? Math.min(100, Math.round((manuscriptWords / targetWords) * 100)) : 0;
+  const wordsThisSession = Math.max(0, countWords(draft) - sessionWordBaseline.current);
+  const sessionMinutes = Math.max(1, Math.round((sessionNow - sessionStart.current) / 60000));
+  const estimatedPages = Math.max(1, Math.ceil(manuscriptWords / 275));
+  const readingMinutes = Math.max(1, Math.ceil(countWords(draft) / 220));
+  const dailyGoal = Math.max(0, book.dailyGoalWords ?? 0);
   const replaceAll = () => { if (findTerm) onDraftChange(draft.split(findTerm).join(replaceTerm)); };
   const formatSelection = (command: string, value?: string) => { document.execCommand(command, false, value); };
   const toolbarButton = (label: string, command: string, value?: string) => <button type="button" aria-label={label} title={label} className="rounded px-2 py-1 hover:bg-secondary" onMouseDown={event => { event.preventDefault(); formatSelection(command, value); }}>{label}</button>;
