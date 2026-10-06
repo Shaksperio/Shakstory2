@@ -12,7 +12,7 @@ const harness = vi.hoisted(() => {
   };
   let literaryOptions: { onSuccess?: (value: typeof analysis) => void } = {};
   const literaryMutation = { isPending: false, mutate: vi.fn(() => literaryOptions.onSuccess?.(analysis)) };
-  const library = { version: 1, books: [{ id: "book-1", title: "Caderno", status: "draft", targetWordCount: 50000, updatedAt: Date.now(), nodes: [{ id: "chapter-1", title: "Capítulo 1", kind: "chapter", content: "A noite caiu.", updatedAt: Date.now() },] }] };
+  const library = { version: 1, books: [{ id: "book-1", title: "Caderno", status: "draft", targetWordCount: 50000, updatedAt: Date.now(), hierarchy: { bookId: "book-1", universeId: "universe-qa", universeName: "Universo QA", seriesId: "series-qa", seriesName: "Série QA" }, planning: { characters: [{ id: "char-1", name: "Elia", role: "Protagonista", notes: "Centro do conflito." }], locations: [{ id: "loc-1", name: "Gramaria", atmosphere: "Antiga", notes: "Cidade central." }], timeline: [{ id: "event-1", title: "A carta", date: "Início", description: "Revela uma ruptura." }] }, story: { objectives: [{ id: "obj-1", title: "Descobrir a verdade", description: "Objetivo principal." }], conflicts: [{ id: "conf-1", title: "Segredo familiar", description: "Impede a protagonista." }], relations: [], notes: ["Preservar o mistério."], scenes: [] }, nodes: [{ id: "chapter-1", title: "Capítulo 1", kind: "chapter", content: "A noite caiu.", updatedAt: Date.now() }, { id: "chapter-2", title: "Capítulo 2", kind: "chapter", content: "A carta continuava escondida.", updatedAt: Date.now() }] }] };
   const trpc = {
     data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) } },
     literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) } },
@@ -87,6 +87,17 @@ describe("WriterStudio integrated literary assistance", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Analisar trecho" }));
     await waitFor(() => expect(screen.getByText("A imagem inicial é clara.")).toBeTruthy());
+    expect(harness.literaryMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      text: "A noite caiu.",
+      focus: "full",
+      context: expect.objectContaining({
+        book: expect.objectContaining({ id: "book-1", hierarchy: expect.objectContaining({ universeName: "Universo QA", seriesName: "Série QA" }) }),
+        characters: [expect.objectContaining({ name: "Elia", role: "Protagonista" })],
+        locations: [expect.objectContaining({ name: "Gramaria" })],
+        neighboringNodes: [expect.objectContaining({ id: "chapter-2", excerpt: "A carta continuava escondida." })],
+        story: expect.objectContaining({ objectives: [expect.objectContaining({ title: "Descobrir a verdade" })] }),
+      }),
+    }));
     expect(editor.textContent).toBe("A noite caiu.");
 
     fireEvent.click(screen.getByRole("button", { name: "Aplicar sugestão" }));
