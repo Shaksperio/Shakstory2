@@ -2,10 +2,10 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 const root = process.cwd();
-const forbidden = /\b(?:pintura|orçamento|orcamento|cliente|material|serviço|servico|paint[- ]budget)\b/i;
+const forbidden = /\b(?:pintura|orçamento|orcamento|paint[- ]budget)\b|\b(?:cliente(?:s)?|material(?:is)?|serviço(?:s)?|servico(?:s)?)\s+(?:de\s+)?pintura\b/i;
 const ignoredDirectories = new Set([".git", "node_modules", "dist", ".manus-logs"]);
 const ignoredFiles = new Set(["todo.md"]);
-// Linhas permitidas: são as listas de termos que os próprios guardrails precisam conter.
+// Termos genéricos como cliente, material e serviço são válidos em contexto técnico;\n// o guardrail bloqueia o domínio descartado somente quando o termo é específico ou contextualizado com pintura.\n// Linhas permitidas: são as listas de termos que os próprios guardrails precisam conter.
 const technicalAllowlist = new Map([
   ["scripts/validate-data.mjs", ["const forbidden =", "console.log(\"Dados editoriais"]],
   ["scripts/validate-repository.mjs", ["const forbidden ="]],
