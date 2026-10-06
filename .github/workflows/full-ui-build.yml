@@ -1,0 +1,44 @@
+name: Full UI Cloudflare Build
+
+on:
+  push:
+    branches:
+      - deploy/full-app-cloudflare
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate pnpm
+        run: corepack prepare pnpm@10.4.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript
+        run: pnpm check
+
+      - name: Build full Shakstory
+        run: pnpm build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shakstory-full-ui
+          path: dist/public
+          if-no-files-found: error
+          retention-days: 2
