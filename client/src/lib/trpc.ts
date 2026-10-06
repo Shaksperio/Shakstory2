@@ -19,10 +19,14 @@ export class CloudflareApiError extends Error {
 
 type DocumentResult = {
   data: Record<string, unknown> | null;
-  sha: string | null;
+  sha?: string;
   version: number;
   updatedAt?: string;
 };
+
+type RawDocumentResult = Omit<DocumentResult, "sha"> & { sha: string | null };
+
+type SyncStatus = "idle" | "syncing" | "synced" | "conflict" | "error";
 
 type PutInput = {
   path: string;
@@ -102,8 +106,10 @@ const json = async <T>(url: string, init?: RequestInit): Promise<T> => {
   return payload as T;
 };
 
-const readDocument = async (path: string): Promise<DocumentResult> =>
-  json<DocumentResult>(`/api/book?path=${encodeURIComponent(path)}`);
+const readDocument = async (path: string): Promise<DocumentResult> => {
+  const result = await json<RawDocumentResult>(`/api/book?path=${encodeURIComponent(path)}`);
+  return { ...result, sha: result.sha ?? undefined };
+};
 
 const writeDocument = async (input: PutInput): Promise<PutResult> =>
   json<PutResult>("/api/book", {
@@ -113,10 +119,11 @@ const writeDocument = async (input: PutInput): Promise<PutResult> =>
 
 const getStatus = async () => {
   const health = await json<{ ok: boolean; db: boolean; version?: string }>("/health");
+  const status: SyncStatus = health.ok && health.db ? "synced" : "error";
   return {
     mode: "cloudflare-d1" as const,
     versioned: true,
-    status: health.ok && health.db ? "synced" as const : "error" as const,
+    status,
     lastSyncAt: Date.now(),
     lastWebhookAt: null,
     lastWebhookEvent: null,
