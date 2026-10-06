@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+const credentialIt = process.env.RUN_GITHUB_CREDENTIAL_TESTS === "1" ? it : it.skip;
+
 describe("GitHub OAuth credentials", () => {
-  it("aceita o Client ID e o Client Secret configurados", async () => {
+  credentialIt("aceita o Client ID e o Client Secret configurados", async () => {
     const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
     const clientSecret = process.env.GITHUB_OAUTH_CLIENT_SECRET;
     expect(clientId, "GITHUB_OAUTH_CLIENT_ID não configurado").toBeTruthy();
