@@ -6,13 +6,21 @@ Estado consolidado em 5 de outubro de 2026.
 
 - Versão validada: `2026-10-05.12`
 
-- Worker: `shakstory-pilot`
-- URL: https://shakstory-pilot.antonyopintor.workers.dev
+- Worker de produção: `shakstory`
+- URL de produção: https://shakstory.antonyopintor.workers.dev
+- Worker de staging: `shakstory-pilot`
+- URL de staging: https://shakstory-pilot.antonyopintor.workers.dev
 - D1: `shakstory-pilot`
 - D1 UUID: `b2c9c84a-0ff2-4d7f-8b17-e1046149af4a`
 - Workers AI: ativo
 - Repositório operacional: `Shaksperio/Shakstory2`
 - Origem histórica: `Shaksperio/Shakstory-Backup`
+
+## Ambientes
+
+- **Produção**: `shakstory.antonyopintor.workers.dev`
+- **Staging**: `shakstory-pilot.antonyopintor.workers.dev`
+- Ambos usam o mesmo D1 e Workers AI nesta fase do piloto.
 
 ## Funcionalidades já validadas
 
