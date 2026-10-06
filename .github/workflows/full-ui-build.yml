@@ -1,0 +1,76 @@
+name: Full UI Cloudflare Build
+
+on:
+  push:
+    branches:
+      - deploy/full-app-cloudflare
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_OAUTH_CLIENT_ID: ci-test-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-test-secret
+      GITHUB_WEBHOOK_SECRET: ci-test-webhook-secret
+      JWT_SECRET: ci-test-jwt-secret-for-unit-tests-only
+      RUN_GITHUB_CREDENTIAL_TESTS: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate pnpm
+        run: corepack prepare pnpm@10.4.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript
+        run: pnpm check
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Validate data
+        run: pnpm validate:data
+
+      - name: Validate repository
+        run: pnpm validate:repository
+
+      - name: Build full Shakstory
+        run: pnpm build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shakstory-full-ui
+          path: dist/public
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Publish build branch
+        run: |
+          rm -rf /tmp/shakstory-dist
+          mkdir -p /tmp/shakstory-dist
+          cp -R dist/public/. /tmp/shakstory-dist/
+          git config user.name "Shakstory Build"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout --orphan cloudflare-dist-v2-tmp
+          git rm -rf . || true
+          git clean -fdx
+          cp -R /tmp/shakstory-dist/. .
+          touch .nojekyll
+          git add -A
+          git commit -m "build: publicar frontend Shakstory limpo"
+          git push --force origin HEAD:cloudflare-dist-v2
