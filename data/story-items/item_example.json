@@ -1,0 +1,13 @@
+{
+  "id": "item_example",
+  "bookId": "book_example",
+  "type": "character",
+  "name": "Lia",
+  "summary": "Personagem demonstrativa usada apenas para validação do schema.",
+  "content": "",
+  "relatedNodeIds": ["node_example"],
+  "tags": ["exemplo"],
+  "version": 1,
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z"
+}

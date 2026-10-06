@@ -1,0 +1,12 @@
+{
+  "id": "timeline_example",
+  "bookId": "book_example",
+  "title": "A carta chega",
+  "description": "Marco demonstrativo da linha do tempo narrativa.",
+  "timeLabel": "Outono, dia 3",
+  "relatedNodeId": "node_example",
+  "sortOrder": 0,
+  "version": 1,
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z"
+}
