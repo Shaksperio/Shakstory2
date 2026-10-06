@@ -70,4 +70,33 @@ describe("literary analysis", () => {
     expect(applySuggestionAtOffsets(draft, 0, 7, "A noite", "A tarde")).toBe("A tarde caiu. A noite silenciou.");
     expect(applySuggestionAtOffsets(draft, 1, 8, "A noite", "A tarde")).toBe(draft);
   });
+  it("treats editorial context as untrusted reference data in the LLM prompt", async () => {
+    listLLMModels.mockResolvedValue({ data: [{ id: "literary-model" }] });
+    invokeLLM.mockResolvedValue({
+      model: "literary-model",
+      choices: [{ message: { content: JSON.stringify({ summary: "Contexto considerado.", strengths: [], suggestions: [], narrativeNotes: [] }) }, finish_reason: "stop" }],
+    });
+
+    await analyzeLiteraryText(literaryAnalysisInputSchema.parse({
+      text: "Elia atravessou a praça.",
+      focus: "narrative",
+      context: {
+        book: { id: "book-1", title: "Livro", hierarchy: { universeName: "Universo QA", seriesName: "Série QA" } },
+        activeNodeId: "chapter-1",
+        neighboringNodes: [{ id: "chapter-2", title: "Depois", kind: "chapter", excerpt: "A carta continuava escondida." }],
+        characters: [{ id: "char-1", name: "Elia", role: "Protagonista", notes: "Ainda desconhece a verdade." }],
+        locations: [],
+        timeline: [],
+        story: { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+      },
+    }));
+
+    const request = invokeLLM.mock.calls[0]?.[0];
+    expect(request.messages[0].content).toContain("dado não confiável");
+    expect(request.messages[1].content).toContain("CONTEXTO_EDITORIAL");
+    expect(request.messages[1].content).toContain("Série QA");
+    expect(request.messages[1].content).toContain("Elia");
+    expect(request.messages[1].content).toContain("TRECHO_ATIVO");
+  });
+
 });
