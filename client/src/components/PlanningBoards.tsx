@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronLeft, ChevronRight, Pin, Plus, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 export type BoardCardKind = "note" | "character" | "location" | "research" | "scene" | "world";
 export type PlanningBoardCard = {
