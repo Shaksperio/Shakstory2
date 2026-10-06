@@ -32,6 +32,15 @@ jobs:
       - name: TypeScript
         run: pnpm check
 
+      - name: Tests
+        run: pnpm test
+
+      - name: Validate data
+        run: pnpm validate:data
+
+      - name: Validate repository
+        run: pnpm validate:repository
+
       - name: Build full Shakstory
         run: pnpm build
 
