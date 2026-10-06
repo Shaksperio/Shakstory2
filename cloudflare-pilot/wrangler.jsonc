@@ -1,0 +1,15 @@
+{
+  "name": "shakstory-pilot",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-05",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shakstory-pilot",
+      "database_id": "b2c9c84a-0ff2-4d7f-8b17-e1046149af4a"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
+}
