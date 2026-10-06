@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "databaseVersion": 1,
+  "lastSync": null,
+  "counts": {
+    "books": 1,
+    "manuscriptNodes": 1,
+    "storyItems": 1,
+    "timelineItems": 1,
+    "writingGoals": 1,
+    "manuscriptVersions": 1,
+    "mediaAssets": 1
+  },
+  "source": "shakstory",
+  "notes": "Manifesto inicial sem dados de usuários. Os arquivos editoriais são criados pelo aplicativo ou por uma migração autorizada."
+}

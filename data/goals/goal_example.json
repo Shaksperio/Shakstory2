@@ -1,0 +1,9 @@
+{
+  "id": "goal_example",
+  "bookId": "book_example",
+  "targetWordCount": 50000,
+  "dailyWordCount": 500,
+  "dueAt": null,
+  "version": 1,
+  "updatedAt": "2026-08-26T00:00:00Z"
+}

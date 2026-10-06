@@ -1,0 +1,16 @@
+{
+  "id": "book_example",
+  "ownerId": "owner_example",
+  "title": "A Casa Depois da Chuva",
+  "subtitle": "Exemplo de estrutura editorial",
+  "authorName": "Autor de exemplo",
+  "synopsis": "Registro demonstrativo para validar a forma dos dados do Shakstory.",
+  "status": "planning",
+  "language": "pt-BR",
+  "targetWordCount": 50000,
+  "wordCount": 0,
+  "cover": null,
+  "version": 1,
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z"
+}

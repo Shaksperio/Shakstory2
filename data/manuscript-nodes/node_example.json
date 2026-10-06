@@ -1,0 +1,13 @@
+{
+  "id": "node_example",
+  "bookId": "book_example",
+  "parentId": null,
+  "kind": "chapter",
+  "title": "Capítulo 1 — A margem do rio",
+  "content": "Este é um documento editorial de exemplo para validar a estrutura do manuscrito.",
+  "sortOrder": 0,
+  "wordCount": 13,
+  "version": 1,
+  "createdAt": "2026-08-26T00:00:00Z",
+  "updatedAt": "2026-08-26T00:00:00Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "media_example",
+  "bookId": "book_example",
+  "kind": "reference",
+  "name": "Referência visual demonstrativa",
+  "storageKey": "books/book_example/reference/media_example.webp",
+  "mimeType": "image/webp",
+  "sizeBytes": 1,
+  "createdAt": "2026-08-26T00:00:00Z"
+}
