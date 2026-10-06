@@ -19,6 +19,10 @@ jobs:
     timeout-minutes: 20
     env:
       GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_OAUTH_CLIENT_ID: ci-test-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-test-secret
+      GITHUB_WEBHOOK_SECRET: ci-test-webhook-secret
+      RUN_GITHUB_CREDENTIAL_TESTS: "0"
 
     steps:
       - name: Checkout
