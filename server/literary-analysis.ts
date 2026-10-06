@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { invokeOmniRouteLLM, isOmniRouteConfigured, listOmniRouteModels } from "./omniroute";
+import { buildCowilaLiteraryContext } from "@shared/literary-intelligence";
 
 export const literaryFocusSchema = z.enum([
   "language",
@@ -18,6 +19,11 @@ export const literaryAnalysisInputSchema = z.object({
   focus: literaryFocusSchema.default("full"),
   model: z.string().trim().min(1).max(120).optional(),
   language: z.string().trim().min(2).max(40).default("pt-BR"),
+  genre: z.string().trim().max(80).optional(),
+  subgenre: z.string().trim().max(80).optional(),
+  audience: z.string().trim().max(80).optional(),
+  role: z.enum(["coauthor", "developmental_editor", "line_editor", "copy_editor", "continuity_editor", "worldbuilding_editor", "genre_editor", "publishing_editor", "typesetting_editor", "ebook_editor"]).optional(),
+  task: z.enum(["analyze", "continue_scene", "brainstorm", "rewrite_options", "outline", "scene_design", "character_arc", "dialogue", "continuity_check", "worldbuilding", "synopsis", "blurb", "metadata", "typesetting", "ebook"]).optional(),
 });
 
 const suggestionSchema = {
@@ -94,12 +100,13 @@ export async function analyzeLiteraryText(input: z.infer<typeof literaryAnalysis
   const catalog = await listLiteraryModels();
   const available = new Set(catalog.data.map(model => model.id));
   const selectedModel = input.model && available.has(input.model) ? input.model : undefined;
+  const cowilaContext = buildCowilaLiteraryContext({ genre: input.genre, subgenre: input.subgenre, audience: input.audience, role: input.role, task: input.task });
   const request = {
     ...(selectedModel ? { model: selectedModel } : {}),
     messages: [
       {
         role: "system",
-        content: `Você é uma editora literária brasileira, rigorosa e respeitosa à autoria. Responda somente em JSON conforme o schema. O idioma do trecho é ${input.language}. ${focusInstructions[input.focus]} Diferencie erro verificável de preferência editorial. Nunca invente regra, não elogie de forma genérica e não proponha mudanças que alterem fatos, personagens ou intenção sem explicar o risco. O campo original deve ser uma sequência literal encontrada no trecho, exceto quando a sugestão for uma observação sem substituição; nesse caso use uma string vazia. Informe start e end como offsets UTF-16 do trecho original; para observações sem substituição, use start=0 e end=0. A confiança deve ficar entre 0 e 1.`,
+        content: `Você é Cowila, editora literária do Shakstory, rigorosa e respeitosa à autoria. ${cowilaContext} Responda somente em JSON conforme o schema. O idioma do trecho é ${input.language}. ${focusInstructions[input.focus]} Diferencie erro verificável de preferência editorial. Nunca invente regra, não elogie de forma genérica e não proponha mudanças que alterem fatos, personagens ou intenção sem explicar o risco. O campo original deve ser uma sequência literal encontrada no trecho, exceto quando a sugestão for uma observação sem substituição; nesse caso use uma string vazia. Informe start e end como offsets UTF-16 do trecho original; para observações sem substituição, use start=0 e end=0. A confiança deve ficar entre 0 e 1.`,
       },
       { role: "user", content: `Analise o trecho abaixo. Não o reescreva integralmente e não aplique alterações.\n\n${input.text}` },
     ] as Array<{ role: "system" | "user"; content: string }>,

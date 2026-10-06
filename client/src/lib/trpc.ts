@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
 
 type QueryOptions = {
   enabled?: boolean;
@@ -55,6 +56,11 @@ type PutResult = {
 type LiteraryInput = {
   text: string;
   focus: "language" | "grammar" | "parts_of_speech" | "lexicon" | "narrative" | "voice" | "style" | "full";
+  genre?: string;
+  subgenre?: string;
+  audience?: string;
+  role?: LiteraryRole;
+  task?: LiteraryTask;
 };
 
 type LiterarySuggestion = {
@@ -156,6 +162,7 @@ const literaryPrompt: Record<LiteraryInput["focus"], string> = {
 };
 
 const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> => {
+  const cowilaContext = buildCowilaLiteraryContext(input);
   const result = await json<{
     proposal?: string;
     canonWarnings?: string[];
@@ -163,7 +170,8 @@ const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> =>
     method: "POST",
     body: JSON.stringify({
       action: "literary_review",
-      prompt: literaryPrompt[input.focus],
+      prompt: `${cowilaContext} ${literaryPrompt[input.focus]}`,
+      literaryProfile: { genre: input.genre, subgenre: input.subgenre, audience: input.audience, role: input.role, task: input.task },
       book: { id: "writerstudio-cloudflare", title: "Manuscrito Shakstory" },
       scene: { id: "active-excerpt", title: "Trecho ativo", text: input.text },
       canon: [],
