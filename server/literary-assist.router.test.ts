@@ -11,6 +11,7 @@ vi.mock("./literary-analysis", () => ({
     focus: require("zod").enum(["language", "grammar", "parts_of_speech", "lexicon", "narrative", "voice", "style", "full"]).default("full"),
     model: require("zod").string().optional(),
     language: require("zod").string().default("pt-BR"),
+    context: require("zod").unknown().optional(),
   }),
 }));
 vi.mock("./_core/llm", () => ({ listLLMModels }));
