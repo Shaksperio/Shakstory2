@@ -164,4 +164,27 @@ describe("WriterStudio integrated literary assistance", () => {
     expect(await screen.findByText("Projeto do livro")).toBeTruthy();
     expect(screen.getByText("Planejamento")).toBeTruthy();
   });
+
+  it("creates a book linked to a universe and series and persists the hierarchy", async () => {
+    render(<WriterStudio />);
+    fireEvent.click(screen.getByRole("button", { name: "Novo livro" }));
+    fireEvent.change(screen.getByLabelText("Título"), { target: { value: "Livro da Série" } });
+    fireEvent.change(screen.getByLabelText("Universo"), { target: { value: "Universo QA" } });
+    fireEvent.change(screen.getByLabelText("Série"), { target: { value: "Série QA" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar livro" }));
+
+    expect(await screen.findByText("Projeto do livro")).toBeTruthy();
+    expect(screen.getByText("Universo: Universo QA")).toBeTruthy();
+    expect(screen.getByText("Série: Série QA")).toBeTruthy();
+
+    const persisted = JSON.parse(localStorage.getItem("shakstory:library") ?? "{}") as { books?: Array<{ title?: string; hierarchy?: { bookId?: string; universeId?: string; universeName?: string; seriesId?: string; seriesName?: string } }> };
+    const created = persisted.books?.find(book => book.title === "Livro da Série");
+    expect(created?.hierarchy).toMatchObject({
+      bookId: expect.any(String),
+      universeId: "universe-universo-qa",
+      universeName: "Universo QA",
+      seriesId: "series-serie-qa",
+      seriesName: "Série QA",
+    });
+  });
 });
