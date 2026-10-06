@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+const credentialIt = process.env.RUN_GITHUB_CREDENTIAL_TESTS === "1" ? it : it.skip;
+
 describe("GitHub repository token", () => {
-  it("autentica na API do GitHub sem expor o token", async () => {
+  credentialIt("autentica na API do GitHub sem expor o token", async () => {
     const token = process.env.GITHUB_TOKEN;
     expect(token, "GITHUB_TOKEN não configurado").toBeTruthy();
     const response = await fetch("https://api.github.com/user", {
