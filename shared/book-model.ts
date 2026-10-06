@@ -1,3 +1,33 @@
+export type CanonScope = "book" | "series" | "universe";
+export type StoryCanonFact = {
+  id: string;
+  text: string;
+  scope: CanonScope;
+  status: "active" | "superseded" | "disputed";
+  createdAt?: string;
+  updatedAt?: string;
+};
+export type StoryUniverse = {
+  id: string;
+  name: string;
+  description?: string;
+  canonFacts?: StoryCanonFact[];
+};
+export type StorySeries = {
+  id: string;
+  universeId: string;
+  name: string;
+  description?: string;
+  canonFacts?: StoryCanonFact[];
+};
+export type BookHierarchy = {
+  bookId: string;
+  universeId?: string;
+  universeName?: string;
+  seriesId?: string;
+  seriesName?: string;
+};
+
 export type SemanticBlock = { id: string; kind: "paragraph" | "quote" | "scene_break" | "heading"; text: string; sortOrder: number };
 export type SemanticScene = { id: string; title: string; blocks: SemanticBlock[]; richContent?: string; characterIds: string[]; locationIds: string[]; sortOrder: number };
 export type SemanticChapter = { id: string; title: string; scenes: SemanticScene[]; sortOrder: number };
