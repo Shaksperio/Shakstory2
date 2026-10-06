@@ -50,10 +50,11 @@ jobs:
           cp -R dist/public/. /tmp/shakstory-dist/
           git config user.name "Shakstory Build"
           git config user.email "actions@users.noreply.github.com"
-          git checkout --orphan cloudflare-dist-tmp
+          git checkout --orphan cloudflare-dist-v2-tmp
           git rm -rf . || true
+          git clean -fdx
           cp -R /tmp/shakstory-dist/. .
           touch .nojekyll
           git add -A
-          git commit -m "build: publicar frontend Shakstory"
-          git push --force origin HEAD:cloudflare-dist
+          git commit -m "build: publicar frontend Shakstory limpo"
+          git push --force origin HEAD:cloudflare-dist-v2
