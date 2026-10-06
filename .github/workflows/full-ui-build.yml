@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -42,3 +42,18 @@ jobs:
           path: dist/public
           if-no-files-found: error
           retention-days: 2
+
+      - name: Publish build branch
+        run: |
+          rm -rf /tmp/shakstory-dist
+          mkdir -p /tmp/shakstory-dist
+          cp -R dist/public/. /tmp/shakstory-dist/
+          git config user.name "Shakstory Build"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout --orphan cloudflare-dist-tmp
+          git rm -rf . || true
+          cp -R /tmp/shakstory-dist/. .
+          touch .nojekyll
+          git add -A
+          git commit -m "build: publicar frontend Shakstory"
+          git push --force origin HEAD:cloudflare-dist
