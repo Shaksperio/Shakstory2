@@ -1,0 +1,9 @@
+{
+  "id": "version_example",
+  "bookId": "book_example",
+  "nodeId": "node_example",
+  "label": "Primeiro marco",
+  "content": "Este é um snapshot editorial de exemplo para validar restauração.",
+  "wordCount": 11,
+  "createdAt": "2026-08-26T00:00:00Z"
+}

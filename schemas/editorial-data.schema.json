@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shakstory.app/schemas/editorial-data.schema.json",
+  "title": "Shakstory Editorial Data",
+  "oneOf": [
+    {
+      "title": "Timeline item",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "bookId", "title", "version", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^timeline_[a-zA-Z0-9_-]+$" },
+        "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "description": { "type": ["string", "null"], "maxLength": 5000 },
+        "timeLabel": { "type": ["string", "null"], "maxLength": 240 },
+        "relatedNodeId": { "type": ["string", "null"] },
+        "sortOrder": { "type": "integer", "minimum": 0 },
+        "version": { "type": "integer", "minimum": 1 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    {
+      "title": "Writing goal",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "bookId", "targetWordCount", "dailyWordCount", "version", "updatedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^goal_[a-zA-Z0-9_-]+$" },
+        "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+        "targetWordCount": { "type": "integer", "minimum": 1 },
+        "dailyWordCount": { "type": "integer", "minimum": 1 },
+        "dueAt": { "type": ["string", "null"], "format": "date-time" },
+        "version": { "type": "integer", "minimum": 1 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    {
+      "title": "Manuscript version",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "bookId", "nodeId", "label", "content", "wordCount", "createdAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^version_[a-zA-Z0-9_-]+$" },
+        "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+        "nodeId": { "type": "string", "pattern": "^node_[a-zA-Z0-9_-]+$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "content": { "type": "string" },
+        "wordCount": { "type": "integer", "minimum": 0 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    {
+      "title": "Media asset",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "bookId", "kind", "name", "storageKey", "mimeType", "sizeBytes", "createdAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^media_[a-zA-Z0-9_-]+$" },
+        "bookId": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+        "kind": { "type": "string", "enum": ["cover", "inline", "reference"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "storageKey": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "mimeType": { "type": "string", "pattern": "^image/(png|jpeg|webp|gif|svg\\+xml)$" },
+        "sizeBytes": { "type": "integer", "minimum": 1 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  ]
+}
+

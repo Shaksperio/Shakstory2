@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shakstory.app/schemas/book.schema.json",
+  "title": "Shakstory Book",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "ownerId", "title", "status", "language", "targetWordCount", "wordCount", "version", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^book_[a-zA-Z0-9_-]+$" },
+    "ownerId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "subtitle": { "type": ["string", "null"], "maxLength": 320 },
+    "authorName": { "type": ["string", "null"], "maxLength": 240 },
+    "synopsis": { "type": ["string", "null"], "maxLength": 5000 },
+    "status": { "type": "string", "enum": ["planning", "draft", "revision", "complete"] },
+    "language": { "type": "string", "minLength": 2, "maxLength": 16 },
+    "targetWordCount": { "type": "integer", "minimum": 1 },
+    "wordCount": { "type": "integer", "minimum": 0 },
+    "cover": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["assetId"],
+      "properties": { "assetId": { "type": "string" }, "alt": { "type": "string", "maxLength": 240 } }
+    },
+    "version": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
+
