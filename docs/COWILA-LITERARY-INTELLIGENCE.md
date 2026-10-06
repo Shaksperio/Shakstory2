@@ -48,7 +48,7 @@ A Cowila não deve trabalhar apenas com o final do texto. A composição de cont
 12. pack de gênero/subgênero;
 13. conhecimento editorial recuperado da base documental versionada.
 
-O contexto deve ser selecionado por relevância e orçamento de tokens, não concatenado indiscriminadamente.
+O contexto deve ser selecionado por relevância e limite de tokens, não concatenado indiscriminadamente.
 
 ## Modos da Cowila
 
