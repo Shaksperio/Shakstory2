@@ -28,6 +28,18 @@ type RawDocumentResult = Omit<DocumentResult, "sha"> & { sha: string | null };
 
 type SyncStatus = "idle" | "syncing" | "synced" | "conflict" | "error";
 
+type StatusResult = {
+  mode: "cloudflare-d1";
+  versioned: true;
+  status: SyncStatus;
+  lastSyncAt: number | null;
+  lastWebhookAt: number | null;
+  lastWebhookEvent: string | null;
+  lastConflictPath: string | null;
+  lastError: string | null;
+  version: string | null;
+};
+
 type PutInput = {
   path: string;
   data: Record<string, unknown>;
@@ -117,7 +129,7 @@ const writeDocument = async (input: PutInput): Promise<PutResult> =>
     body: JSON.stringify(input),
   });
 
-const getStatus = async () => {
+const getStatus = async (): Promise<StatusResult> => {
   const health = await json<{ ok: boolean; db: boolean; version?: string }>("/health");
   const status: SyncStatus = health.ok && health.db ? "synced" : "error";
   return {
