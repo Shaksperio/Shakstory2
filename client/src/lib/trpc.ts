@@ -31,18 +31,6 @@ type StatusResult = {
   mode: "cloudflare-d1";
   versioned: true;
   status: SyncStatus;
-  lastSyncAt: number;
-  lastWebhookAt: number | null;
-  lastWebhookEvent: string | null;
-  lastConflictPath: string | null;
-  lastError: string | null;
-  version: string | null;
-};
-
-type StatusResult = {
-  mode: "cloudflare-d1";
-  versioned: true;
-  status: SyncStatus;
   lastSyncAt: number | null;
   lastWebhookAt: number | null;
   lastWebhookEvent: string | null;
