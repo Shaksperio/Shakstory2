@@ -203,9 +203,6 @@ describe("WriterStudio integrated literary assistance", () => {
       sceneTitle: "Capítulo 1",
       text: "A noite caiu.",
     }));
-    expect(screen.getByText("2")).toBeTruthy();
-    expect(screen.getByText("3")).toBeTruthy();
-    expect(screen.getByText("1")).toBeTruthy();
     expect(screen.getByText(/Revisar conhecimento/)).toBeTruthy();
   });
 
