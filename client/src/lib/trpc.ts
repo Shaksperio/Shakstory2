@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
 import { buildContinuationPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
+import { buildStyleDnaPrompt } from "@shared/style-dna";
 
 type QueryOptions = {
   enabled?: boolean;
@@ -68,6 +69,7 @@ type LiteraryInput = {
   sceneTitle?: string;
   planning?: unknown;
   story?: unknown;
+  styleSample?: string;
 };
 
 type LiterarySuggestion = {
@@ -104,6 +106,7 @@ type CoauthorInput = {
   audience?: string;
   planning?: unknown;
   story?: unknown;
+  styleSample?: string;
 };
 
 type CoauthorResult = {
@@ -222,6 +225,7 @@ const historyFromDocument = (document: Record<string, unknown> | null): Array<{ 
 
 const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> => {
   const cowilaContext = buildCowilaLiteraryContext(input);
+  const styleContext = buildStyleDnaPrompt(input.styleSample ?? input.text);
   const [canonDocument, memoryDocument] = await Promise.all([
     readOptionalDocument(input.bookId ? `canon/${input.bookId}.json` : undefined),
     readOptionalDocument(input.bookId ? `assistant/${input.bookId}.json` : undefined),
@@ -233,7 +237,7 @@ const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> =>
     method: "POST",
     body: JSON.stringify({
       action: "literary_review",
-      prompt: `${cowilaContext} ${literaryPrompt[input.focus]}`,
+      prompt: `${cowilaContext} ${styleContext} ${literaryPrompt[input.focus]}`,
       literaryProfile: { genre: input.genre, subgenre: input.subgenre, audience: input.audience, role: input.role, task: input.task },
       book: { id: input.bookId ?? "writerstudio-cloudflare", title: input.bookTitle ?? "Manuscrito Shakstory" },
       scene: { id: input.sceneId ?? "active-excerpt", title: input.sceneTitle ?? "Trecho ativo", text: input.text },
@@ -264,6 +268,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
     role: "coauthor",
     task: "continue_scene",
   });
+  const styleContext = buildStyleDnaPrompt(input.styleSample ?? input.text);
   const [canonDocument, memoryDocument] = await Promise.all([
     readOptionalDocument(`canon/${input.bookId}.json`),
     readOptionalDocument(`assistant/${input.bookId}.json`),
@@ -277,7 +282,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
       intent: input.intent,
       targetWords,
       approach,
-      literaryContext,
+      literaryContext: `${literaryContext} ${styleContext}`,
     });
     const result = await json<{
       proposal?: string;

@@ -139,6 +139,9 @@ describe("WriterStudio integrated literary assistance", () => {
     const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
     await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
 
+    fireEvent.click(screen.getByRole("button", { name: "Contexto" }));
+    expect(await screen.findByText("Style DNA")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Revisar" }));
     fireEvent.click(screen.getByRole("tab", { name: "Coautora" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Intenção da continuação" }), {
       target: { value: "Aumentar a tensão sem revelar o segredo." },
@@ -153,6 +156,7 @@ describe("WriterStudio integrated literary assistance", () => {
       text: "A noite caiu.",
       intent: "Aumentar a tensão sem revelar o segredo.",
       alternativeCount: 3,
+      styleSample: "A noite caiu.",
     }));
 
     const useButtons = screen.getAllByRole("button", { name: "Usar esta continuação" });
