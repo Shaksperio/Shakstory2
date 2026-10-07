@@ -325,3 +325,16 @@
 - [x] Validar regressões e registrar limitações do ambiente.
 
 Validação concluída em 07/10/2026: TypeScript, build de produção, validate:data, validate:repository e git diff --check aprovados. Suíte integral: 87 testes aprovados e 3 testes opcionais de credenciais reais ignorados. OAuth e webhook executados com configurações QA equivalentes ao CI. CI do PR #20 aprovado em todas as etapas (run 37653729827), usando pnpm 10.4.1 e lockfile congelado. Os 11 testes de coautoria incluem as novas regressões. Publicação em produção ainda não verificada.
+
+
+## Evolução editorial autorizada — análise Reedsy 2026-10-07
+
+- [x] Integrar preliminares, corpo e pós-textuais ao manuscrito sem migrar/destruir capítulos existentes.
+- [x] Preparação guiada: copyright, edição, ISBN por formato, editora e créditos.
+- [x] Importar DOCX/ODT com prévia, capítulos, formatação e imagens.
+- [x] Comentários com resolução, alterações rastreadas e histórico/restauração explícita.
+- [x] Biblioteca com capas/arquivo e preferências pessoais independentes do layout; painéis móveis.
+- [x] Corrigir e validar ordem, navegação, conteúdo e paginação das exportações.
+- [x] Executar regressão, typecheck, build e publicar somente estado validado.
+
+Implementação e validação local concluídas: 99 testes aprovados, 3 opcionais ignorados; TypeScript, build frontend/backend, validações e diff aprovados. Detalhes e limites em docs/editorial-workflow.md. Publicação será confirmada pelo CI e pelo bundle servido em produção.

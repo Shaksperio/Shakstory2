@@ -1,0 +1,32 @@
+# Evolução editorial — 7 de outubro de 2026
+
+A evolução aproveita o fluxo editorial observado no Reedsy sem alterar os IDs ou converter os capítulos dos projetos existentes. Os campos novos são opcionais no documento da biblioteca.
+
+## Como usar
+
+- **Biblioteca:** importar DOCX/ODT, conferir a prévia e confirmar a criação de um novo livro. Capas aparecem nos cartões. Em **Editar livro**, ativar ou desativar **Arquivar livro**; **Ver arquivo** alterna a biblioteca.
+- **Manuscrito, revisão e preferências:** a estrutura reúne preliminares, corpo e pós-textuais. Seções podem ser incluídas, editadas, desativadas e reordenadas. Os capítulos continuam usando o editor existente.
+- **Copyright e créditos:** autor, edição, ano, editora, ISBN por formato, créditos, cláusulas opcionais e texto adicional. O copyright é gerado na estrutura e nas exportações, respeitando sua posição e ativação.
+- **Revisão e histórico:** comentários por capítulo, trecho citado, resolução/reabertura, rastreamento opcional das próximas edições e versões explícitas do capítulo. Edições consecutivas em até 30 segundos são agrupadas, preservando o texto inicial. Aceitar mantém a edição; rejeitar restaura somente quando não há edições posteriores. Restaurar uma versão guarda primeiro o texto deslocado.
+- **Preferências de escrita:** fonte e entrelinha por navegador, independentes do layout exportado. A aparência clara/escura continua disponível no aplicativo.
+- **Celular:** alternar entre Capítulos, Escrever e Ferramentas. Ações de capítulo não dependem de hover.
+- **Preparação:** metadados e layout são salvos no livro. Exportações incorporam as imagens; falhas no carregamento são exibidas antes do download.
+
+## Persistência e compatibilidade
+
+Comentários, alterações, versões, copyright e arquivo ficam em `library.json`, junto ao livro, e seguem o salvamento no D1. O salvamento serializa gravações e usa o SHA confirmado na gravação seguinte; um conflito interrompe a fila até a atualização explícita. A cópia IndexedDB suporta manuscritos com imagens, além do backup legado em localStorage. O limite do localStorage não impede o salvamento remoto. Ao retornar a conexão, a fila pode continuar.
+
+Cowila continua sob solicitação do autor, mantendo o fluxo de três amostras, expansão selecionada, aplicação manual e desfazer. Comentários são registros editoriais persistidos; esta versão não acrescenta convites, permissões de equipe ou edição simultânea.
+
+## Importação e exportação
+
+DOCX/ODT: até 25 MB comprimidos, 80 MB descompactados, 5.000 entradas; imagens internas PNG/JPEG/WebP até 4 MB por imagem. Títulos de nível 1 separam capítulos. Negrito, itálico, sublinhado DOCX, subtítulos e imagens são preservados. A prévia informa conversões e conteúdo não suportado. Tabelas são convertidas em parágrafos; notas de rodapé, comentários e alterações do arquivo original não são convertidos. Manter o original para conferência.
+
+EPUB inclui pós-textuais no manifesto, navegação e ordem de leitura, incorpora imagens e usa data de modificação compatível com EPUB 3. HTML mantém o texto formatado e tamanho de página. DOCX mantém marcas básicas, imagens e tamanho de página. PDF mantém marcas básicas, imagens, títulos e sumários com quebra de linha, ordem editorial e numeração de páginas. Os mecanismos de composição dos formatos diferem; fontes e paginação não são idênticas entre PDF, DOCX e EPUB. Imagens WebP são convertidas em PNG pelo navegador antes da exportação.
+
+## Validação
+
+- 99 testes aprovados; 3 testes opcionais de credenciais reais ignorados.
+- TypeScript, build frontend/backend, validação de dados, validação do repositório e `git diff --check` aprovados.
+- Regressões cobrem importação, copyright, comentários, resolução, versões, rejeição sem rastreamento adicional, serialização de gravações, incorporação e falha de imagens, navegação EPUB e formatação/dimensões DOCX.
+- Fixture PDF/DOCX/EPUB com capa e imagem: XML dos pacotes validado; ordem do PDF conferida por extração e página renderizada inspecionada.
