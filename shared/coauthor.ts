@@ -26,17 +26,17 @@ export const COAUTHOR_APPROACHES: CoauthorApproach[] = [
   {
     id: "faithful",
     label: "Fiel à cena",
-    instruction: "Preserve ao máximo o tom, o ponto de vista, a intenção da cena e o ritmo já estabelecido. Faça o caminho dramático mais natural a partir do texto atual.",
+    instruction: "Preserve ao máximo o tom, o ponto de vista, a intenção da cena e o ritmo já estabelecido. Faça avançar a consequência causal mais imediata do que já está em movimento. O acontecimento central desta opção deve nascer organicamente da ação ou tensão já aberta.",
   },
   {
     id: "tension",
     label: "Mais tensão",
-    instruction: "Aumente a pressão dramática por meio de uma complicação, consequência ou ameaça concreta, sem quebrar o cânone nem antecipar o clímax.",
+    instruction: "Introduza uma complicação externa concreta — obstáculo, ameaça, interrupção, chegada, perda, descoberta prática ou consequência material — que mude a situação da cena sem quebrar o cânone nem antecipar o clímax. O acontecimento central deve ser diferente do caminho mais natural.",
   },
   {
     id: "subtext",
     label: "Mais subtexto",
-    instruction: "Privilegie gesto, atmosfera, silêncio, ação concreta e informação implícita. Evite explicar diretamente emoções que possam ser dramatizadas.",
+    instruction: "Faça a cena mudar por uma decisão, gesto, revelação parcial, recusa, aproximação, afastamento ou mudança de relação concreta. Use subtexto, silêncio, atmosfera e ação física para dramatizar essa virada. O acontecimento central deve ser relacional ou interior com consequência visível, não apenas uma versão mais descritiva das outras opções.",
   },
 ];
 
@@ -111,6 +111,8 @@ export function buildContinuationPrompt(input: {
     "Regras da amostra:",
     "- escreva cena de verdade, não resumo, sinopse ou explicação do que aconteceria;",
     "- mostre um caminho dramático claro que possa ser expandido depois;",
+    "- a diferença entre as três amostras deve estar no ACONTECIMENTO CENTRAL, não em adjetivos, tom, intensidade ou paráfrase;",
+    "- esta amostra precisa representar a classe de evento definida em 'Caminho desta amostra'; não copie o mesmo evento provável das outras duas direções;",
     "- preserve pessoa, tempo verbal, foco narrativo, voz, nomes, fatos, relações e conhecimento do personagem focal;",
     "- não repita literalmente o final já escrito;",
     "- não resolva conflitos maiores nem feche o capítulo;",
