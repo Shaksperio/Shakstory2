@@ -107,7 +107,7 @@ describe("WriterStudio integrated literary assistance", () => {
     expect(await screen.findByText("Minha biblioteca")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Segurança" }));
-    expect(await screen.findByText(/seguran/i)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Segurança antivírus" })).toBeTruthy();
   });
 
   it("keeps the rich editor DOM stable while typing so the caret is not reset", async () => {
