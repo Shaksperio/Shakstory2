@@ -315,3 +315,13 @@
 - [x] Confirmar remotamente 338 caminhos, incluindo código, documentação, schema e migrações SQL.
 - [x] Confirmar que não foram publicados `.env`, `node_modules`, `dist`, `.pem` ou `.key`.
 - [x] Validar o backup remoto: https://github.com/Shaksperio/Shakstory-Backup/commit/8a9ffe4752356834bcc913cdac63f7d970b7e592
+
+
+## Continuidade 2026-10-07 — contratos da coautoria
+
+- [x] Exigir três amostras utilizáveis; resposta parcial deve mostrar erro sem alterar o manuscrito.
+- [x] Resolver gênero específico antes do genérico e usar faixa geral quando ausente.
+- [x] Respeitar contagem explícita abaixo de 700 palavras quando solicitada pelo autor.
+- [x] Validar regressões e registrar limitações do ambiente.
+
+Validação concluída em 07/10/2026: TypeScript, build de produção, validate:data, validate:repository e git diff --check aprovados. Suíte integral: 87 testes aprovados e 3 testes opcionais de credenciais reais ignorados. OAuth e webhook executados com configurações QA equivalentes ao CI. CI do PR #20 aprovado em todas as etapas (run 37653729827), usando pnpm 10.4.1 e lockfile congelado. Os 11 testes de coautoria incluem as novas regressões. Publicação em produção ainda não verificada.
