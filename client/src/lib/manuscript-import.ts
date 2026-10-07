@@ -24,11 +24,12 @@ const attr = (element: Element, name: string) =>
 const descendants = (element: Element | Document, name: string) =>
   Array.from(element.getElementsByTagNameNS("*", name));
 const xml = (text: string) => {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text))
+    throw new Error(
+      "O documento contém XML inválido ou entidades não permitidas."
+    );
   const doc = new DOMParser().parseFromString(text, "application/xml");
-  if (
-    doc.getElementsByTagName("parsererror").length ||
-    /<!DOCTYPE|<!ENTITY/i.test(text)
-  )
+  if (doc.getElementsByTagName("parsererror").length)
     throw new Error(
       "O documento contém XML inválido ou entidades não permitidas."
     );
