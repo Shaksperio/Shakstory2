@@ -356,3 +356,10 @@ Implementação e validação local concluídas: 99 testes aprovados, 3 opcionai
 - [x] DOCX com campos PAGE/TOC, bookmarks e quebras; EPUB com metadados estáveis e navegação.
 - [x] Redesenhar biblioteca, página de escrita e navegação preliminares/corpo/pós-textuais; arraste e controles de ordem.
 - [x] Validar 108 testes, TypeScript, builds, dados/repositório e inspeção visual do PDF.
+
+## Continuidade 2026-10-07 — máquina de escrever
+
+- [x] Modo opcional no Manuscrito com folha que acompanha a escrita e teclado verde clássico.
+- [x] Teclas físicas e visuais, maiúsculas, acentos, números, apagar e quebra de linha.
+- [x] Preservar o mesmo editor, rascunho formatado, salvamento e preferência local.
+- [x] Verificar inserção e movimento da folha com testes; validar a troca de modo com salvamento integrado.
