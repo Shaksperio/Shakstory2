@@ -30,9 +30,11 @@ Objetivo: permitir que o autor compare caminhos dramáticos antes de gastar uma 
 
 Caminhos padrão:
 
-1. **Fiel à cena** — desenvolvimento orgânico do impulso já presente.
-2. **Mais tensão** — complicação ou consequência concreta.
-3. **Mais subtexto** — gesto, silêncio, atmosfera e não dito.
+1. **Fiel à cena** — consequência causal imediata do impulso já presente.
+2. **Mais tensão** — complicação externa concreta que muda a situação.
+3. **Mais subtexto** — decisão, gesto, revelação parcial ou mudança relacional com consequência visível.
+
+As três opções devem divergir no **acontecimento central**. Não basta reescrever a mesma continuação trocando adjetivos, intensidade emocional, descrição ou ritmo.
 
 ---
 
