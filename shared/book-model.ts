@@ -42,9 +42,11 @@ export function migrateLegacyNodes(input: { id: string; title: string; nodes: Le
   const ordered = [...input.nodes].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   const parts: SemanticPart[] = [];
   let currentPart: SemanticPart = { id: `${input.id}_part_1`, title: "Parte 1", chapters: [], sortOrder: 0 };
+  let explicitPart = false;
   for (const node of ordered) {
     if (node.kind === "part") {
-      if (currentPart.chapters.length > 0) parts.push(currentPart);
+      if (currentPart.chapters.length > 0 || explicitPart) parts.push(currentPart);
+      explicitPart = true;
       currentPart = { id: node.id, title: node.title, chapters: [], sortOrder: parts.length };
       continue;
     }
@@ -52,7 +54,7 @@ export function migrateLegacyNodes(input: { id: string; title: string; nodes: Le
     const chapter: SemanticChapter = { id: node.kind === "chapter" ? node.id : `${node.id}_chapter`, title: node.kind === "chapter" ? node.title : "Capítulo", scenes: [{ id: node.kind === "scene" ? node.id : `${node.id}_scene_1`, title: node.kind === "scene" ? node.title : node.title, blocks: splitBlocks(node.content), characterIds: [], locationIds: [], sortOrder: 0 }], sortOrder: currentPart.chapters.length };
     currentPart.chapters.push(chapter);
   }
-  if (currentPart.chapters.length > 0 || parts.length === 0) parts.push(currentPart);
+  if (currentPart.chapters.length > 0 || explicitPart || parts.length === 0) parts.push(currentPart);
   return { schemaVersion: "1.1", id: input.id, title: input.title, parts, migratedFromLegacy: true, plannedScenes: [] };
 }
 

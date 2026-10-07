@@ -302,6 +302,37 @@ describe("WriterStudio integrated literary assistance", () => {
     await waitFor(() => expect(screen.queryByText(/continuação/)).toBeNull());
   });
 
+  it("splits the current unsaved formatted draft at the cursor and keeps it after autosave and merge", async () => {
+    render(<WriterStudio />);
+    fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manuscrito" }));
+    const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
+    editor.innerHTML = '<p><strong>First fresh</strong> second fresh<img src="https://example.com/image.png" /></p>';
+    fireEvent.input(editor);
+    const range = document.createRange();
+    range.setStart(editor.querySelector("strong")!.firstChild!, 11);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.mouseUp(editor);
+    fireEvent.click(screen.getByRole("button", { name: "Dividir aqui" }));
+    const saved = () => JSON.parse(localStorage.getItem("shakstory:library")!).books[0];
+    await waitFor(() => expect(saved().nodes).toHaveLength(2));
+    expect(saved().nodes[0].content).toBe("First fresh");
+    expect(saved().nodes[1].content).toBe("second fresh");
+    expect(saved().nodes[1].richContent).toContain("<img");
+    expect(saved().semanticBook.parts[0].chapters).toHaveLength(2);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    expect(saved().nodes[0].content).toBe("First fresh");
+    fireEvent.click(screen.getByRole("button", { name: "Unir ao próximo" }));
+    await waitFor(() => expect(saved().nodes).toHaveLength(1));
+    expect(saved().nodes[0].content).toContain("second fresh");
+    expect(saved().nodes[0].richContent).toContain("<strong>");
+    expect(saved().nodes[0].richContent.match(/<img/g)).toHaveLength(1);
+    expect(saved().review.versions.length).toBeGreaterThanOrEqual(3);
+    expect(saved().semanticBook.parts[0].chapters).toHaveLength(1);
+  });
+
   it("exposes contextual navigation and protected library CRUD actions", async () => {
     render(<WriterStudio />);
     expect(screen.getByRole("button", { name: "Abrir menu de navegação" })).toBeTruthy();
