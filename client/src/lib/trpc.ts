@@ -315,7 +315,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   if (!usable.length) throw new CloudflareApiError("A Cowila não retornou nenhuma continuação utilizável.", { code: "EMPTY_COAUTHOR_RESULT", status: 502 });
   return {
     alternatives: usable,
-    canonWarnings: [...new Set(usable.flatMap(item => item.warnings))],
+    canonWarnings: Array.from(new Set(usable.flatMap(item => item.warnings))),
     model: "@cf/meta/llama-3.1-8b-instruct-fast",
     context: {
       canonFacts: canon.length,
