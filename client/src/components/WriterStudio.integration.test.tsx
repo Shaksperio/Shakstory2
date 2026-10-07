@@ -48,9 +48,12 @@ const harness = vi.hoisted(() => {
   const coauthorMutation = { isPending: false, mutate: vi.fn(() => coauthorOptions.onSuccess?.(coauthor)), error: null };
   const expandCoauthorMutation = { isPending: false, mutate: vi.fn(() => coauthorExpansionOptions.onSuccess?.(coauthorExpansion)), error: null };
   const continuityMutation = { isPending: false, mutate: vi.fn(() => continuityOptions.onSuccess?.(continuity)), error: null };
+  let saveOptions: {onSuccess?: (result:{sha:string})=>void} = {};
+  const saveMutation = {isPending:false,mutate:vi.fn((_input:unknown)=>{})};
+  const completeSave = (sha:string) => saveOptions.onSuccess?.({sha});
   const library = { version: 1, books: [{ id: "book-1", title: "Caderno", status: "draft", targetWordCount: 50000, updatedAt: Date.now(), nodes: [{ id: "chapter-1", title: "Capítulo 1", kind: "chapter", content: "A noite caiu.", updatedAt: Date.now() },] }] };
   const trpc = {
-    data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) } },
+    data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn((options:typeof saveOptions) => {saveOptions=options;return saveMutation;}) } },
     literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) }, coauthor: { useMutation: vi.fn((options: typeof coauthorOptions) => { coauthorOptions = options; return coauthorMutation; }) }, expandCoauthor: { useMutation: vi.fn((options: typeof coauthorExpansionOptions) => { coauthorExpansionOptions = options; return expandCoauthorMutation; }) }, continuity: { useMutation: vi.fn((options: typeof continuityOptions) => { continuityOptions = options; return continuityMutation; }) } },
     assets: { uploadCover: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn(), error: null })) } },
     security: {
@@ -65,7 +68,7 @@ const harness = vi.hoisted(() => {
       security: { antivirus: { sessions: { invalidate: vi.fn() } } },
     })),
   };
-  return { trpc, literaryMutation, coauthorMutation, expandCoauthorMutation, continuityMutation, analysis, coauthor, coauthorExpansion, continuity, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
+  return { trpc, saveMutation, completeSave, literaryMutation, coauthorMutation, expandCoauthorMutation, continuityMutation, analysis, coauthor, coauthorExpansion, continuity, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
 });
 
 vi.mock("@/lib/trpc", () => ({ trpc: harness.trpc }));
@@ -363,4 +366,27 @@ describe("WriterStudio integrated literary assistance", () => {
       seriesName: "Série QA",
     });
   });
+  it("persists tracked changes and explicitly restores the original without retracking it", async () => {
+    render(<WriterStudio/>);fireEvent.click(await screen.findByRole("button",{name:"Manuscrito"}));
+    const editor=await screen.findByRole("textbox",{name:"Editar bloco 1"});
+    fireEvent.click(screen.getByText("Manuscrito, revisão e preferências"));fireEvent.click(screen.getByRole("button",{name:"Revisão e histórico"}));
+    fireEvent.click(screen.getByLabelText("Rastrear próximas alterações"));
+    editor.innerHTML="<p>Texto revisado.</p>";fireEvent.input(editor);
+    await waitFor(()=>{const saved=JSON.parse(localStorage.getItem("shakstory:library")!);expect(saved.books[0].review.changes[0].after).toBe("Texto revisado.");});
+    fireEvent.click(screen.getByRole("button",{name:"Rejeitar e restaurar"}));
+    await waitFor(()=>{const saved=JSON.parse(localStorage.getItem("shakstory:library")!);expect(saved.books[0].nodes[0].content).toBe("A noite caiu.");expect(saved.books[0].review.changes).toHaveLength(1);expect(saved.books[0].review.changes[0].status).toBe("rejected");});
+  });
+  it("serializes metadata writes and sends the latest state with the acknowledged SHA", async () => {
+    render(<WriterStudio/>);fireEvent.click(await screen.findByRole("button",{name:"Manuscrito"}));
+    await screen.findByRole("textbox",{name:"Editar bloco 1"});
+    harness.completeSave("sha-2");harness.saveMutation.mutate.mockClear();
+    fireEvent.click(screen.getByText("Manuscrito, revisão e preferências"));fireEvent.click(screen.getByRole("button",{name:"Copyright e créditos"}));
+    const publisher=screen.getByLabelText("Editora");fireEvent.change(publisher,{target:{value:"E"}});fireEvent.change(publisher,{target:{value:"Editora final"}});
+    expect(harness.saveMutation.mutate).toHaveBeenCalledTimes(1);
+    harness.completeSave("sha-3");
+    expect(harness.saveMutation.mutate).toHaveBeenCalledTimes(2);
+    const input=harness.saveMutation.mutate.mock.calls[1][0] as {expectedSha:string;data:{books:Array<{publication:{copyright:{publisher:string}}}>}};
+    expect(input.expectedSha).toBe("sha-3");expect(input.data.books[0].publication.copyright.publisher).toBe("Editora final");
+  });
+
 });
