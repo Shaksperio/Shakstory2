@@ -1,3 +1,4 @@
+import React from "react";
 import { Button } from "@/components/ui/button";
 import { ShieldCheck, RotateCcw, Trash2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";

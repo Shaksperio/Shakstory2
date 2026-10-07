@@ -44,7 +44,17 @@ const harness = vi.hoisted(() => {
     data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) } },
     literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) }, coauthor: { useMutation: vi.fn((options: typeof coauthorOptions) => { coauthorOptions = options; return coauthorMutation; }) }, continuity: { useMutation: vi.fn((options: typeof continuityOptions) => { continuityOptions = options; return continuityMutation; }) } },
     assets: { uploadCover: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn(), error: null })) } },
-    useUtils: vi.fn(() => ({ data: { status: { invalidate: vi.fn() } } })),
+    security: {
+      antivirus: {
+        sessions: { useQuery: vi.fn(() => ({ data: [], isError: false, error: null })) },
+        rotate: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) },
+        revoke: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) },
+      },
+    },
+    useUtils: vi.fn(() => ({
+      data: { status: { invalidate: vi.fn() } },
+      security: { antivirus: { sessions: { invalidate: vi.fn() } } },
+    })),
   };
   return { trpc, literaryMutation, coauthorMutation, continuityMutation, analysis, coauthor, continuity, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
 });
@@ -75,6 +85,52 @@ describe("WriterStudio integrated literary assistance", () => {
     expect(secondEditor.innerHTML).toContain("<em>Texto restaurado</em>");
     second.unmount();
     harness.remoteLibrary = harness.library;
+  });
+
+  it("opens every book workspace area from navigation without requiring a prior card click", async () => {
+    render(<WriterStudio />);
+    await screen.findByRole("button", { name: "Continuar Caderno" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Projeto" }));
+    expect(await screen.findByText("Projeto do livro")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Planejar" }));
+    expect(await screen.findByText("Seu projeto, antes das páginas.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manuscrito" }));
+    expect(await screen.findByRole("textbox", { name: "Editar bloco 1" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preparar" }));
+    expect(await screen.findByText("Preparação editorial")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Biblioteca" }));
+    expect(await screen.findByText("Minha biblioteca")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Segurança" }));
+    expect(await screen.findByRole("heading", { name: "Segurança antivírus" })).toBeTruthy();
+  });
+
+  it("keeps the rich editor DOM stable while typing so the caret is not reset", async () => {
+    render(<WriterStudio />);
+    await screen.findByRole("button", { name: "Continuar Caderno" });
+    fireEvent.click(screen.getByRole("button", { name: "Manuscrito" }));
+    const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
+
+    editor.innerHTML = "<p>ABC</p>";
+    const paragraph = editor.firstChild;
+    fireEvent.input(editor);
+
+    expect(editor.firstChild).toBe(paragraph);
+    expect(editor.textContent).toBe("ABC");
+
+    const textNode = editor.firstChild?.firstChild;
+    expect(textNode).toBeTruthy();
+    if (textNode) textNode.textContent = "ABCD";
+    fireEvent.input(editor);
+
+    expect(editor.firstChild).toBe(paragraph);
+    expect(editor.textContent).toBe("ABCD");
   });
 
   it("sends the draft only after analysis is requested and applies the returned suggestion manually", async () => {
