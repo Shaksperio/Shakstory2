@@ -78,6 +78,7 @@ describe("WriterStudio integrated literary assistance", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+    delete (document as unknown as {execCommand?:unknown}).execCommand;
     localStorage.clear();
   });
 
@@ -331,6 +332,24 @@ describe("WriterStudio integrated literary assistance", () => {
     expect(saved().nodes[0].richContent.match(/<img/g)).toHaveLength(1);
     expect(saved().review.versions.length).toBeGreaterThanOrEqual(3);
     expect(saved().semanticBook.parts[0].chapters).toHaveLength(1);
+  });
+
+  it("switches to the machine without remounting the manuscript and saves virtual typing", async () => {
+    render(<WriterStudio />);
+    fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manuscrito" }));
+    const editor=await screen.findByRole("textbox",{name:"Editar bloco 1"});
+    await waitFor(()=>expect(editor.textContent).toBe("A noite caiu."));
+    fireEvent.click(screen.getByRole("button",{name:"Máquina de escrever"}));
+    expect(screen.getByRole("textbox",{name:"Editar bloco 1"})).toBe(editor);
+    expect(editor.getAttribute("inputmode")).toBe("none");
+    expect(localStorage.getItem("shakstory:typewriter-mode")).toBe("true");
+    fireEvent.click(screen.getByRole("button",{name:"Digitar a"}));
+    await waitFor(()=>expect(JSON.parse(localStorage.getItem("shakstory:library")!).books[0].nodes[0].content).toBe("A noite caiu.a"));
+    fireEvent.click(screen.getByRole("button",{name:"Máquina de escrever"}));
+    expect(screen.getByRole("textbox",{name:"Editar bloco 1"})).toBe(editor);
+    expect(editor.textContent).toBe("A noite caiu.a");
+    expect(localStorage.getItem("shakstory:typewriter-mode")).toBe("false");
   });
 
   it("exposes contextual navigation and protected library CRUD actions", async () => {

@@ -44,3 +44,7 @@ Os capítulos recebem numeração contínua na cópia exportada; partes, prólog
 A interface agrupa preliminares, corpo e pós-textuais na barra lateral. Seções podem ser ativadas e ordenadas; capítulos podem ser renomeados e reordenados por arraste ou botões. Biblioteca e área de escrita receberam superfícies editoriais, capas com destaque, barra lateral em azul acinzentado e página clara (escura no tema escuro).
 
 Validação: 108 testes aprovados e 3 testes opcionais de credenciais reais ignorados; PDF de amostra renderizado e conferido (créditos, sumário, abertura e paginação); XML DOCX/EPUB conferido. Campos DOCX são dependentes do leitor; não foi usada uma sessão real do Word para validar sua atualização automática.
+
+## Máquina de escrever
+
+No Manuscrito, o botão **Máquina de escrever** ativa a folha em movimento e o teclado verde clássico. O teclado físico e as teclas visuais editam o mesmo rascunho, mantendo formatação e salvamento automático. Há maiúsculas, números, símbolos e acentos; a folha acompanha a linha de escrita. No celular, o teclado visual substitui o teclado do sistema neste modo. A preferência é lembrada no dispositivo; desativar retorna ao editor normal. O modo é silencioso e respeita a preferência de movimento reduzido.
