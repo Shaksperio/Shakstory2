@@ -51,7 +51,8 @@ const statusLabels: Record<EditorialStatus, string> = { planning: "Planejamento"
 const statusLabel = (value?: EditorialStatus) => statusLabels[value ?? "draft"];
 const countCharacters = (book: Book) => book.nodes.reduce((sum, node) => sum + node.content.length, 0);
 const countPages = (book: Book) => Math.max(1, Math.ceil(countCharacters(book) / 1800));
-const styleSampleForBook = (book: Book, activeNodeId?: string | null, activeDraft?: string) => book.nodes.map(node => node.id === activeNodeId && activeDraft !== undefined ? activeDraft : node.content).join("\n\n").slice(-24000);\nconst formatDuration = (seconds = 0) => { const minutes = Math.max(0, Math.round(seconds / 60)); return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; };
+const styleSampleForBook = (book: Book, activeNodeId?: string | null, activeDraft?: string) => book.nodes.map(node => node.id === activeNodeId && activeDraft !== undefined ? activeDraft : node.content).join("\n\n").slice(-24000);
+const formatDuration = (seconds = 0) => { const minutes = Math.max(0, Math.round(seconds / 60)); return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; };
 const hierarchyId = (prefix: "universe" | "series", value: string) => {
   const slug = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
   return slug ? `${prefix}-${slug}` : undefined;
