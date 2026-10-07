@@ -26,7 +26,11 @@ EPUB inclui pós-textuais no manifesto, navegação e ordem de leitura, incorpor
 
 ## Validação
 
-- 99 testes aprovados; 3 testes opcionais de credenciais reais ignorados.
+- 105 testes aprovados; 3 testes opcionais de credenciais reais ignorados.
 - TypeScript, build frontend/backend, validação de dados, validação do repositório e `git diff --check` aprovados.
 - Regressões cobrem importação, copyright, comentários, resolução, versões, rejeição sem rastreamento adicional, serialização de gravações, incorporação e falha de imagens, navegação EPUB e formatação/dimensões DOCX.
 - Fixture PDF/DOCX/EPUB com capa e imagem: XML dos pacotes validado; ordem do PDF conferida por extração e página renderizada inspecionada.
+
+## Preservação em operações estruturais
+
+Dividir usa o cursor quando disponível (ou o meio do texto), mantém marcas, listas, links e imagens e recusa divisões com conteúdo formatado inconsistente. Unir combina os capítulos sem descartar formatação. Ambas as operações incorporam primeiro a edição ainda não salva e guardam versões do conteúdo alterado. Comentários e histórico do capítulo unido são associados ao capítulo mantido. Renomear e reorganizar reconciliam a árvore semântica; restaurar o snapshot do projeto guarda primeiro o estado deslocado.

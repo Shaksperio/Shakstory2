@@ -292,13 +292,13 @@
 
 - [x] Auditar a solicitação de inventário completo para desenvolvedores.
 - [x] Conferir estrutura real do repositório, stack, contratos, persistência, IA, exportação, segurança e documentação existente.
-- [ ] Consolidar o inventário em `docs/RELATORIO-ESTRUTURA-SHAKSTORY.md`.
-- [ ] Executar validação final do arquivo e registrar limitações verificáveis.
+- [x] Consolidar o inventário em `docs/RELATORIO-ESTRUTURA-SHAKSTORY.md`.
+- [x] Executar validação final do arquivo e registrar limitações verificáveis.
 
 - [x] Verificar o relatório: arquivo presente, 443 linhas e 18 seções técnicas.
 - [x] Executar `pnpm check`: aprovado.
-- [ ] Executar suíte integral sem bloqueio externo: 61 testes aprovados, 1 ignorado e 1 falhou em `server/github-token.credentials.test.ts` com HTTP 401; causa operacional provável: token/credencial GitHub ausente, inválido ou sem autorização para o repositório. Nenhum segredo foi exposto.
-- [ ] Reexecutar `pnpm validate:data`, `pnpm validate:repository` e `pnpm build` separadamente após a falha da suíte, pois o encadeamento parou no teste externo.
+- [x] Reexecutar suíte sem dependência de credenciais reais: atualização de 07/10 validada; testes de credenciais reais permanecem opcionais. O HTTP 401 histórico não foi tratado como sucesso de autenticação.
+- [x] Reexecutar validações de dados, repositório e build separadamente; aprovadas na continuidade de 07/10.
 
 
 # Backup GitHub — 2026-10-05
@@ -307,8 +307,8 @@
 - [x] Confirmar que as migrações e o schema SQL em `drizzle/` já fazem parte do conteúdo rastreado.
 - [x] Confirmar que a conta GitHub `Shaksperio` está autenticada.
 - [x] Verificar que `Shaksperio/Shakstory` não aparece na conta atual; criar destino privado antes do push.
-- [ ] Criar commit somente com código, documentação, schemas, dados editoriais autorizados e SQL; não incluir secrets, `node_modules` ou `dist`.
-- [ ] Enviar o commit para o repositório GitHub privado e validar o conteúdo remoto.
+- [x] Criar commit somente com código, documentação, schemas, dados editoriais autorizados e SQL; não incluir secrets, `node_modules` ou `dist`.
+- [x] Enviar o commit para o repositório GitHub privado e validar o conteúdo remoto.
 
 - [x] Criar o repositório privado `Shaksperio/Shakstory-Backup`.
 - [x] Publicar o commit `8a9ffe4752356834bcc913cdac63f7d970b7e592` no branch `main`.
@@ -338,3 +338,11 @@ Validação concluída em 07/10/2026: TypeScript, build de produção, validate:
 - [x] Executar regressão, typecheck, build e publicar somente estado validado.
 
 Implementação e validação local concluídas: 99 testes aprovados, 3 opcionais ignorados; TypeScript, build frontend/backend, validações e diff aprovados. Detalhes e limites em docs/editorial-workflow.md. Publicação será confirmada pelo CI e pelo bundle servido em produção.
+
+## Continuidade 2026-10-07 — preservação do manuscrito
+
+- [x] Preservar rascunho, marcas e imagens ao dividir no cursor ou unir capítulos.
+- [x] Reconciliar árvore semântica sem perder IDs e metadados de cenas; manter partes vazias.
+- [x] Guardar versões antes de alterar conteúdo e snapshot antes de restaurar projeto.
+- [x] Atualizar inventário para o repositório canônico, Worker/D1 e limites verificáveis.
+- [x] Validar 105 testes aprovados, 3 opcionais de credenciais reais ignorados; TypeScript, builds e validações aprovados.

@@ -1,9 +1,22 @@
 # Shakstory — Relatório técnico de estrutura para desenvolvedores
 
-**Data da auditoria:** 05/10/2026  
-**Versão funcional de referência:** Shakstory 1.1  
-**Repositório:** `Shaksperio/Shakstory`  
-**Domínio publicado informado pelo ambiente:** `https://shakstory-cpuxtpcc.manus.space`
+**Data da auditoria:** 07/10/2026
+**Versão funcional de referência:** Shakstory 1.1
+**Repositório:** `Shaksperio/Shakstory2`, branch `turbo`
+**Aplicativo em produção:** https://shakstory.antonyopintor.workers.dev/
+
+## Atualização de produção — 07/10/2026
+
+O inventário abaixo inclui a implementação Node/Express original. A produção atual usa Cloudflare Worker com D1; o backend Node/tRPC e o schema MySQL/Drizzle permanecem como implementação alternativa no repositório. A presença de um módulo no código não comprova sua execução no Worker. Em particular, os módulos de varredura antivírus do servidor Node não representam uma varredura ativa dos uploads na produção atual.
+
+- Fonte canônica: `Shaksperio/Shakstory2`, branch `turbo`. Publicação: branch `deploy/full-app-cloudflare`, workflow `Full UI Cloudflare Build`; saída estática em `cloudflare-dist-v2`.
+- Biblioteca, manuscrito e preparação editorial: capas, arquivo, importação DOCX/ODT com prévia, elementos pré/pós-textuais, copyright, créditos e ISBN por formato.
+- Revisão: comentários persistidos, resolução, alterações rastreadas e versões restauráveis. Não há convites nem edição simultânea entre usuários.
+- Persistência: backup IndexedDB/localStorage, gravações remotas serializadas e proteção por SHA. Credenciais reais são verificadas apenas por testes opcionais e não foram exercitadas na suíte local desta atualização.
+- Operações estruturais: dividir respeita o cursor e o rascunho atual; unir mantém a formatação e imagens. Operações que alteram conteúdo guardam versões anteriores. A árvore semântica é reconciliada mantendo IDs e metadados das cenas existentes, inclusive partes vazias.
+- Exportações: imagens incorporadas, elementos pós-textuais no EPUB e marcas básicas em PDF/DOCX. Paginação e fontes podem variar entre formatos; consultar `docs/editorial-workflow.md` para limites.
+
+As seções históricas seguintes descrevem os componentes disponíveis; esta atualização define o estado de produção e substitui os endereços antigos. A validação funcional local cobre comportamento em DOM simulado, não uma sessão autenticada com usuários reais.
 
 ## 1. Objetivo do produto
 
