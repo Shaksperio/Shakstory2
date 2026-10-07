@@ -18,7 +18,7 @@ function LiteraryAssistantHarness({ onDraft }: { onDraft: (value: string) => voi
   const [result, setResult] = useState<typeof analysis | null>(null);
   const [draft] = useState("A noite caiu. A noite silenciou.");
   const mockedAnalyzeMutation = vi.fn(() => setResult(analysis));
-  return <><p data-testid="draft">{draft}</p><LiteraryAssistant focus="full" setFocus={vi.fn()} result={result} models={[{ id: "literary-model" }]} isLoading={false} error={null} onAnalyze={mockedAnalyzeMutation} onApply={(start, end, original, suggestion) => onDraft(applySuggestionAtOffsets(draft, start, end, original, suggestion))} /></>;
+  return <><p data-testid="draft">{draft}</p><LiteraryAssistant focus="full" setFocus={vi.fn()} result={result} models={[{ id: "literary-model" }]} isLoading={false} error={null} onAnalyze={mockedAnalyzeMutation} onApply={(start, end, original, suggestion) => onDraft(applySuggestionAtOffsets(draft, start, end, original, suggestion))} coauthorResult={null} coauthorLoading={false} coauthorError={null} onGenerate={vi.fn()} onAccept={vi.fn()} onReject={vi.fn()} canUndoCoauthor={false} onUndoCoauthor={vi.fn()} /></>;
 }
 
 describe("WriterStudio literary assistant UI", () => {

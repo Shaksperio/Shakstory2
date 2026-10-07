@@ -10,16 +10,27 @@ const harness = vi.hoisted(() => {
     suggestions: [{ category: "gramatica", severity: "revisar", original: "A noite", suggestion: "A tarde", explanation: "Alternativa de teste.", confidence: 0.9, start: 0, end: 7 }],
     narrativeNotes: [], model: "literary-model", availableModels: ["literary-model"],
   };
+  const coauthor = {
+    alternatives: [
+      { id: "faithful-1", label: "Fiel à cena", approach: "Preservar a cena.", text: "Uma sombra atravessou a janela.", warnings: [] },
+      { id: "tension-2", label: "Mais tensão", approach: "Aumentar a pressão.", text: "Do corredor veio o som de passos apressados.", warnings: [] },
+    ],
+    canonWarnings: [],
+    model: "coauthor-model",
+    context: { canonFacts: 2, memoryMessages: 3, requestedWords: 180 },
+  };
   let literaryOptions: { onSuccess?: (value: typeof analysis) => void } = {};
+  let coauthorOptions: { onSuccess?: (value: typeof coauthor) => void } = {};
   const literaryMutation = { isPending: false, mutate: vi.fn(() => literaryOptions.onSuccess?.(analysis)) };
+  const coauthorMutation = { isPending: false, mutate: vi.fn(() => coauthorOptions.onSuccess?.(coauthor)), error: null };
   const library = { version: 1, books: [{ id: "book-1", title: "Caderno", status: "draft", targetWordCount: 50000, updatedAt: Date.now(), nodes: [{ id: "chapter-1", title: "Capítulo 1", kind: "chapter", content: "A noite caiu.", updatedAt: Date.now() },] }] };
   const trpc = {
     data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) } },
-    literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) } },
+    literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) }, coauthor: { useMutation: vi.fn((options: typeof coauthorOptions) => { coauthorOptions = options; return coauthorMutation; }) } },
     assets: { uploadCover: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn(), error: null })) } },
     useUtils: vi.fn(() => ({ data: { status: { invalidate: vi.fn() } } })),
   };
-  return { trpc, literaryMutation, analysis, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
+  return { trpc, literaryMutation, coauthorMutation, analysis, coauthor, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
 });
 
 vi.mock("@/lib/trpc", () => ({ trpc: harness.trpc }));
@@ -119,6 +130,38 @@ describe("WriterStudio integrated literary assistance", () => {
     fireEvent.click(screen.getByRole("button", { name: "Projeto" }));
     fireEvent.click(screen.getByRole("button", { name: "Preparar" }));
     expect((await screen.findByRole("textbox", { name: "Conteúdo Dedicatória" }) as HTMLTextAreaElement).value).toBe("Para quem lê.");
+  });
+
+  it("generates coauthor alternatives without changing the draft, then accepts and undoes one", async () => {
+    render(<WriterStudio />);
+    fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manuscrito" }));
+    const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Coautora" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Intenção da continuação" }), {
+      target: { value: "Aumentar a tensão sem revelar o segredo." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Gerar alternativas" }));
+
+    await waitFor(() => expect(screen.getByText("Alternativa 1 · Fiel à cena")).toBeTruthy());
+    expect(editor.textContent).toBe("A noite caiu.");
+    expect(harness.coauthorMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      bookId: "book-1",
+      sceneId: "chapter-1",
+      text: "A noite caiu.",
+      intent: "Aumentar a tensão sem revelar o segredo.",
+      alternativeCount: 3,
+    }));
+
+    const useButtons = screen.getAllByRole("button", { name: "Usar esta continuação" });
+    fireEvent.click(useButtons[0]);
+    await waitFor(() => expect(editor.textContent).toContain("Uma sombra atravessou a janela."));
+    expect(editor.textContent).toContain("A noite caiu.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer última aplicação" }));
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
   });
 
   it("splits and merges manuscript nodes through the editor controls", async () => {
