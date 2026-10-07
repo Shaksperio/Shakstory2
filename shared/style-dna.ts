@@ -17,7 +17,7 @@ export type StyleDna = {
 };
 
 const wordTokens = (text: string): string[] =>
-  text.match(/[\p{L}\p{M}]+(?:['’\-][\p{L}\p{M}]+)*/gu) ?? [];
+  text.match(/[A-Za-zÀ-ÖØ-öø-ÿ]+(?:['’\-][A-Za-zÀ-ÖØ-öø-ÿ]+)*/g) ?? [];
 
 const normalizedWord = (word: string): string =>
   word.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
@@ -32,7 +32,7 @@ export function analyzeStyleDna(text: string): StyleDna {
   const words = wordTokens(clean);
   const wordCount = words.length;
   const sentenceChunks = clean
-    ? clean.split(/(?<=[.!?…])(?:["”’)]*)\s+|\n{2,}/u).map(value => value.trim()).filter(Boolean)
+    ? clean.split(/[.!?…]+(?:["”’)]*)\s+|\n{2,}/).map(value => value.trim()).filter(Boolean)
     : [];
   const paragraphs = clean ? clean.split(/\n{2,}/).map(value => value.trim()).filter(Boolean) : [];
   const dialogueWords = clean
