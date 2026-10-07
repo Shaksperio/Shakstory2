@@ -19,6 +19,21 @@ describe("Cowila coauthor two-stage flow", () => {
     expect(pickApproaches(1)).toHaveLength(3);
   });
 
+  it("defines three samples by different event classes, not adjective-level variation", () => {
+    const approaches = pickApproaches();
+    expect(approaches[0].instruction.toLowerCase()).toContain("consequência causal");
+    expect(approaches[1].instruction.toLowerCase()).toContain("complicação externa");
+    expect(approaches[2].instruction.toLowerCase()).toContain("mudança de relação");
+    const prompt = buildContinuationPrompt({
+      approach: approaches[1],
+      targetWords: 180,
+      intent: "Manter o segredo por enquanto.",
+    });
+    expect(prompt).toContain("ACONTECIMENTO CENTRAL");
+    expect(prompt).toContain("não em adjetivos");
+    expect(prompt).toContain("classe de evento");
+  });
+
   it("builds a Phase 1 sample prompt instead of a final continuation", () => {
     const prompt = buildContinuationPrompt({
       intent: "Elia deve desconfiar da carta sem descobrir toda a verdade.",
