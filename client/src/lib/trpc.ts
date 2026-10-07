@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
 import { buildContinuationPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 import { buildStyleDnaPrompt } from "@shared/style-dna";
+import { buildContinuityPrompt } from "@shared/continuity-radar";
 
 type QueryOptions = {
   enabled?: boolean;
@@ -117,6 +118,33 @@ type CoauthorResult = {
     canonFacts: number;
     memoryMessages: number;
     requestedWords: number;
+  };
+};
+
+type ContinuityInput = {
+  bookId: string;
+  bookTitle: string;
+  sceneId: string;
+  sceneTitle: string;
+  text: string;
+  genre?: string;
+  subgenre?: string;
+  planning?: unknown;
+  story?: unknown;
+};
+
+type ContinuityResult = {
+  report: string;
+  canonWarnings: string[];
+  model: string;
+  context: {
+    canonFacts: number;
+    memoryMessages: number;
+    bookCanonFacts: number;
+    seriesCanonFacts: number;
+    universeCanonFacts: number;
+    planningEntities: number;
+    storyEntities: number;
   };
 };
 
@@ -330,6 +358,72 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   };
 };
 
+const runContinuityCheck = async (input: ContinuityInput): Promise<ContinuityResult> => {
+  const [canonDocument, memoryDocument] = await Promise.all([
+    readOptionalDocument(`canon/${input.bookId}.json`),
+    readOptionalDocument(`assistant/${input.bookId}.json`),
+  ]);
+  const canon = factsFromDocument(canonDocument);
+  const history = historyFromDocument(memoryDocument);
+  const prompt = [
+    buildCowilaLiteraryContext({
+      genre: input.genre,
+      subgenre: input.subgenre,
+      role: "continuity_editor",
+      task: "continuity_check",
+    }),
+    buildContinuityPrompt({ sceneTitle: input.sceneTitle }),
+  ].join("\n\n");
+
+  const result = await json<{
+    proposal?: string;
+    canonWarnings?: string[];
+    context?: {
+      canonFacts?: number;
+      bookCanonFacts?: number;
+      seriesCanonFacts?: number;
+      universeCanonFacts?: number;
+      planningEntities?: number;
+      storyEntities?: number;
+      historyMessages?: number;
+    };
+  }>("/api/assist", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "continuity_check",
+      prompt,
+      literaryProfile: {
+        genre: input.genre,
+        subgenre: input.subgenre,
+        role: "continuity_editor",
+        task: "continuity_check",
+      },
+      book: { id: input.bookId, title: input.bookTitle },
+      scene: { id: input.sceneId, title: input.sceneTitle, text: input.text },
+      canon,
+      planning: input.planning ?? { characters: [], locations: [], timeline: [] },
+      story: input.story ?? { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+      history,
+    }),
+  });
+
+  const context = result.context ?? {};
+  return {
+    report: String(result.proposal ?? "").trim() || "Nenhum conflito de continuidade foi relatado.",
+    canonWarnings: Array.isArray(result.canonWarnings) ? result.canonWarnings : [],
+    model: "@cf/meta/llama-3.1-8b-instruct-fast",
+    context: {
+      canonFacts: Number(context.canonFacts ?? canon.length),
+      memoryMessages: Number(context.historyMessages ?? history.length),
+      bookCanonFacts: Number(context.bookCanonFacts ?? canon.length),
+      seriesCanonFacts: Number(context.seriesCanonFacts ?? 0),
+      universeCanonFacts: Number(context.universeCanonFacts ?? 0),
+      planningEntities: Number(context.planningEntities ?? 0),
+      storyEntities: Number(context.storyEntities ?? 0),
+    },
+  };
+};
+
 const modelResult = {
   models: [{ id: "@cf/meta/llama-3.1-8b-instruct-fast" }],
 };
@@ -404,6 +498,18 @@ export const trpc = {
       }) {
         return useMutation<CoauthorResult, CloudflareApiError, CoauthorInput>({
           mutationFn: generateCoauthorAlternatives,
+          onSuccess: options?.onSuccess,
+          onError: options?.onError,
+        });
+      },
+    },
+    continuity: {
+      useMutation(options?: {
+        onSuccess?: (data: ContinuityResult) => void;
+        onError?: (error: CloudflareApiError) => void;
+      }) {
+        return useMutation<ContinuityResult, CloudflareApiError, ContinuityInput>({
+          mutationFn: runContinuityCheck,
           onSuccess: options?.onSuccess,
           onError: options?.onError,
         });
