@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
-import { buildContinuationPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
+import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 import { buildStyleDnaPrompt } from "@shared/style-dna";
 import { buildContinuityPrompt } from "@shared/continuity-radar";
 
@@ -118,6 +118,33 @@ type CoauthorResult = {
     canonFacts: number;
     memoryMessages: number;
     requestedWords: number;
+  };
+};
+
+type CoauthorExpansionInput = {
+  bookId: string;
+  bookTitle: string;
+  sceneId: string;
+  sceneTitle: string;
+  text: string;
+  selectedAlternative: CoauthorAlternative;
+  intent?: string;
+  requestedWords?: number;
+  genre?: string;
+  subgenre?: string;
+  audience?: string;
+  planning?: unknown;
+  story?: unknown;
+  styleSample?: string;
+};
+
+type CoauthorExpansionResult = {
+  text: string;
+  canonWarnings: string[];
+  model: string;
+  context: {
+    canonFacts: number;
+    memoryMessages: number;
   };
 };
 
@@ -358,6 +385,75 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   };
 };
 
+const expandSelectedCoauthorAlternative = async (input: CoauthorExpansionInput): Promise<CoauthorExpansionResult> => {
+  const literaryContext = buildCowilaLiteraryContext({
+    genre: input.genre,
+    subgenre: input.subgenre,
+    audience: input.audience,
+    role: "coauthor",
+    task: "continue_scene",
+  });
+  const styleContext = buildStyleDnaPrompt(input.styleSample ?? input.text);
+  const [canonDocument, memoryDocument] = await Promise.all([
+    readOptionalDocument(`canon/${input.bookId}.json`),
+    readOptionalDocument(`assistant/${input.bookId}.json`),
+  ]);
+  const canon = factsFromDocument(canonDocument);
+  const history = historyFromDocument(memoryDocument);
+  const prompt = buildExpansionPrompt({
+    selectedSample: input.selectedAlternative.text,
+    intent: input.intent,
+    genre: input.genre,
+    subgenre: input.subgenre,
+    literaryContext: `${literaryContext} ${styleContext}`,
+    requestedWords: input.requestedWords,
+  });
+
+  const result = await json<{
+    proposal?: string;
+    canonWarnings?: string[];
+  }>("/api/assist", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "continue_scene",
+      prompt,
+      literaryProfile: {
+        genre: input.genre,
+        subgenre: input.subgenre,
+        audience: input.audience,
+        role: "coauthor",
+        task: "continue_scene",
+        phase: "expand_selected_sample",
+      },
+      book: { id: input.bookId, title: input.bookTitle },
+      scene: { id: input.sceneId, title: input.sceneTitle, text: input.text },
+      canon,
+      planning: input.planning ?? { characters: [], locations: [], timeline: [] },
+      story: input.story ?? { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+      history,
+      selectedAlternative: input.selectedAlternative,
+    }),
+  });
+
+  const text = String(result.proposal ?? "").trim();
+  if (!text) {
+    throw new CloudflareApiError("A Cowila não retornou a expansão da opção escolhida.", {
+      code: "EMPTY_COAUTHOR_EXPANSION",
+      status: 502,
+    });
+  }
+
+  return {
+    text,
+    canonWarnings: Array.isArray(result.canonWarnings) ? result.canonWarnings : [],
+    model: "@cf/meta/llama-3.1-8b-instruct-fast",
+    context: {
+      canonFacts: canon.length,
+      memoryMessages: history.length,
+    },
+  };
+};
+
 const runContinuityCheck = async (input: ContinuityInput): Promise<ContinuityResult> => {
   const [canonDocument, memoryDocument] = await Promise.all([
     readOptionalDocument(`canon/${input.bookId}.json`),
@@ -498,6 +594,18 @@ export const trpc = {
       }) {
         return useMutation<CoauthorResult, CloudflareApiError, CoauthorInput>({
           mutationFn: generateCoauthorAlternatives,
+          onSuccess: options?.onSuccess,
+          onError: options?.onError,
+        });
+      },
+    },
+    expandCoauthor: {
+      useMutation(options?: {
+        onSuccess?: (data: CoauthorExpansionResult) => void;
+        onError?: (error: CloudflareApiError) => void;
+      }) {
+        return useMutation<CoauthorExpansionResult, CloudflareApiError, CoauthorExpansionInput>({
+          mutationFn: expandSelectedCoauthorAlternative,
           onSuccess: options?.onSuccess,
           onError: options?.onError,
         });
