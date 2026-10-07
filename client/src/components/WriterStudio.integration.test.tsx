@@ -77,6 +77,52 @@ describe("WriterStudio integrated literary assistance", () => {
     harness.remoteLibrary = harness.library;
   });
 
+  it("opens every book workspace area from navigation without requiring a prior card click", async () => {
+    render(<WriterStudio />);
+    await screen.findByRole("button", { name: "Continuar Caderno" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Projeto" }));
+    expect(await screen.findByText("Projeto do livro")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Planejar" }));
+    expect(await screen.findByText("Seu projeto, antes das páginas.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manuscrito" }));
+    expect(await screen.findByRole("textbox", { name: "Editar bloco 1" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preparar" }));
+    expect(await screen.findByText("Preparação editorial")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Biblioteca" }));
+    expect(await screen.findByText("Minha biblioteca")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Segurança" }));
+    expect(await screen.findByText(/seguran/i)).toBeTruthy();
+  });
+
+  it("keeps the rich editor DOM stable while typing so the caret is not reset", async () => {
+    render(<WriterStudio />);
+    await screen.findByRole("button", { name: "Continuar Caderno" });
+    fireEvent.click(screen.getByRole("button", { name: "Manuscrito" }));
+    const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
+
+    editor.innerHTML = "<p>ABC</p>";
+    const paragraph = editor.firstChild;
+    fireEvent.input(editor);
+
+    expect(editor.firstChild).toBe(paragraph);
+    expect(editor.textContent).toBe("ABC");
+
+    const textNode = editor.firstChild?.firstChild;
+    expect(textNode).toBeTruthy();
+    if (textNode) textNode.textContent = "ABCD";
+    fireEvent.input(editor);
+
+    expect(editor.firstChild).toBe(paragraph);
+    expect(editor.textContent).toBe("ABCD");
+  });
+
   it("sends the draft only after analysis is requested and applies the returned suggestion manually", async () => {
     render(<WriterStudio />);
     fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
