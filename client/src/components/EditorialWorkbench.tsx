@@ -16,12 +16,18 @@ import { importManuscript, type ImportPreview } from "@/lib/manuscript-import";
 
 type Publication = {
   author: string;
+  bookId?: string;
+  isbn?: string;
+  publicationDate?: string;
+  publicationYear?: string;
   copyright?: CopyrightData;
   frontMatter?: MatterSection[];
   backMatter?: MatterSection[];
 };
 export function EditorialWorkbench({
   publication,
+  initiallyOpen = false,
+  initialTab = "manuscript",
   review = {},
   node,
   nodes = [],
@@ -33,6 +39,8 @@ export function EditorialWorkbench({
   onRestore,
 }: {
   publication: Publication;
+  initiallyOpen?: boolean;
+  initialTab?: string;
   review?: ReviewData;
   node?: { id: string; title: string } | null;
   nodes?: Array<{ id: string; title: string; kind?: string }>;
@@ -43,8 +51,8 @@ export function EditorialWorkbench({
   onReview: (value: ReviewData) => void;
   onRestore: (text: string, html: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState("manuscript");
+  const [open, setOpen] = useState(initiallyOpen);
+  const [tab, setTab] = useState(initialTab);
   const [comment, setComment] = useState("");
   const [quote, setQuote] = useState("");
   const [message, setMessage] = useState("");
@@ -243,7 +251,10 @@ export function EditorialWorkbench({
                     <label key={key} className="block">
                       <input
                         type="checkbox"
-                        checked={copyright.clauses?.[key] ?? false}
+                        checked={
+                          copyright.clauses?.[key] ??
+                          (key === "rights" || key === "fiction")
+                        }
                         onChange={e =>
                           changeCopyright({
                             clauses: {

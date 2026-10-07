@@ -1,3 +1,4 @@
+import { publicationSections, type CopyrightData } from "./editorial-workflow";
 import { sanitizeRichContent } from "./rich-text";
 import JSZip from "jszip";
 import {
@@ -9,10 +10,15 @@ import {
   Paragraph,
   TextRun,
   ImageRun,
+  PageNumber,
+  TableOfContents,
+  Bookmark,
+  AlignmentType,
 } from "docx";
 import { jsPDF } from "jspdf";
 
 export type ExportChapter = {
+  kind?: string;
   id: string;
   title: string;
   content: string;
@@ -35,6 +41,9 @@ export type TypographyPreset =
   | "academic"
   | "children";
 export type ExportBook = {
+  bookId?: string;
+  publicationYear?: string;
+  copyright?: CopyrightData;
   title: string;
   subtitle?: string;
   author?: string;
@@ -160,6 +169,55 @@ export const TYPOGRAPHY_PRESETS: Record<TypographyPreset, Preset> = {
   },
 };
 
+/** One contract for quick exports, preparation and every file format. */
+export function normalizeExportBook(book: ExportBook): ExportBook {
+  let number = 0;
+  const chapters = book.chapters.map(chapter => {
+    if (
+      chapter.kind === "part" ||
+      chapter.kind === "front_matter" ||
+      chapter.kind === "back_matter" ||
+      /^(pr[oó]logo|ep[ií]logo|introdu[cç][aã]o|posf[aá]cio)\b/i.test(
+        chapter.title
+      )
+    )
+      return { ...chapter };
+    number++;
+    const title = chapter.title
+      .replace(/^cap[ií]tulo(?:\s+\d+)?\s*(?:[—–:.-]\s*)?/i, "")
+      .trim();
+    return {
+      ...chapter,
+      title: `Capítulo ${number}${title ? ` — ${title}` : ""}`,
+    };
+  });
+  return {
+    ...book,
+    author: book.copyright?.penName || book.author,
+    frontMatter: publicationSections(book),
+    chapters,
+  };
+}
+export function buildText(book: ExportBook): string {
+  book = normalizeExportBook(book);
+  const sections = [
+    ...enabledSections(book.frontMatter),
+    ...book.chapters,
+    ...enabledSections(book.backMatter),
+  ];
+  return [
+    book.title,
+    book.subtitle,
+    book.author,
+    ...(book.includeToc === false
+      ? []
+      : ["Sumário", ...sections.map(s => s.title)]),
+    ...sections.map(s => `${s.title}\n\n${s.content}`),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 const escapeXml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -183,9 +241,9 @@ const paragraphs = (content: string) =>
 const coverMarkup = (book: ExportBook) =>
   book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa de ${escapeHtml(book.title)}" /></figure>`
-    : `<div class="cover-placeholder"><span>Shakstory</span></div>`;
-const tocMarkup = (chapters: ExportChapter[]) =>
-  `<nav class="toc" aria-label="Sumário"><h2>Sumário</h2><ol>${chapters.map((chapter, index) => `<li><a href="#chapter-${index + 1}">${escapeHtml(chapter.title)}</a></li>`).join("")}</ol></nav>`;
+    : "";
+const tocMarkup = (chapters: Array<{ title: string; href?: string }>) =>
+  `<nav class="toc" aria-label="Sumário"><h2>Sumário</h2><ol>${chapters.map((chapter, index) => `<li><a href="${chapter.href ?? `#chapter-${index + 1}`}">${escapeHtml(chapter.title)}</a></li>`).join("")}</ol></nav>`;
 const sectionMarkup = (sections: ExportSection[] = [], className: string) =>
   sections
     .filter(section => section.enabled !== false && section.content.trim())
@@ -304,6 +362,7 @@ function docxContent(chapter: ExportChapter): Paragraph[] {
 }
 
 export function buildPrintHtml(book: ExportBook): string {
+  book = normalizeExportBook(book);
   const preset = presetFor(book);
   const compact = book.layout === "compact";
   const bodyMargin =
@@ -323,10 +382,11 @@ export function buildPrintHtml(book: ExportBook): string {
         `<article id="chapter-${index + 1}" class="chapter"><h1>${escapeHtml(chapter.title)}</h1>${richMarkup(chapter)}</article>`
     )
     .join("");
-  return `<!doctype html><html lang="${escapeXml(book.language ?? "pt-BR")}"><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc li{margin:0.5em 0}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}p{text-indent:${compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em;orphans:3;widows:3}${dropCap}@page{size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media print{body{margin:0;max-width:none}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup(book.chapters)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
+  return `<!doctype html><html lang="${escapeXml(book.language ?? "pt-BR")}"><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc li{margin:.75em 0;border-bottom:1px dotted #ccc;padding-bottom:.5em}.toc a{color:inherit;text-decoration:none}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}p{text-indent:${compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em;orphans:3;widows:3}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc{background:white;padding:48px;margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh}}@media print{body{margin:0;max-width:none}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup([...enabledSections(book.frontMatter).map(s => ({ title: s.title, href: `#${s.id}` })), ...book.chapters.map((s, i) => ({ title: s.title, href: `#chapter-${i + 1}` })), ...enabledSections(book.backMatter).map(s => ({ title: s.title, href: `#${s.id}` }))])}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
 }
 
 export async function buildEpub(book: ExportBook): Promise<Blob> {
+  book = normalizeExportBook(book);
   const zip = new JSZip();
   const preset = presetFor(book);
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
@@ -342,10 +402,10 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
         : book.layout === "compact"
           ? Math.min(6, preset.margin / 12)
           : preset.margin / 6;
-  const epubStyle = `body{font-family:${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter{page-break-before:always}p{text-indent:${book.layout === "compact" || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em}`;
+  const epubStyle = `body{font-family:${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter,.front-matter,.back-matter{page-break-before:always}p{text-indent:${book.layout === "compact" || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em}`;
   const coverXhtml = book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa" /></figure>`
-    : `<div class="cover-placeholder">Shakstory</div>`;
+    : "";
   const imageItems: Array<{ id: string; file: string; mime: string }> = [];
   const embedImages = (markup: string) =>
     markup.replace(
@@ -392,16 +452,38 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
   );
   zip.file(
     "OEBPS/content.opf",
-    `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:shakstory:${Date.now()}</dc:identifier><dc:title>${escapeXml(book.title)}</dc:title><dc:creator>${escapeXml(book.author ?? "")}</dc:creator><dc:language>${escapeXml(book.language ?? "pt-BR")}</dc:language>${book.category ? `<dc:subject>${escapeXml(book.category)}</dc:subject>` : ""}${book.isbn ? `<dc:identifier id="isbn">${escapeXml(book.isbn)}</dc:identifier>` : ""}<meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"${book.coverImageUrl?.startsWith("http") ? ' properties="remote-resources"' : ""}/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${imageItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="${item.mime}"/>`).join("")}${readingItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="application/xhtml+xml"${book.chapters.some(c => /src=["']https?:/i.test(c.richContent ?? "")) ? ' properties="remote-resources"' : ""}/>`).join("")}</manifest><spine><itemref idref="cover"/>${book.includeToc === false ? "" : '<itemref idref="nav"/>'}${readingItems.map(item => `<itemref idref="${item.id}"/>`).join("")}</spine></package>`
+    `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:shakstory:${escapeXml(book.bookId || book.title)}</dc:identifier><dc:title>${escapeXml(book.title)}</dc:title><dc:creator>${escapeXml(book.author ?? "")}</dc:creator><dc:language>${escapeXml(book.language ?? "pt-BR")}</dc:language>${book.category ? `<dc:subject>${escapeXml(book.category)}</dc:subject>` : ""}${book.isbn ? `<dc:identifier id="isbn">${escapeXml(book.isbn)}</dc:identifier>` : ""}${book.publicationDate || book.publicationYear || book.copyright?.year ? `<dc:date>${escapeXml(book.publicationDate || book.publicationYear || book.copyright?.year || "")}</dc:date>` : ""}<meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"${book.coverImageUrl?.startsWith("http") ? ' properties="remote-resources"' : ""}/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${imageItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="${item.mime}"/>`).join("")}${readingItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="application/xhtml+xml"${book.chapters.some(c => /src=["']https?:/i.test(c.richContent ?? "")) ? ' properties="remote-resources"' : ""}/>`).join("")}</manifest><spine><itemref idref="cover"/>${book.includeToc === false ? "" : '<itemref idref="nav"/>'}${readingItems.map(item => `<itemref idref="${item.id}"/>`).join("")}</spine></package>`
   );
   return zip.generateAsync({ type: "blob", mimeType: "application/epub+zip" });
 }
 
+let embeddedPdfFonts: Record<string, string> | undefined;
+export async function loadPdfFonts(): Promise<void> {
+  embeddedPdfFonts = (await import("./pdf-fonts")).PDF_FONTS;
+}
 export function buildPdf(book: ExportBook): Blob {
+  book = normalizeExportBook(book);
   const preset = presetFor(book);
   const pdfFormat =
     book.trimSize === "a5" ? "a5" : book.trimSize === "6x9" ? [432, 648] : "a4";
-  const pdf = new jsPDF({ unit: "pt", format: pdfFormat });
+  const pdf = new jsPDF({
+    unit: "pt",
+    format: pdfFormat,
+    putOnlyUsedFonts: true,
+  });
+  const pdfFont = embeddedPdfFonts
+    ? preset.pdfFont === "times"
+      ? "ShakstorySerif"
+      : "ShakstorySans"
+    : preset.pdfFont;
+  if (embeddedPdfFonts) {
+    const family = preset.pdfFont === "times" ? "Serif" : "Sans";
+    for (const style of ["normal", "bold", "italic", "bolditalic"]) {
+      const file = `Shakstory-${family}-${style}.ttf`;
+      pdf.addFileToVFS(file, embeddedPdfFonts[`${family}-${style}`]);
+      pdf.addFont(file, pdfFont, style);
+    }
+  }
   const margin =
     book.marginPreset === "wide"
       ? preset.margin + 18
@@ -413,6 +495,8 @@ export function buildPdf(book: ExportBook): Blob {
   const width = pdf.internal.pageSize.getWidth() - margin * 2;
   const height = pdf.internal.pageSize.getHeight();
   let y = margin;
+  const bodyFontSize = preset.bodySize * 0.75;
+  let contentLineHeight = bodyFontSize * 1.3;
   if (book.coverImageUrl?.startsWith("data:image/")) {
     const props = pdf.getImageProperties(book.coverImageUrl);
     const coverWidth = Math.min(
@@ -430,58 +514,83 @@ export function buildPdf(book: ExportBook): Blob {
     );
     pdf.addPage();
   }
-  pdf.setFont(preset.pdfFont, "normal");
+  pdf.setFont(pdfFont, "normal");
+  y = height * 0.3;
   pdf.setFontSize(28);
   const titleLines = pdf.splitTextToSize(book.title, width) as string[];
-  pdf.text(titleLines, margin, y);
+  pdf.text(titleLines, margin + width / 2, y, { align: "center" });
   y += titleLines.length * 32;
   if (book.subtitle) {
     pdf.setFontSize(14);
     const lines = pdf.splitTextToSize(book.subtitle, width) as string[];
-    pdf.text(lines, margin, y);
+    pdf.text(lines, margin + width / 2, y, { align: "center" });
     y += lines.length * 20;
   }
   if (book.author) {
     pdf.setFontSize(12);
-    pdf.text(book.author, margin, y);
+    pdf.text(pdf.splitTextToSize(book.author, width), margin + width / 2, y, {
+      align: "center",
+    });
     y += 32;
   }
+  pdf.setProperties({
+    title: book.title,
+    author: book.author ?? "",
+    subject: book.description ?? "",
+    keywords: [book.bookId, book.isbn].filter(Boolean).join(", "),
+  });
+  const front = enabledSections(book.frontMatter);
   const contentItems = [
-    ...enabledSections(book.frontMatter),
+    ...front,
     ...book.chapters,
     ...enabledSections(book.backMatter),
   ];
+  const pageEntries: Array<{ title: string; page: number }> = [];
+  const tocPages: number[] = [];
+  const tocLayout: Array<{
+    title: string;
+    lines: string[];
+    pageIndex: number;
+    y: number;
+    entryIndex: number;
+  }> = [];
+  if (book.includeToc !== false) {
+    pdf.setFontSize(12);
+    let pageIndex = 0,
+      rowY = margin + 44;
+    for (let entryIndex = 0; entryIndex < contentItems.length; entryIndex++) {
+      const item = contentItems[entryIndex];
+      const lines = pdf.splitTextToSize(item.title, width - 44) as string[];
+      for (let index = 0; index < lines.length; index++) {
+        if (rowY > height - margin - 20) {
+          pageIndex++;
+          rowY = margin + 44;
+        }
+        tocLayout.push({
+          title: item.title,
+          lines: [lines[index]],
+          pageIndex,
+          y: rowY,
+          entryIndex,
+        });
+        rowY += 19;
+      }
+      rowY += 9;
+    }
+  }
   for (let itemIndex = 0; itemIndex < contentItems.length; itemIndex++) {
     const chapter = contentItems[itemIndex];
-    if (
-      itemIndex === enabledSections(book.frontMatter).length &&
-      book.includeToc !== false
-    ) {
-      pdf.addPage();
-      y = margin;
-      pdf.setFontSize(22);
-      pdf.text("Sumário", margin, y);
-      y += 32;
-      pdf.setFontSize(12);
-      book.chapters.forEach((chapter, index) => {
-        const lines = pdf.splitTextToSize(
-          `${index + 1}. ${chapter.title}`,
-          width
-        ) as string[];
-        for (const line of lines) {
-          if (y > height - margin) {
-            pdf.addPage();
-            y = margin;
-          }
-          pdf.text(line, margin, y);
-          y += 20;
-        }
-      });
+    if (itemIndex === front.length && book.includeToc !== false) {
+      const pages = Math.max(1, (tocLayout.at(-1)?.pageIndex ?? 0) + 1);
+      for (let i = 0; i < pages; i++) {
+        pdf.addPage();
+        tocPages.push(pdf.getNumberOfPages());
+      }
     }
-
     pdf.addPage();
-    y = margin;
-    pdf.setFont(preset.pdfFont, "bold");
+    y = margin + 24;
+    pageEntries.push({ title: chapter.title, page: pdf.getNumberOfPages() });
+    pdf.setFont(pdfFont, "bold");
     pdf.setFontSize(22);
     const titleLines = pdf.splitTextToSize(chapter.title, width) as string[];
     for (const line of titleLines) {
@@ -489,25 +598,40 @@ export function buildPdf(book: ExportBook): Blob {
         pdf.addPage();
         y = margin;
       }
-      pdf.text(line, margin, y);
+      pdf.text(line, margin + width / 2, y, { align: "center" });
       y += 28;
     }
     y += 12;
-    pdf.setFont(preset.pdfFont, "normal");
-    pdf.setFontSize(preset.bodySize - 3);
+    pdf.setFont(pdfFont, "normal");
+    const contentFontSize = chapter.id === "copyright" ? 10.5 : bodyFontSize;
+    contentLineHeight = contentFontSize * 1.35;
+    pdf.setFontSize(contentFontSize);
     const rich =
       "richContent" in chapter && typeof chapter.richContent === "string"
         ? sanitizeRichContent(chapter.richContent)
         : "";
     if (!rich) {
       for (const paragraph of paragraphs(chapter.content)) {
-        for (const line of pdf.splitTextToSize(paragraph, width) as string[]) {
+        const lines = pdf.splitTextToSize(paragraph, width) as string[];
+        if (lines.length > 1 && y + contentLineHeight > height - margin) {
+          pdf.addPage();
+          y = margin;
+        }
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+          const line = lines[lineIndex];
+          if (
+            lines.length - lineIndex === 2 &&
+            y + contentLineHeight > height - margin
+          ) {
+            pdf.addPage();
+            y = margin;
+          }
           if (y > height - margin) {
             pdf.addPage();
             y = margin;
           }
           pdf.text(line, margin, y);
-          y += preset.lineHeight * 10;
+          y += contentLineHeight;
         }
         y += 8;
       }
@@ -517,7 +641,7 @@ export function buildPdf(book: ExportBook): Blob {
         italic = false;
       const newline = (gap = 0) => {
         x = margin;
-        y += preset.lineHeight * 10 + gap;
+        y += contentLineHeight + gap;
         if (y > height - margin) {
           pdf.addPage();
           y = margin;
@@ -559,7 +683,7 @@ export function buildPdf(book: ExportBook): Blob {
           }
         } else if (!token.startsWith("<")) {
           pdf.setFont(
-            preset.pdfFont,
+            pdfFont,
             bold && italic
               ? "bolditalic"
               : bold
@@ -585,9 +709,45 @@ export function buildPdf(book: ExportBook): Blob {
       }
     }
   }
+  // Fill reserved TOC pages after composition, using actual page destinations.
+  for (let i = 0; i < tocPages.length; i++) {
+    pdf.setPage(tocPages[i]);
+    pdf.setFont(pdfFont, "normal");
+    pdf.setFontSize(22);
+    pdf.text(
+      i ? "Sumário — continuação" : "Sumário",
+      margin + width / 2,
+      margin,
+      { align: "center" }
+    );
+    pdf.setFontSize(12);
+    const rows = tocLayout.filter(row => row.pageIndex === i);
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index],
+        entry = pageEntries[row.entryIndex];
+      pdf.text(row.lines[0], margin, row.y);
+      pdf.link(margin, row.y - 12, width, 18, { pageNumber: entry?.page ?? 1 });
+      if (
+        index === rows.length - 1 ||
+        rows[index + 1].entryIndex !== row.entryIndex
+      ) {
+        const leaderStart = margin + pdf.getTextWidth(row.lines[0]) + 12;
+        if (leaderStart < margin + width - 30) {
+          pdf.setDrawColor(170);
+          pdf.setLineWidth(0.4);
+          pdf.setLineDashPattern([1, 2], 0);
+          pdf.line(leaderStart, row.y - 3, margin + width - 25, row.y - 3);
+          pdf.setLineDashPattern([], 0);
+        }
+        pdf.text(String(entry?.page ?? ""), margin + width, row.y, {
+          align: "right",
+        });
+      }
+    }
+  }
   for (let page = 1; page <= pdf.getNumberOfPages(); page += 1) {
     pdf.setPage(page);
-    pdf.setFont(preset.pdfFont, "normal");
+    pdf.setFont(pdfFont, "normal");
     pdf.setFontSize(8);
     if (book.headerText) pdf.text(book.headerText, margin, 18);
     if (book.footerText) pdf.text(book.footerText, margin, height - 16);
@@ -602,6 +762,7 @@ export function buildPdf(book: ExportBook): Blob {
 }
 
 export async function buildDocx(book: ExportBook): Promise<Blob> {
+  book = normalizeExportBook(book);
   const preset = presetFor(book);
   const docMargin =
     book.marginPreset === "wide"
@@ -609,12 +770,17 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       : book.marginPreset === "narrow"
         ? preset.margin * 12
         : preset.margin * 15;
-  const sectionParagraphs = (sections: ExportSection[] = []) =>
+  const sectionParagraphs = (sections: ExportSection[] = [], offset = 0) =>
     sections
       .filter(section => section.enabled !== false && section.content.trim())
-      .flatMap(section => [
+      .flatMap((section, index) => [
         new Paragraph({
-          text: section.title,
+          children: [
+            new Bookmark({
+              id: `section_${offset + index}`,
+              children: [new TextRun(section.title)],
+            }),
+          ],
           heading: HeadingLevel.HEADING_1,
           pageBreakBefore: true,
         }),
@@ -656,26 +822,48 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       : [
           new Paragraph({
             text: "Sumário",
-            heading: HeadingLevel.HEADING_1,
+            heading: HeadingLevel.TITLE,
             pageBreakBefore: true,
           }),
-          ...book.chapters.map(
-            (chapter, index) =>
-              new Paragraph({ text: `${index + 1}. ${chapter.title}` })
-          ),
+          new TableOfContents("Sumário", {
+            hyperlink: true,
+            headingStyleRange: "1-2",
+            beginDirty: true,
+            cachedEntries: [
+              ...enabledSections(book.frontMatter),
+              ...book.chapters,
+              ...enabledSections(book.backMatter),
+            ].map((item, index) => ({
+              title: item.title,
+              level: 1,
+              href: `section_${index}`,
+            })),
+          }),
         ]),
-    ...book.chapters.flatMap(chapter => [
+    ...book.chapters.flatMap((chapter, index) => [
       new Paragraph({
-        text: chapter.title,
+        children: [
+          new Bookmark({
+            id: `section_${enabledSections(book.frontMatter).length + index}`,
+            children: [new TextRun(chapter.title)],
+          }),
+        ],
         heading: HeadingLevel.HEADING_1,
         pageBreakBefore: true,
       }),
       ...docxContent(chapter),
     ]),
-    ...sectionParagraphs(book.backMatter),
+    ...sectionParagraphs(
+      book.backMatter,
+      enabledSections(book.frontMatter).length + book.chapters.length
+    ),
   ];
   return Packer.toBlob(
     new Document({
+      title: book.title,
+      creator: book.author,
+      description: book.description,
+      features: { updateFields: true },
       styles: {
         default: {
           document: {
@@ -713,15 +901,21 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
                 }),
               }
             : undefined,
-          footers: book.footerText
-            ? {
-                default: new Footer({
+          footers: {
+            default: new Footer({
+              children: [
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
                   children: [
-                    new Paragraph({ children: [new TextRun(book.footerText)] }),
+                    ...(book.footerText
+                      ? [new TextRun(`${book.footerText} · `)]
+                      : []),
+                    new TextRun({ children: [PageNumber.CURRENT] }),
                   ],
                 }),
-              }
-            : undefined,
+              ],
+            }),
+          },
           children,
         },
       ],
@@ -738,12 +932,11 @@ export function chaptersFromNodes(
     kind?: string;
   }>
 ): ExportChapter[] {
-  return nodes
-    .filter(node => node.kind !== "part")
-    .map(node => ({
-      id: node.id,
-      title: node.title,
-      content: node.content,
-      richContent: node.richContent,
-    }));
+  return nodes.map(node => ({
+    kind: node.kind,
+    id: node.id,
+    title: node.title,
+    content: node.content,
+    richContent: node.richContent,
+  }));
 }

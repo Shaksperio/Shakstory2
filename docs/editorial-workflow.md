@@ -26,7 +26,7 @@ EPUB inclui pós-textuais no manifesto, navegação e ordem de leitura, incorpor
 
 ## Validação
 
-- 105 testes aprovados; 3 testes opcionais de credenciais reais ignorados.
+- 108 testes aprovados; 3 testes opcionais de credenciais reais ignorados.
 - TypeScript, build frontend/backend, validação de dados, validação do repositório e `git diff --check` aprovados.
 - Regressões cobrem importação, copyright, comentários, resolução, versões, rejeição sem rastreamento adicional, serialização de gravações, incorporação e falha de imagens, navegação EPUB e formatação/dimensões DOCX.
 - Fixture PDF/DOCX/EPUB com capa e imagem: XML dos pacotes validado; ordem do PDF conferida por extração e página renderizada inspecionada.
@@ -34,3 +34,13 @@ EPUB inclui pós-textuais no manifesto, navegação e ordem de leitura, incorpor
 ## Preservação em operações estruturais
 
 Dividir usa o cursor quando disponível (ou o meio do texto), mantém marcas, listas, links e imagens e recusa divisões com conteúdo formatado inconsistente. Unir combina os capítulos sem descartar formatação. Ambas as operações incorporam primeiro a edição ainda não salva e guardam versões do conteúdo alterado. Comentários e histórico do capítulo unido são associados ao capítulo mantido. Renomear e reorganizar reconciliam a árvore semântica; restaurar o snapshot do projeto guarda primeiro o estado deslocado.
+
+## Créditos, paginação e navegação — 07/10/2026
+
+Todos os caminhos de exportação usam o mesmo contrato editorial. Ano (copyright, ano de publicação ou data preenchida), ISBN e ID estável aparecem na página de copyright em PDF, DOCX, EPUB, HTML e TXT. O copyright e os avisos de direitos reservados/ficção são incluídos por padrão, com controles explícitos para desativar seções ou cláusulas. O aviso de ficção menciona personagens, lugares e acontecimentos e a coincidência com pessoas ou fatos reais. ISBNs por formato e créditos adicionais são mantidos.
+
+Os capítulos recebem numeração contínua na cópia exportada; partes, prólogo e epílogo permanecem sem número de capítulo. Títulos e IDs do manuscrito original são preservados. PDF inicia seções em novas páginas, incorpora fontes DejaVu com variantes e usa sumário com destinos e números de páginas calculados após a composição. DOCX usa quebras de página, numeração PAGE no rodapé, bookmarks e sumário TOC com entradas em cache; solicita atualização dos campos ao abrir. No Word, atualizar o sumário recalcula os números conforme a paginação local. EPUB tem sumário navegável e páginas fluidas conforme o leitor; não possui numeração fixa equivalente ao PDF. HTML de impressão usa quebras e contadores CSS de páginas quando suportados pelo navegador; TXT não é um formato paginado.
+
+A interface agrupa preliminares, corpo e pós-textuais na barra lateral. Seções podem ser ativadas e ordenadas; capítulos podem ser renomeados e reordenados por arraste ou botões. Biblioteca e área de escrita receberam superfícies editoriais, capas com destaque, barra lateral em azul acinzentado e página clara (escura no tema escuro).
+
+Validação: 108 testes aprovados e 3 testes opcionais de credenciais reais ignorados; PDF de amostra renderizado e conferido (créditos, sumário, abertura e paginação); XML DOCX/EPUB conferido. Campos DOCX são dependentes do leitor; não foi usada uma sessão real do Word para validar sua atualização automática.
