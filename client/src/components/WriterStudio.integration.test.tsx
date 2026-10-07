@@ -44,7 +44,17 @@ const harness = vi.hoisted(() => {
     data: { get: { useQuery: vi.fn(() => ({ data: { data: harness.remoteLibrary, sha: "sha-1" }, isLoading: false, refetch: vi.fn() })) }, status: { useQuery: vi.fn(() => ({ data: { status: "synced" } })) }, put: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) } },
     literaryAssist: { models: { useQuery: vi.fn(() => ({ data: { models: [{ id: "literary-model" }] } })) }, analyze: { useMutation: vi.fn((options: typeof literaryOptions) => { literaryOptions = options; return literaryMutation; }) }, coauthor: { useMutation: vi.fn((options: typeof coauthorOptions) => { coauthorOptions = options; return coauthorMutation; }) }, continuity: { useMutation: vi.fn((options: typeof continuityOptions) => { continuityOptions = options; return continuityMutation; }) } },
     assets: { uploadCover: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn(), error: null })) } },
-    useUtils: vi.fn(() => ({ data: { status: { invalidate: vi.fn() } } })),
+    security: {
+      antivirus: {
+        sessions: { useQuery: vi.fn(() => ({ data: [], isError: false, error: null })) },
+        rotate: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) },
+        revoke: { useMutation: vi.fn(() => ({ isPending: false, mutate: vi.fn() })) },
+      },
+    },
+    useUtils: vi.fn(() => ({
+      data: { status: { invalidate: vi.fn() } },
+      security: { antivirus: { sessions: { invalidate: vi.fn() } } },
+    })),
   };
   return { trpc, literaryMutation, coauthorMutation, continuityMutation, analysis, coauthor, continuity, library, remoteLibrary: library as typeof library | { version: 1; books: [] } };
 });
