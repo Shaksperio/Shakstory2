@@ -566,16 +566,20 @@ export function LiteraryAssistant({
   coauthorResult,
   coauthorLoading,
   coauthorError,
+  coauthorExpansion,
+  coauthorExpansionLoading,
+  coauthorExpansionError,
   onGenerate,
-  onAccept,
+  onChoose,
+  onApplyExpansion,
+  onBackToSamples,
   onReject,
   canUndoCoauthor,
   onUndoCoauthor,
 }: LiteraryAssistantProps) {
   const [mode, setMode] = useState<"review" | "coauthor">("review");
   const [intent, setIntent] = useState("");
-  const [targetWords, setTargetWords] = useState(180);
-  const [alternativeCount, setAlternativeCount] = useState(3);
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null);
   const labels: Record<LiteraryAssistantProps["focus"], string> = {
     full: "Revisão completa",
     language: "Ortografia e clareza",
@@ -594,13 +598,13 @@ export function LiteraryAssistant({
       </div>
       <div>
         <p className="text-sm font-medium">Cowila • Estúdio literário</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Revisa, propõe e continua a obra sem escrever por cima do autor.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Revisa, propõe e desenvolve caminhos narrativos sem escrever por cima do autor.</p>
       </div>
     </div>
 
     <div className="mt-4 grid grid-cols-2 rounded-lg bg-secondary/60 p-1" role="tablist" aria-label="Modo da Cowila">
-      <button type="button" role="tab" aria-selected={mode === "review"} onClick={() => setMode("review")} className={`rounded-md px-3 py-2 text-[11px] font-medium transition ${mode === "review" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Revisora</button>
-      <button type="button" role="tab" aria-selected={mode === "coauthor"} onClick={() => setMode("coauthor")} className={`rounded-md px-3 py-2 text-[11px] font-medium transition ${mode === "coauthor" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Coautora</button>
+      <button type="button" role="tab" aria-selected={mode === "review"} onClick={() => setMode("review")} className={"rounded-md px-3 py-2 text-[11px] font-medium transition " + (mode === "review" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>Revisora</button>
+      <button type="button" role="tab" aria-selected={mode === "coauthor"} onClick={() => setMode("coauthor")} className={"rounded-md px-3 py-2 text-[11px] font-medium transition " + (mode === "coauthor" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>Coautora</button>
     </div>
 
     {mode === "review" ? <div>
@@ -617,7 +621,7 @@ export function LiteraryAssistant({
         {result.strengths.length > 0 && <div><p className="mb-2 flex items-center gap-2 text-xs font-medium"><CheckCircle2 className="h-3.5 w-3.5 text-primary" />Pontos fortes</p><ul className="space-y-1 text-xs text-muted-foreground">{result.strengths.slice(0, 3).map((item, index) => <li key={index}>• {item}</li>)}</ul></div>}
         {result.suggestions.length > 0 && <div>
           <p className="mb-2 flex items-center gap-2 text-xs font-medium"><Lightbulb className="h-3.5 w-3.5 text-primary" />Sugestões ({result.suggestions.length})</p>
-          <div className="space-y-2">{result.suggestions.map((item, index) => <div key={`${item.original}-${index}`} className="rounded-lg border border-border/70 p-3">
+          <div className="space-y-2">{result.suggestions.map((item, index) => <div key={item.original + "-" + index} className="rounded-lg border border-border/70 p-3">
             <div className="flex items-center justify-between gap-2"><Badge variant="outline" className="text-[10px]">{item.category}</Badge><span className="text-[10px] text-muted-foreground">{Math.round(item.confidence * 100)}%</span></div>
             {item.original && <p className="mt-2 text-xs line-through text-muted-foreground">{item.original}</p>}
             {item.suggestion && <p className="mt-1 text-xs font-medium">{item.suggestion}</p>}
@@ -629,29 +633,22 @@ export function LiteraryAssistant({
       </div>}
     </div> : <div className="mt-4">
       <div className="rounded-lg border border-primary/15 bg-primary/5 p-3">
-        <p className="text-xs font-medium">Continuação assistida</p>
-        <p className="mt-1 text-[10px] leading-4 text-muted-foreground">A Cowila cria alternativas separadas. Nenhuma entra no manuscrito até você escolher.</p>
+        <p className="text-xs font-medium">Coautoria em duas etapas</p>
+        <p className="mt-1 text-[10px] leading-4 text-muted-foreground">1. A Cowila cria três amostras curtas de caminhos diferentes. 2. Você escolhe um caminho. 3. Só então a Cowila expande esse caminho com as diretrizes literárias completas.</p>
       </div>
 
       <label className="mt-4 block text-xs font-medium text-muted-foreground">O que deve acontecer agora?
         <Textarea aria-label="Intenção da continuação" value={intent} onChange={event => setIntent(event.target.value)} className="mt-2 min-h-20 text-xs" placeholder="Ex.: aumentar a tensão, mas Elia ainda não deve descobrir toda a verdade." />
       </label>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <label className="text-[10px] font-medium text-muted-foreground">Palavras por alternativa
-          <Input aria-label="Palavras por alternativa" type="number" min={60} max={500} step={20} className="mt-1 h-9 text-xs" value={targetWords} onChange={event => setTargetWords(Math.max(60, Math.min(500, Number(event.target.value) || 180)))} />
-        </label>
-        <label className="text-[10px] font-medium text-muted-foreground">Alternativas
-          <select aria-label="Quantidade de alternativas" className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs" value={alternativeCount} onChange={event => setAlternativeCount(Number(event.target.value))}>
-            <option value={2}>2 propostas</option>
-            <option value={3}>3 propostas</option>
-            <option value={4}>4 propostas</option>
-          </select>
-        </label>
+      <div className="mt-3 flex flex-wrap gap-1.5 text-[9px] text-muted-foreground">
+        <Badge variant="outline">3 amostras</Badge>
+        <Badge variant="outline">~180 palavras cada</Badge>
+        <Badge variant="outline">nenhuma altera o manuscrito</Badge>
       </div>
 
-      <Button className="mt-3 w-full" size="sm" onClick={() => onGenerate({ intent, targetWords, alternativeCount })} disabled={coauthorLoading}>
-        <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando alternativas…" : "Gerar alternativas"}
+      <Button className="mt-3 w-full" size="sm" onClick={() => { setSelectedSampleId(null); onGenerate({ intent }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
+        <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando 3 amostras…" : "Gerar 3 amostras"}
       </Button>
 
       {canUndoCoauthor && <Button variant="outline" className="mt-2 w-full" size="sm" onClick={onUndoCoauthor}>
@@ -659,29 +656,51 @@ export function LiteraryAssistant({
       </Button>}
 
       {coauthorError && <div className="mt-3 flex gap-2 rounded-lg bg-destructive/10 p-3 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{coauthorError}</span></div>}
+      {coauthorExpansionError && <div className="mt-3 flex gap-2 rounded-lg bg-destructive/10 p-3 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{coauthorExpansionError}</span></div>}
 
-      {coauthorResult && <div className="mt-4 space-y-3">
+      {coauthorResult && !coauthorExpansion && <div className="mt-4 space-y-3">
         <div className="flex flex-wrap gap-1.5 text-[9px] text-muted-foreground">
           <Badge variant="outline">{coauthorResult.context.canonFacts} fatos de cânone do livro</Badge>
           <Badge variant="outline">{coauthorResult.context.memoryMessages} mensagens de memória</Badge>
-          <Badge variant="outline">~{coauthorResult.context.requestedWords} palavras</Badge>
+          <Badge variant="outline">fase 1 · amostras</Badge>
         </div>
         {coauthorResult.canonWarnings.length > 0 && <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
           <p className="text-[10px] font-medium">Alertas de contexto</p>
           {coauthorResult.canonWarnings.map((warning, index) => <p key={index} className="mt-1 text-[10px] leading-4 text-muted-foreground">• {warning}</p>)}
         </div>}
-        {coauthorResult.alternatives.map((alternative, index) => <article key={alternative.id} className="rounded-xl border border-border/70 bg-background p-3">
+        {coauthorResult.alternatives.map((alternative, index) => <article key={alternative.id} className={"rounded-xl border bg-background p-3 " + (selectedSampleId === alternative.id ? "border-primary/60" : "border-border/70")}>
           <div className="flex items-center justify-between gap-2">
-            <div><p className="text-xs font-medium">Alternativa {index + 1} · {alternative.label}</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(alternative.text)} palavras</p></div>
-            <Badge variant="outline" className="text-[9px]">Proposta</Badge>
+            <div><p className="text-xs font-medium">Amostra {index + 1} · {alternative.label}</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(alternative.text)} palavras · direção narrativa</p></div>
+            <Badge variant="outline" className="text-[9px]">Amostra</Badge>
           </div>
           <p className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{alternative.text}</p>
-          <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => onAccept(alternative)}>
-            <Check className="mr-2 h-3.5 w-3.5" />Usar esta continuação
+          <Button className="mt-3 w-full" size="sm" variant="outline" disabled={coauthorExpansionLoading} onClick={() => { setSelectedSampleId(alternative.id); onChoose(alternative, intent); }}>
+            <ChevronRight className="mr-2 h-3.5 w-3.5" />{coauthorExpansionLoading && selectedSampleId === alternative.id ? "Expandindo este caminho…" : "Escolher este caminho"}
           </Button>
         </article>)}
-        <Button variant="ghost" className="w-full text-xs" onClick={onReject}>Rejeitar todas</Button>
-        <p className="text-[9px] leading-4 text-muted-foreground">Modelo: {coauthorResult.model}. Aceitar uma alternativa cria um ponto de reversão local.</p>
+        {coauthorExpansionLoading && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-4 text-muted-foreground">A Cowila está transformando a amostra escolhida em uma continuação completa com ritmo, beats, continuidade, Style DNA e faixa do gênero.</div>}
+        <Button variant="ghost" className="w-full text-xs" onClick={() => { setSelectedSampleId(null); onReject(); }}>Descartar as 3 amostras</Button>
+      </div>}
+
+      {coauthorExpansion && <div className="mt-4 space-y-3">
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div><p className="text-xs font-medium">Continuação expandida</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(coauthorExpansion.text)} palavras · fase 2</p></div>
+            <Badge className="text-[9px]">Pronta para decisão</Badge>
+          </div>
+          <p className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{coauthorExpansion.text}</p>
+        </div>
+        {coauthorExpansion.canonWarnings.length > 0 && <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+          <p className="text-[10px] font-medium">Alertas antes de aplicar</p>
+          {coauthorExpansion.canonWarnings.map((warning, index) => <p key={index} className="mt-1 text-[10px] leading-4 text-muted-foreground">• {warning}</p>)}
+        </div>}
+        <Button className="w-full" size="sm" onClick={() => onApplyExpansion(coauthorExpansion.text)}>
+          <Check className="mr-2 h-3.5 w-3.5" />Aplicar ao manuscrito
+        </Button>
+        <Button variant="outline" className="w-full" size="sm" onClick={() => { setSelectedSampleId(null); onBackToSamples(); }}>
+          Voltar às 3 amostras
+        </Button>
+        <p className="text-[9px] leading-4 text-muted-foreground">A expansão segue o caminho escolhido e as diretrizes de extensão/ritmo do gênero. Só o botão acima altera o manuscrito.</p>
       </div>}
     </div>}
   </div>;
