@@ -68,23 +68,41 @@ export const MATTER_TEMPLATES = {
 };
 export function buildCopyrightText(
   data: CopyrightData,
-  fallbackAuthor = ""
+  fallbackAuthor = "",
+  metadata: {
+    bookId?: string;
+    isbn?: string;
+    publicationDate?: string;
+    publicationYear?: string;
+  } = {}
 ): string {
   const author = data.penName || fallbackAuthor;
-  const lines = [`© ${data.year || new Date().getFullYear()} ${author}`];
+  const year =
+    data.year ||
+    metadata.publicationYear ||
+    metadata.publicationDate?.slice(0, 4) ||
+    String(new Date().getFullYear());
+  const lines = [
+    `© ${year} ${author || "Autor não informado"}`,
+    `Ano de publicação: ${year}`,
+  ];
+  if (metadata.publicationDate)
+    lines.push(`Data de publicação: ${metadata.publicationDate}`);
+  if (metadata.bookId) lines.push(`ID do livro: ${metadata.bookId}`);
+  if (metadata.isbn) lines.push(`ISBN: ${metadata.isbn}`);
   if (data.edition) lines.push(`Edição: ${data.edition}`);
   if (data.publisher) lines.push(`Editora: ${data.publisher}`);
   for (const [format, isbn] of Object.entries(data.isbns ?? {}))
     if (isbn?.trim()) lines.push(`ISBN (${format}): ${isbn.trim()}`);
   for (const person of data.contributors ?? [])
     lines.push(`${person.role}: ${person.name}`);
-  if (data.clauses?.rights)
+  if (data.clauses?.rights !== false)
     lines.push(
       "Todos os direitos reservados. A reprodução desta obra depende de autorização do titular, ressalvadas as utilizações permitidas pela legislação aplicável."
     );
-  if (data.clauses?.fiction)
+  if (data.clauses?.fiction !== false)
     lines.push(
-      "Esta é uma obra de ficção. Personagens e acontecimentos pertencem ao universo narrativo criado pelo autor."
+      "Esta história é uma obra de ficção. Nomes, personagens, lugares e acontecimentos são fictícios ou utilizados de forma fictícia. Qualquer semelhança com pessoas reais, vivas ou falecidas, lugares ou acontecimentos reais é mera coincidência."
     );
   if (data.clauses?.moral)
     lines.push(`${author} declara a autoria desta obra.`);
@@ -99,13 +117,20 @@ export function publicationSections(publication: {
   frontMatter?: MatterSection[];
   copyright?: CopyrightData;
   author?: string;
+  bookId?: string;
+  isbn?: string;
+  publicationDate?: string;
+  publicationYear?: string;
 }): MatterSection[] {
   const sections = publication.frontMatter ?? [];
-  if (!publication.copyright) return sections;
   const copyright = {
     id: "copyright",
     title: "Copyright",
-    content: buildCopyrightText(publication.copyright, publication.author),
+    content: buildCopyrightText(
+      publication.copyright ?? {},
+      publication.author,
+      publication
+    ),
     enabled: true,
   };
   const existing = sections.find(section => section.id === "copyright");

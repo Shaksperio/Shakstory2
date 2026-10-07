@@ -1,8 +1,10 @@
+import { loadPdfFonts } from "@shared/book-export";
 import type { ExportBook } from "@shared/book-export";
 // Materialize images before downloading so books remain readable without the site.
 export async function prepareExportAssets(
   book: ExportBook
 ): Promise<ExportBook> {
+  await loadPdfFonts();
   const cache = new Map<string, Promise<string>>();
   const load = (source: string) => {
     let existing = cache.get(source);

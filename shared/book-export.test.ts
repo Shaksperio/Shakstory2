@@ -5,6 +5,10 @@ import {
   buildEpub,
   buildPrintHtml,
   chaptersFromNodes,
+  normalizeExportBook,
+  buildText,
+  buildPdf,
+  loadPdfFonts,
   type ExportBook,
 } from "./book-export";
 
@@ -22,6 +26,84 @@ const book: ExportBook = {
 };
 
 describe("book export", () => {
+  it("exports legacy metadata and automatic credits consistently in every format", async () => {
+    const input: ExportBook = {
+      ...book,
+      bookId: "stable-book",
+      publicationDate: "2024-05-15",
+      isbn: "978-test",
+      chapters: [
+        { id: "p", kind: "part", title: "Parte I", content: "" },
+        {
+          id: "c",
+          kind: "chapter",
+          title: "Capítulo 8 — A carta",
+          content: "Uma carta.",
+        },
+      ],
+    };
+    const normalized = normalizeExportBook(input);
+    expect(normalized.chapters[1].title).toBe("Capítulo 1 — A carta");
+    expect(normalizeExportBook(normalized)).toEqual(normalized);
+    const html = buildPrintHtml(input),
+      txt = buildText(input);
+    for (const output of [html, txt]) {
+      expect(output).toContain("© 2024 Autora");
+      expect(output).toContain("ISBN: 978-test");
+      expect(output).toContain("ID do livro: stable-book");
+      expect(output).toContain("mera coincidência");
+    }
+    const epub = await JSZip.loadAsync(
+      await (await buildEpub(input)).arrayBuffer()
+    );
+    expect(await epub.file("OEBPS/content.opf")!.async("string")).toContain(
+      "urn:shakstory:stable-book"
+    );
+    expect(await epub.file("OEBPS/content.opf")!.async("string")).toContain(
+      "<dc:date>2024-05-15</dc:date>"
+    );
+    const docx = await JSZip.loadAsync(
+      await (await buildDocx(input)).arrayBuffer()
+    );
+    const xml = await docx.file("word/document.xml")!.async("string");
+    expect(xml).toContain("ID do livro: stable-book");
+    expect(xml).toContain("TOC ");
+    expect(xml).toContain("w:bookmarkStart");
+    expect(await docx.file("word/footer1.xml")!.async("string")).toContain(
+      "PAGE"
+    );
+    expect(await docx.file("word/settings.xml")!.async("string")).toContain(
+      "updateFields"
+    );
+    expect(input.chapters[1].title).toBe("Capítulo 8 — A carta");
+  });
+  it("keeps explicit exclusions and composes multi-page PDF with embedded fonts and destinations", async () => {
+    const input: ExportBook = {
+      ...book,
+      copyright: { year: "2023", clauses: { fiction: false } },
+      frontMatter: [
+        { id: "copyright", title: "Copyright", content: "", enabled: false },
+      ],
+    };
+    expect(buildText(input)).not.toContain("mera coincidência");
+    expect(buildText(input)).not.toContain("Ano de publicação");
+    await loadPdfFonts();
+    const pdf = buildPdf({
+      ...book,
+      bookId: "stable-book",
+      chapters: [
+        ...book.chapters,
+        { id: "two", title: "Second", content: "Story" },
+      ],
+    });
+    const bytes = new TextDecoder().decode(await pdf.arrayBuffer());
+    expect(bytes).toContain("/FontFile2");
+    expect(bytes).toContain("/Subtype /Link");
+    expect(bytes).toContain("/Dest");
+    expect(
+      (bytes.match(/\/Type \/Page\b/g) ?? []).length
+    ).toBeGreaterThanOrEqual(5);
+  });
   it("builds a navigable EPUB without changing source content", async () => {
     const epub = await buildEpub(book);
     const zip = await JSZip.loadAsync(await epub.arrayBuffer());
@@ -141,6 +223,6 @@ describe("book export", () => {
         { id: "p", title: "Parte", content: "", kind: "part" },
         { id: "c", title: "Capítulo", content: "texto", kind: "chapter" },
       ])
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 });

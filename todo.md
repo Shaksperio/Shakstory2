@@ -346,3 +346,13 @@ Implementação e validação local concluídas: 99 testes aprovados, 3 opcionai
 - [x] Guardar versões antes de alterar conteúdo e snapshot antes de restaurar projeto.
 - [x] Atualizar inventário para o repositório canônico, Worker/D1 e limites verificáveis.
 - [x] Validar 105 testes aprovados, 3 opcionais de credenciais reais ignorados; TypeScript, builds e validações aprovados.
+
+## Continuidade 2026-10-07 — metadados e diagramação editorial
+
+- [x] Unificar exportação rápida e preparação; incluir ano, ISBN e ID na página de créditos.
+- [x] Incluir copyright e aviso completo de ficção por padrão, com opções explícitas.
+- [x] Numerar capítulos e preservar partes sem alterar o manuscrito original.
+- [x] PDF com sumário paginado e links, páginas numeradas e fontes incorporadas.
+- [x] DOCX com campos PAGE/TOC, bookmarks e quebras; EPUB com metadados estáveis e navegação.
+- [x] Redesenhar biblioteca, página de escrita e navegação preliminares/corpo/pós-textuais; arraste e controles de ordem.
+- [x] Validar 108 testes, TypeScript, builds, dados/repositório e inspeção visual do PDF.
