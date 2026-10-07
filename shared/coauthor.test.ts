@@ -30,7 +30,7 @@ describe("Cowila coauthor two-stage flow", () => {
     expect(prompt).toContain("AMOSTRA");
     expect(prompt).toContain("180 palavras");
     expect(prompt).toContain("Elia deve desconfiar");
-    expect(prompt).toContain("não é a continuação final");
+    expect(prompt.toLowerCase()).toContain("não é a continuação final");
     expect(prompt.toLowerCase()).toContain("dark fantasy");
   });
 
