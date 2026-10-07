@@ -38,7 +38,8 @@ type LibraryDocument = { version: 1; versionId?: string; books: Book[] };
 type LiterarySuggestion = { category: string; severity: string; original: string; suggestion: string; explanation: string; confidence: number; start: number; end: number };
 type LiteraryResult = { summary: string; strengths: string[]; suggestions: LiterarySuggestion[]; narrativeNotes: string[]; model: string; availableModels: string[] };
 type CoauthorResult = { alternatives: CoauthorAlternative[]; canonWarnings: string[]; model: string; context: { canonFacts: number; memoryMessages: number; requestedWords: number } };
-type CoauthorGenerateOptions = { intent: string; targetWords: number; alternativeCount: number };
+type CoauthorExpansionResult = { text: string; canonWarnings: string[]; model: string; context: { canonFacts: number; memoryMessages: number } };
+type CoauthorGenerateOptions = { intent: string };
 type ContinuityResult = {
   report: string;
   canonWarnings: string[];
@@ -60,7 +61,7 @@ type ContinuityRadarProps = {
   onCheck: () => void;
   onClear: () => void;
 };
-type LiteraryAssistantProps = { focus: "language" | "grammar" | "parts_of_speech" | "lexicon" | "narrative" | "voice" | "style" | "full"; setFocus: (focus: LiteraryAssistantProps["focus"]) => void; result: LiteraryResult | null; models: Array<{ id: string }>; isLoading: boolean; error: string | null; onAnalyze: () => void; onApply: (start: number, end: number, original: string, suggestion: string) => void; coauthorResult: CoauthorResult | null; coauthorLoading: boolean; coauthorError: string | null; onGenerate: (options: CoauthorGenerateOptions) => void; onAccept: (alternative: CoauthorAlternative) => void; onReject: () => void; canUndoCoauthor: boolean; onUndoCoauthor: () => void };
+type LiteraryAssistantProps = { focus: "language" | "grammar" | "parts_of_speech" | "lexicon" | "narrative" | "voice" | "style" | "full"; setFocus: (focus: LiteraryAssistantProps["focus"]) => void; result: LiteraryResult | null; models: Array<{ id: string }>; isLoading: boolean; error: string | null; onAnalyze: () => void; onApply: (start: number, end: number, original: string, suggestion: string) => void; coauthorResult: CoauthorResult | null; coauthorLoading: boolean; coauthorError: string | null; coauthorExpansion: CoauthorExpansionResult | null; coauthorExpansionLoading: boolean; coauthorExpansionError: string | null; onGenerate: (options: CoauthorGenerateOptions) => void; onChoose: (alternative: CoauthorAlternative, intent: string) => void; onApplyExpansion: (text: string) => void; onBackToSamples: () => void; onReject: () => void; canUndoCoauthor: boolean; onUndoCoauthor: () => void };
 
 type SyncState = { mode: "cloudflare-d1" | "github" | "json"; status: "idle" | "syncing" | "synced" | "conflict" | "error"; lastSyncAt: number | null; lastWebhookAt: number | null; lastWebhookEvent: string | null; lastConflictPath: string | null; lastError: string | null };
 
@@ -102,7 +103,8 @@ export default function WriterStudio() {
   const modelQuery = trpc.literaryAssist.models.useQuery(undefined, { enabled: view === "editor" });
   const utils = trpc.useUtils();
   const literaryMutation = trpc.literaryAssist.analyze.useMutation({ onSuccess: data => setAssistResult(data) });
-  const coauthorMutation = trpc.literaryAssist.coauthor.useMutation({ onSuccess: data => setCoauthorResult(data) });
+  const coauthorMutation = trpc.literaryAssist.coauthor.useMutation({ onSuccess: data => { setCoauthorResult(data); setCoauthorExpansion(null); } });
+  const expandCoauthorMutation = trpc.literaryAssist.expandCoauthor.useMutation({ onSuccess: data => setCoauthorExpansion(data) });
   const continuityMutation = trpc.literaryAssist.continuity.useMutation({ onSuccess: data => setContinuityResult(data) });
   const [library, setLibrary] = useState<LibraryDocument>(emptyLibrary);
   const [sha, setSha] = useState<string | undefined>();
@@ -123,6 +125,7 @@ export default function WriterStudio() {
   const [assistFocus, setAssistFocus] = useState<"language" | "grammar" | "parts_of_speech" | "lexicon" | "narrative" | "voice" | "style" | "full">("full");
   const [assistResult, setAssistResult] = useState<LiteraryResult | null>(null);
   const [coauthorResult, setCoauthorResult] = useState<CoauthorResult | null>(null);
+  const [coauthorExpansion, setCoauthorExpansion] = useState<CoauthorExpansionResult | null>(null);
   const [continuityResult, setContinuityResult] = useState<ContinuityResult | null>(null);
   const [coauthorUndo, setCoauthorUndo] = useState<{ nodeId: string; text: string; html: string } | null>(null);
   const restoredWorkspace = React.useRef(false);
@@ -172,6 +175,7 @@ export default function WriterStudio() {
     if (!activeNode) return;
     setAssistResult(null);
     setCoauthorResult(null);
+    setCoauthorExpansion(null);
     setContinuityResult(null);
     setCoauthorUndo(null);
     const localDraft = localStorage.getItem(`shakstory:node:${activeNode.id}`);
@@ -279,16 +283,17 @@ export default function WriterStudio() {
     if (activeNode) { localStorage.setItem(`shakstory:node:${activeNode.id}`, value); if (html !== undefined) localStorage.setItem(`shakstory:node:${activeNode.id}:html`, html); }
   };
 
-  const applyCoauthorAlternative = (alternative: CoauthorAlternative) => {
-    if (!activeNode || !alternative.text.trim()) return;
+  const applyCoauthorExpansion = (expandedText: string) => {
+    if (!activeNode || !expandedText.trim()) return;
     setCoauthorUndo({ nodeId: activeNode.id, text: draft, html: draftHtml });
     const baseHtml = draftHtml || continuationToHtml(draft);
     updateDraft(
-      appendContinuationText(draft, alternative.text),
-      appendContinuationHtml(baseHtml, alternative.text),
+      appendContinuationText(draft, expandedText),
+      appendContinuationHtml(baseHtml, expandedText),
     );
     setCoauthorResult(null);
-    setNotice("Continuação aplicada · desfazer disponível");
+    setCoauthorExpansion(null);
+    setNotice("Continuação expandida aplicada · desfazer disponível");
     window.setTimeout(() => setNotice(null), 2600);
   };
 
@@ -440,7 +445,7 @@ export default function WriterStudio() {
     <header className="sticky top-0 z-10 border-b border-border/70 bg-background/90 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-5"><Button variant="ghost" size="icon" aria-label="Abrir menu de navegação" onClick={() => setMenuOpen(current => !current)}><Menu className="h-4 w-4" /></Button><div className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground"><BookOpen className="h-4 w-4" /></div><div className="min-w-0"><p className="font-serif text-lg leading-none">Shakstory</p><p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Estúdio do autor</p></div><nav className="ml-4 hidden items-center gap-1 lg:flex"><NavButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => setView("library")} /><NavButton active={view === "project"} icon={Target} label="Projeto" onClick={() => navigate("project")} /><NavButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => navigate("editor")} /><NavButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => navigate("planning")} /><NavButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => navigate("prepare")} /><NavButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => navigate("security")} /></nav><div className="ml-auto flex items-center gap-2"><span className={`hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-xs sm:inline-flex ${localOnly || conflict ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary"}`}><SyncIcon localOnly={localOnly} conflict={conflict} />{syncLabel}</span><Button variant="ghost" size="sm" onClick={() => toggleTheme?.()} aria-label="Alternar tema">{theme === "dark" ? "Tema clássico" : "Tema escuro"}</Button><Button variant="ghost" size="icon" aria-label="Buscar" onClick={() => document.getElementById("library-search")?.focus()}><Search className="h-4 w-4" /></Button></div></div></header>
     {menuOpen && <div className="fixed inset-0 z-20 bg-black/10" onClick={() => setMenuOpen(false)}><aside className="absolute left-3 top-16 w-64 rounded-2xl border border-border bg-card p-3 shadow-xl" role="dialog" aria-label="Menu de navegação" onClick={event => event.stopPropagation()}><div className="mb-2 flex items-center justify-between px-2"><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">Navegação</p><Button variant="ghost" size="icon" aria-label="Fechar menu" onClick={() => setMenuOpen(false)}><X className="h-4 w-4" /></Button></div><div className="grid gap-1"><NavButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => { setView("library"); setMenuOpen(false); }} /><NavButton active={view === "project"} icon={Target} label="Projeto" onClick={() => { navigate("project"); setMenuOpen(false); }} /><NavButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => { navigate("editor"); setMenuOpen(false); }} /><NavButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => { navigate("planning"); setMenuOpen(false); }} /><NavButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => { navigate("prepare"); setMenuOpen(false); }} /><NavButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => { setView("security"); setMenuOpen(false); }} /></div></aside></div>}
     {conflict && <div className="border-b border-amber-500/25 bg-amber-500/10"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-2.5 text-sm text-amber-900 dark:text-amber-100"><span>Outra sessão alterou o documento antes deste salvamento. Recarregue antes de substituir o conteúdo.</span><Button size="sm" variant="outline" onClick={() => { setConflict(false); void libraryQuery.refetch(); }}>Recarregar</Button></div></div>}
-    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-5 sm:py-12">{view === "library" && <LibraryView books={filteredBooks} totalWords={totalWords} query={query} onQuery={setQuery} onOpen={chooseBook} onNew={() => setNewBookOpen(true)} onEdit={book => { setActiveBookId(book.id); setBookDialog("edit"); }} onReset={book => { setActiveBookId(book.id); setBookDialog("reset"); }} onDelete={book => { setActiveBookId(book.id); setBookDialog("delete"); }} onExport={quickExport} />}{view === "project" && activeBook && <ProjectView book={activeBook} onNavigate={navigate} onUpdate={updateBook} />}{view === "editor" && activeBook && <EditorView book={activeBook} nodes={activeBook.nodes} activeNode={activeNode} draft={draft} richContent={draftHtml} onDraftChange={updateDraft} onRichDraftChange={(value, html) => updateDraft(value, html)} onSelectNode={setActiveNodeId} onBack={() => setView("library")} onSave={() => saveLibrary(library)} onUpdateBook={updateBook} onOpenPlanning={() => navigate("planning")} onOpenPrepare={() => navigate("prepare")} onAddChapter={() => updateNodeList(nodes => addChapter(nodes, Date.now()))} onAddPart={() => updateNodeList(nodes => addPart(nodes, Date.now()))} onRenameNode={(id, title) => updateNodeList(nodes => renameNode(nodes, id, title, Date.now()))} onDuplicateNode={id => updateNodeList(nodes => duplicateNode(nodes, id, Date.now()))} onMoveNode={(id, direction) => updateNodeList(nodes => moveNode(nodes, id, direction))} onRemoveNode={id => updateNodeList(nodes => removeNode(nodes, id))} onSplitNode={splitActiveNode} onMergeNode={mergeActiveNode} onPromotePlannedScene={scene => updateNodeList(nodes => nodes.some(node => node.id === scene.id) ? nodes : [...nodes, { id: scene.id, title: scene.title, kind: "scene", content: "", updatedAt: Date.now() }])} saving={saveMutation.isPending} notice={notice} assistant={{ focus: assistFocus, setFocus: setAssistFocus, result: assistResult, models: modelQuery.data?.models ?? [], isLoading: literaryMutation.isPending, error: literaryMutation.error?.message ?? null, onAnalyze: () => { if (activeNode && draft.trim()) literaryMutation.mutate({ text: draft, focus: assistFocus, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, role: assistFocus === "narrative" ? "developmental_editor" : assistFocus === "grammar" || assistFocus === "language" || assistFocus === "parts_of_speech" ? "copy_editor" : "line_editor", task: "analyze", bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onApply: (start, end, original, suggestion) => { if (!original || !suggestion || draft.slice(start, end) !== original) return; updateDraft(applySuggestionAtOffsets(draft, start, end, original, suggestion)); }, coauthorResult, coauthorLoading: coauthorMutation.isPending, coauthorError: coauthorMutation.error?.message ?? null, onGenerate: options => { if (!activeNode) return; coauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, intent: options.intent, targetWords: options.targetWords, alternativeCount: options.alternativeCount, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onAccept: applyCoauthorAlternative, onReject: () => setCoauthorResult(null), canUndoCoauthor: Boolean(activeNode && coauthorUndo?.nodeId === activeNode.id), onUndoCoauthor: undoCoauthorApplication }} continuity={{ result: continuityResult, loading: continuityMutation.isPending, error: continuityMutation.error?.message ?? null, onCheck: () => { if (!activeNode) return; continuityMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story }); }, onClear: () => setContinuityResult(null) }} />}{view === "planning" && activeBook && <PlanningView book={activeBook} onUpdate={updatePlanning} />}{view === "prepare" && activeBook && <PreparationView book={activeBook} onUpdate={updateBook} />}{view === "security" && <AntivirusSecurityView />}</main>
+    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-5 sm:py-12">{view === "library" && <LibraryView books={filteredBooks} totalWords={totalWords} query={query} onQuery={setQuery} onOpen={chooseBook} onNew={() => setNewBookOpen(true)} onEdit={book => { setActiveBookId(book.id); setBookDialog("edit"); }} onReset={book => { setActiveBookId(book.id); setBookDialog("reset"); }} onDelete={book => { setActiveBookId(book.id); setBookDialog("delete"); }} onExport={quickExport} />}{view === "project" && activeBook && <ProjectView book={activeBook} onNavigate={navigate} onUpdate={updateBook} />}{view === "editor" && activeBook && <EditorView book={activeBook} nodes={activeBook.nodes} activeNode={activeNode} draft={draft} richContent={draftHtml} onDraftChange={updateDraft} onRichDraftChange={(value, html) => updateDraft(value, html)} onSelectNode={setActiveNodeId} onBack={() => setView("library")} onSave={() => saveLibrary(library)} onUpdateBook={updateBook} onOpenPlanning={() => navigate("planning")} onOpenPrepare={() => navigate("prepare")} onAddChapter={() => updateNodeList(nodes => addChapter(nodes, Date.now()))} onAddPart={() => updateNodeList(nodes => addPart(nodes, Date.now()))} onRenameNode={(id, title) => updateNodeList(nodes => renameNode(nodes, id, title, Date.now()))} onDuplicateNode={id => updateNodeList(nodes => duplicateNode(nodes, id, Date.now()))} onMoveNode={(id, direction) => updateNodeList(nodes => moveNode(nodes, id, direction))} onRemoveNode={id => updateNodeList(nodes => removeNode(nodes, id))} onSplitNode={splitActiveNode} onMergeNode={mergeActiveNode} onPromotePlannedScene={scene => updateNodeList(nodes => nodes.some(node => node.id === scene.id) ? nodes : [...nodes, { id: scene.id, title: scene.title, kind: "scene", content: "", updatedAt: Date.now() }])} saving={saveMutation.isPending} notice={notice} assistant={{ focus: assistFocus, setFocus: setAssistFocus, result: assistResult, models: modelQuery.data?.models ?? [], isLoading: literaryMutation.isPending, error: literaryMutation.error?.message ?? null, onAnalyze: () => { if (activeNode && draft.trim()) literaryMutation.mutate({ text: draft, focus: assistFocus, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, role: assistFocus === "narrative" ? "developmental_editor" : assistFocus === "grammar" || assistFocus === "language" || assistFocus === "parts_of_speech" ? "copy_editor" : "line_editor", task: "analyze", bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onApply: (start, end, original, suggestion) => { if (!original || !suggestion || draft.slice(start, end) !== original) return; updateDraft(applySuggestionAtOffsets(draft, start, end, original, suggestion)); }, coauthorResult, coauthorLoading: coauthorMutation.isPending, coauthorError: coauthorMutation.error?.message ?? null, coauthorExpansion, coauthorExpansionLoading: expandCoauthorMutation.isPending, coauthorExpansionError: expandCoauthorMutation.error?.message ?? null, onGenerate: options => { if (!activeNode) return; setCoauthorExpansion(null); coauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, intent: options.intent, targetWords: 180, alternativeCount: 3, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onChoose: (alternative, intent) => { if (!activeNode) return; setCoauthorExpansion(null); expandCoauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, selectedAlternative: alternative, intent, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onApplyExpansion: applyCoauthorExpansion, onBackToSamples: () => setCoauthorExpansion(null), onReject: () => { setCoauthorResult(null); setCoauthorExpansion(null); }, canUndoCoauthor: Boolean(activeNode && coauthorUndo?.nodeId === activeNode.id), onUndoCoauthor: undoCoauthorApplication }} continuity={{ result: continuityResult, loading: continuityMutation.isPending, error: continuityMutation.error?.message ?? null, onCheck: () => { if (!activeNode) return; continuityMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story }); }, onClear: () => setContinuityResult(null) }} />}{view === "planning" && activeBook && <PlanningView book={activeBook} onUpdate={updatePlanning} />}{view === "prepare" && activeBook && <PreparationView book={activeBook} onUpdate={updateBook} />}{view === "security" && <AntivirusSecurityView />}</main>
     {newBookOpen && <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-5 backdrop-blur-sm"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="new-book-title"><div className="flex items-start justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-primary">Novo projeto</p><h2 id="new-book-title" className="mt-2 font-serif text-3xl">Comece a história.</h2></div><Button size="icon" variant="ghost" onClick={() => setNewBookOpen(false)} aria-label="Fechar"><X className="h-4 w-4" /></Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">O primeiro capítulo será criado automaticamente. Você pode completar os metadados quando quiser.</p><label className="mt-6 block text-xs font-medium text-muted-foreground">Título<Input className="mt-2" autoFocus value={newBookTitle} onChange={event => setNewBookTitle(event.target.value)} onKeyDown={event => event.key === "Enter" && createBook()} placeholder="O nome do seu livro" /></label><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-muted-foreground">Universo<Input className="mt-2" value={newBookUniverseName} onChange={event => setNewBookUniverseName(event.target.value)} placeholder="Opcional" /></label><label className="text-xs font-medium text-muted-foreground">Série<Input className="mt-2" value={newBookSeriesName} onChange={event => setNewBookSeriesName(event.target.value)} placeholder="Opcional" /></label></div><p className="mt-2 text-[11px] leading-4 text-muted-foreground">Livros com os mesmos nomes de Universo e Série compartilham a mesma identidade narrativa.</p><Button className="mt-5 w-full" onClick={createBook} disabled={!newBookTitle.trim()}><Plus className="mr-2 h-4 w-4" />Criar livro</Button></div></div>}
     {bookDialog && activeBook && <BookDialog mode={bookDialog} book={activeBook} onClose={() => setBookDialog(null)} onSave={patch => { updateBook(patch); setBookDialog(null); }} onReset={resetActiveBook} onDelete={deleteActiveBook} />}
   </div>;
@@ -561,16 +566,20 @@ export function LiteraryAssistant({
   coauthorResult,
   coauthorLoading,
   coauthorError,
+  coauthorExpansion,
+  coauthorExpansionLoading,
+  coauthorExpansionError,
   onGenerate,
-  onAccept,
+  onChoose,
+  onApplyExpansion,
+  onBackToSamples,
   onReject,
   canUndoCoauthor,
   onUndoCoauthor,
 }: LiteraryAssistantProps) {
   const [mode, setMode] = useState<"review" | "coauthor">("review");
   const [intent, setIntent] = useState("");
-  const [targetWords, setTargetWords] = useState(180);
-  const [alternativeCount, setAlternativeCount] = useState(3);
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null);
   const labels: Record<LiteraryAssistantProps["focus"], string> = {
     full: "Revisão completa",
     language: "Ortografia e clareza",
@@ -589,13 +598,13 @@ export function LiteraryAssistant({
       </div>
       <div>
         <p className="text-sm font-medium">Cowila • Estúdio literário</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Revisa, propõe e continua a obra sem escrever por cima do autor.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Revisa, propõe e desenvolve caminhos narrativos sem escrever por cima do autor.</p>
       </div>
     </div>
 
     <div className="mt-4 grid grid-cols-2 rounded-lg bg-secondary/60 p-1" role="tablist" aria-label="Modo da Cowila">
-      <button type="button" role="tab" aria-selected={mode === "review"} onClick={() => setMode("review")} className={`rounded-md px-3 py-2 text-[11px] font-medium transition ${mode === "review" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Revisora</button>
-      <button type="button" role="tab" aria-selected={mode === "coauthor"} onClick={() => setMode("coauthor")} className={`rounded-md px-3 py-2 text-[11px] font-medium transition ${mode === "coauthor" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Coautora</button>
+      <button type="button" role="tab" aria-selected={mode === "review"} onClick={() => setMode("review")} className={"rounded-md px-3 py-2 text-[11px] font-medium transition " + (mode === "review" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>Revisora</button>
+      <button type="button" role="tab" aria-selected={mode === "coauthor"} onClick={() => setMode("coauthor")} className={"rounded-md px-3 py-2 text-[11px] font-medium transition " + (mode === "coauthor" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>Coautora</button>
     </div>
 
     {mode === "review" ? <div>
@@ -612,7 +621,7 @@ export function LiteraryAssistant({
         {result.strengths.length > 0 && <div><p className="mb-2 flex items-center gap-2 text-xs font-medium"><CheckCircle2 className="h-3.5 w-3.5 text-primary" />Pontos fortes</p><ul className="space-y-1 text-xs text-muted-foreground">{result.strengths.slice(0, 3).map((item, index) => <li key={index}>• {item}</li>)}</ul></div>}
         {result.suggestions.length > 0 && <div>
           <p className="mb-2 flex items-center gap-2 text-xs font-medium"><Lightbulb className="h-3.5 w-3.5 text-primary" />Sugestões ({result.suggestions.length})</p>
-          <div className="space-y-2">{result.suggestions.map((item, index) => <div key={`${item.original}-${index}`} className="rounded-lg border border-border/70 p-3">
+          <div className="space-y-2">{result.suggestions.map((item, index) => <div key={item.original + "-" + index} className="rounded-lg border border-border/70 p-3">
             <div className="flex items-center justify-between gap-2"><Badge variant="outline" className="text-[10px]">{item.category}</Badge><span className="text-[10px] text-muted-foreground">{Math.round(item.confidence * 100)}%</span></div>
             {item.original && <p className="mt-2 text-xs line-through text-muted-foreground">{item.original}</p>}
             {item.suggestion && <p className="mt-1 text-xs font-medium">{item.suggestion}</p>}
@@ -624,29 +633,22 @@ export function LiteraryAssistant({
       </div>}
     </div> : <div className="mt-4">
       <div className="rounded-lg border border-primary/15 bg-primary/5 p-3">
-        <p className="text-xs font-medium">Continuação assistida</p>
-        <p className="mt-1 text-[10px] leading-4 text-muted-foreground">A Cowila cria alternativas separadas. Nenhuma entra no manuscrito até você escolher.</p>
+        <p className="text-xs font-medium">Coautoria em duas etapas</p>
+        <p className="mt-1 text-[10px] leading-4 text-muted-foreground">1. A Cowila cria três amostras curtas de caminhos diferentes. 2. Você escolhe um caminho. 3. Só então a Cowila expande esse caminho com as diretrizes literárias completas.</p>
       </div>
 
       <label className="mt-4 block text-xs font-medium text-muted-foreground">O que deve acontecer agora?
         <Textarea aria-label="Intenção da continuação" value={intent} onChange={event => setIntent(event.target.value)} className="mt-2 min-h-20 text-xs" placeholder="Ex.: aumentar a tensão, mas Elia ainda não deve descobrir toda a verdade." />
       </label>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <label className="text-[10px] font-medium text-muted-foreground">Palavras por alternativa
-          <Input aria-label="Palavras por alternativa" type="number" min={60} max={500} step={20} className="mt-1 h-9 text-xs" value={targetWords} onChange={event => setTargetWords(Math.max(60, Math.min(500, Number(event.target.value) || 180)))} />
-        </label>
-        <label className="text-[10px] font-medium text-muted-foreground">Alternativas
-          <select aria-label="Quantidade de alternativas" className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs" value={alternativeCount} onChange={event => setAlternativeCount(Number(event.target.value))}>
-            <option value={2}>2 propostas</option>
-            <option value={3}>3 propostas</option>
-            <option value={4}>4 propostas</option>
-          </select>
-        </label>
+      <div className="mt-3 flex flex-wrap gap-1.5 text-[9px] text-muted-foreground">
+        <Badge variant="outline">3 amostras</Badge>
+        <Badge variant="outline">~180 palavras cada</Badge>
+        <Badge variant="outline">nenhuma altera o manuscrito</Badge>
       </div>
 
-      <Button className="mt-3 w-full" size="sm" onClick={() => onGenerate({ intent, targetWords, alternativeCount })} disabled={coauthorLoading}>
-        <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando alternativas…" : "Gerar alternativas"}
+      <Button className="mt-3 w-full" size="sm" onClick={() => { setSelectedSampleId(null); onGenerate({ intent }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
+        <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando 3 amostras…" : "Gerar 3 amostras"}
       </Button>
 
       {canUndoCoauthor && <Button variant="outline" className="mt-2 w-full" size="sm" onClick={onUndoCoauthor}>
@@ -654,29 +656,51 @@ export function LiteraryAssistant({
       </Button>}
 
       {coauthorError && <div className="mt-3 flex gap-2 rounded-lg bg-destructive/10 p-3 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{coauthorError}</span></div>}
+      {coauthorExpansionError && <div className="mt-3 flex gap-2 rounded-lg bg-destructive/10 p-3 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{coauthorExpansionError}</span></div>}
 
-      {coauthorResult && <div className="mt-4 space-y-3">
+      {coauthorResult && !coauthorExpansion && <div className="mt-4 space-y-3">
         <div className="flex flex-wrap gap-1.5 text-[9px] text-muted-foreground">
           <Badge variant="outline">{coauthorResult.context.canonFacts} fatos de cânone do livro</Badge>
           <Badge variant="outline">{coauthorResult.context.memoryMessages} mensagens de memória</Badge>
-          <Badge variant="outline">~{coauthorResult.context.requestedWords} palavras</Badge>
+          <Badge variant="outline">fase 1 · amostras</Badge>
         </div>
         {coauthorResult.canonWarnings.length > 0 && <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
           <p className="text-[10px] font-medium">Alertas de contexto</p>
           {coauthorResult.canonWarnings.map((warning, index) => <p key={index} className="mt-1 text-[10px] leading-4 text-muted-foreground">• {warning}</p>)}
         </div>}
-        {coauthorResult.alternatives.map((alternative, index) => <article key={alternative.id} className="rounded-xl border border-border/70 bg-background p-3">
+        {coauthorResult.alternatives.map((alternative, index) => <article key={alternative.id} className={"rounded-xl border bg-background p-3 " + (selectedSampleId === alternative.id ? "border-primary/60" : "border-border/70")}>
           <div className="flex items-center justify-between gap-2">
-            <div><p className="text-xs font-medium">Alternativa {index + 1} · {alternative.label}</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(alternative.text)} palavras</p></div>
-            <Badge variant="outline" className="text-[9px]">Proposta</Badge>
+            <div><p className="text-xs font-medium">Amostra {index + 1} · {alternative.label}</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(alternative.text)} palavras · direção narrativa</p></div>
+            <Badge variant="outline" className="text-[9px]">Amostra</Badge>
           </div>
           <p className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{alternative.text}</p>
-          <Button className="mt-3 w-full" size="sm" variant="outline" onClick={() => onAccept(alternative)}>
-            <Check className="mr-2 h-3.5 w-3.5" />Usar esta continuação
+          <Button className="mt-3 w-full" size="sm" variant="outline" disabled={coauthorExpansionLoading} onClick={() => { setSelectedSampleId(alternative.id); onChoose(alternative, intent); }}>
+            <ChevronRight className="mr-2 h-3.5 w-3.5" />{coauthorExpansionLoading && selectedSampleId === alternative.id ? "Expandindo este caminho…" : "Escolher este caminho"}
           </Button>
         </article>)}
-        <Button variant="ghost" className="w-full text-xs" onClick={onReject}>Rejeitar todas</Button>
-        <p className="text-[9px] leading-4 text-muted-foreground">Modelo: {coauthorResult.model}. Aceitar uma alternativa cria um ponto de reversão local.</p>
+        {coauthorExpansionLoading && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-4 text-muted-foreground">A Cowila está transformando a amostra escolhida em uma continuação completa com ritmo, beats, continuidade, Style DNA e faixa do gênero.</div>}
+        <Button variant="ghost" className="w-full text-xs" onClick={() => { setSelectedSampleId(null); onReject(); }}>Descartar as 3 amostras</Button>
+      </div>}
+
+      {coauthorExpansion && <div className="mt-4 space-y-3">
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div><p className="text-xs font-medium">Continuação expandida</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(coauthorExpansion.text)} palavras · fase 2</p></div>
+            <Badge className="text-[9px]">Pronta para decisão</Badge>
+          </div>
+          <p className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{coauthorExpansion.text}</p>
+        </div>
+        {coauthorExpansion.canonWarnings.length > 0 && <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+          <p className="text-[10px] font-medium">Alertas antes de aplicar</p>
+          {coauthorExpansion.canonWarnings.map((warning, index) => <p key={index} className="mt-1 text-[10px] leading-4 text-muted-foreground">• {warning}</p>)}
+        </div>}
+        <Button className="w-full" size="sm" onClick={() => onApplyExpansion(coauthorExpansion.text)}>
+          <Check className="mr-2 h-3.5 w-3.5" />Aplicar ao manuscrito
+        </Button>
+        <Button variant="outline" className="w-full" size="sm" onClick={() => { setSelectedSampleId(null); onBackToSamples(); }}>
+          Voltar às 3 amostras
+        </Button>
+        <p className="text-[9px] leading-4 text-muted-foreground">A expansão segue o caminho escolhido e as diretrizes de extensão/ritmo do gênero. Só o botão acima altera o manuscrito.</p>
       </div>}
     </div>}
   </div>;
