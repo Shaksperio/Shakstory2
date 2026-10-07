@@ -133,7 +133,7 @@ export function buildExpansionPrompt(input: {
     ? Math.max(700, Math.round(input.requestedWords))
     : null;
   const targetRule = requested
-    ? `O autor pediu aproximadamente ${requested} palavras; essa contagem prevalece.`
+    ? `O autor pediu aproximadamente ${requested.toLocaleString("pt-BR")} palavras; essa contagem prevalece.`
     : "Entregue entre 900 e 1.600 palavras. O piso absoluto é 700 palavras.";
 
   return [
