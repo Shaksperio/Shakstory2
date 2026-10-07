@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
-import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
+import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, hasCompleteCoauthorSamples, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 import { buildStyleDnaPrompt } from "@shared/style-dna";
 import { buildContinuityPrompt } from "@shared/continuity-radar";
 
@@ -372,7 +372,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   }));
 
   const usable = alternatives.filter(item => item.text);
-  if (!usable.length) throw new CloudflareApiError("A Cowila não retornou nenhuma continuação utilizável.", { code: "EMPTY_COAUTHOR_RESULT", status: 502 });
+  if (!hasCompleteCoauthorSamples(alternatives)) throw new CloudflareApiError("A Cowila não retornou as três amostras completas. Gere novamente para comparar os três caminhos.", { code: "INCOMPLETE_COAUTHOR_RESULT", status: 502 });
   return {
     alternatives: usable,
     canonWarnings: Array.from(new Set(usable.flatMap(item => item.warnings))),

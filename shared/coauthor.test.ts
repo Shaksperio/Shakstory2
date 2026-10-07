@@ -7,6 +7,7 @@ import {
   clampAlternativeCount,
   clampContinuationWords,
   pickApproaches,
+  hasCompleteCoauthorSamples,
   resolveGenreChapterRange,
 } from "./coauthor";
 
@@ -83,6 +84,26 @@ describe("Cowila coauthor two-stage flow", () => {
     });
     expect(prompt).toContain("2.100 palavras");
     expect(prompt).toContain("prevalece");
+  });
+
+  it("uses general ranges for missing genres and prioritizes specific genres", () => {
+    expect(resolveGenreChapterRange().id).toBe("general");
+    expect(resolveGenreChapterRange("romance paranormal").id).toBe("paranormal_romance");
+    expect(resolveGenreChapterRange("romance", "dark paranormal romance").id).toBe("paranormal_romance");
+    expect(resolveGenreChapterRange("fantasia").id).toBe("general");
+  });
+
+  it("respects an explicit short word request from the author", () => {
+    const prompt = buildExpansionPrompt({ selectedSample: "A porta se abriu.", requestedWords: 250 });
+    expect(prompt).toContain("250 palavras");
+    expect(prompt).not.toContain("700 palavras");
+  });
+
+  it("rejects partial sample batches instead of silently offering fewer choices", () => {
+    const samples = pickApproaches().map(approach => ({ ...approach, approach: approach.instruction, text: "Cena utilizável.", warnings: [] }));
+    expect(hasCompleteCoauthorSamples(samples)).toBe(true);
+    expect(hasCompleteCoauthorSamples(samples.slice(0, 2))).toBe(false);
+    expect(hasCompleteCoauthorSamples(samples.map((sample, index) => index === 1 ? { ...sample, text: "  " } : sample))).toBe(false);
   });
 
   it("appends only the final accepted expansion without modifying the original draft value", () => {

@@ -315,3 +315,13 @@
 - [x] Confirmar remotamente 338 caminhos, incluindo código, documentação, schema e migrações SQL.
 - [x] Confirmar que não foram publicados `.env`, `node_modules`, `dist`, `.pem` ou `.key`.
 - [x] Validar o backup remoto: https://github.com/Shaksperio/Shakstory-Backup/commit/8a9ffe4752356834bcc913cdac63f7d970b7e592
+
+
+## Continuidade 2026-10-07 — contratos da coautoria
+
+- [x] Exigir três amostras utilizáveis; resposta parcial deve mostrar erro sem alterar o manuscrito.
+- [x] Resolver gênero específico antes do genérico e usar faixa geral quando ausente.
+- [x] Respeitar contagem explícita abaixo de 700 palavras quando solicitada pelo autor.
+- [x] Validar regressões e registrar limitações do ambiente.
+
+Validação: 11 verificações executadas diretamente em Node, validação de dados, guardrail do repositório e `git diff --check` aprovados. Suíte Vitest, typecheck e build não executados: instalação offline bloqueada por dependência ausente no cache. As novas regressões Vitest estão adicionadas para execução em CI. Publicação em produção pendente.

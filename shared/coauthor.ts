@@ -67,12 +67,16 @@ const normalize = (value?: string | null): string =>
 
 export function resolveGenreChapterRange(genre?: string | null, subgenre?: string | null): GenreChapterRange {
   const haystack = [normalize(genre), normalize(subgenre)].filter(Boolean).join(" ");
-  const specific = GENRE_CHAPTER_RANGES.find(item =>
-    item.id !== "general" &&
-    [item.label, ...item.aliases]
+  if (!haystack) return GENRE_CHAPTER_RANGES.find(item => item.id === "general")!;
+  // Prefer the most specific matching alias (e.g. paranormal romance over romance).
+  const specific = GENRE_CHAPTER_RANGES
+    .filter(item => item.id !== "general")
+    .map(item => ({ item, score: Math.max(0, ...[item.label, ...item.aliases]
       .map(normalize)
-      .some(alias => alias && (haystack === alias || haystack.includes(alias) || alias.includes(haystack)))
-  );
+      .filter(alias => alias && haystack.includes(alias))
+      .map(alias => alias.length)) }))
+    .filter(match => match.score > 0)
+    .sort((left, right) => right.score - left.score)[0]?.item;
   return specific ?? GENRE_CHAPTER_RANGES.find(item => item.id === "general")!;
 }
 
@@ -132,7 +136,7 @@ export function buildExpansionPrompt(input: {
 }): string {
   const range = resolveGenreChapterRange(input.genre, input.subgenre);
   const requested = input.requestedWords && Number.isFinite(input.requestedWords)
-    ? Math.max(700, Math.round(input.requestedWords))
+    ? Math.max(1, Math.round(input.requestedWords))
     : null;
   const targetRule = requested
     ? `O autor pediu aproximadamente ${requested.toLocaleString("pt-BR")} palavras; essa contagem prevalece.`
@@ -181,6 +185,10 @@ export function buildExpansionPrompt(input: {
     "- fecho que sustenta a próxima entrada.",
     "FORMATO: responda somente com a continuação expandida, sem OPÇÃO, sem prefácio, sem lista, sem explicar o que fez.",
   ].filter(Boolean).join("\n");
+}
+
+export function hasCompleteCoauthorSamples(alternatives: CoauthorAlternative[]): boolean {
+  return alternatives.length === 3 && alternatives.every(item => Boolean(item.text.trim()));
 }
 
 export function appendContinuationText(base: string, continuation: string): string {
