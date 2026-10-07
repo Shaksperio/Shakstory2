@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
+import { buildContinuationPrompt, clampAlternativeCount, clampContinuationWords, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 
 type QueryOptions = {
   enabled?: boolean;
@@ -61,6 +62,12 @@ type LiteraryInput = {
   audience?: string;
   role?: LiteraryRole;
   task?: LiteraryTask;
+  bookId?: string;
+  bookTitle?: string;
+  sceneId?: string;
+  sceneTitle?: string;
+  planning?: unknown;
+  story?: unknown;
 };
 
 type LiterarySuggestion = {
@@ -81,6 +88,33 @@ type LiteraryResult = {
   narrativeNotes: string[];
   model: string;
   availableModels: string[];
+};
+
+type CoauthorInput = {
+  bookId: string;
+  bookTitle: string;
+  sceneId: string;
+  sceneTitle: string;
+  text: string;
+  intent?: string;
+  targetWords?: number;
+  alternativeCount?: number;
+  genre?: string;
+  subgenre?: string;
+  audience?: string;
+  planning?: unknown;
+  story?: unknown;
+};
+
+type CoauthorResult = {
+  alternatives: CoauthorAlternative[];
+  canonWarnings: string[];
+  model: string;
+  context: {
+    canonFacts: number;
+    memoryMessages: number;
+    requestedWords: number;
+  };
 };
 
 type CoverInput = {
@@ -161,8 +195,37 @@ const literaryPrompt: Record<LiteraryInput["focus"], string> = {
   full: "Faça uma leitura editorial completa: linguagem, gramática, léxico, narrativa, voz, estilo e continuidade.",
 };
 
+const readOptionalDocument = async (path?: string): Promise<Record<string, unknown> | null> => {
+  if (!path) return null;
+  try {
+    const result = await readDocument(path);
+    return result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+};
+
+const factsFromDocument = (document: Record<string, unknown> | null): unknown[] =>
+  Array.isArray(document?.facts) ? document.facts : [];
+
+const historyFromDocument = (document: Record<string, unknown> | null): Array<{ role: "user" | "assistant"; content: string }> =>
+  Array.isArray(document?.messages)
+    ? document.messages
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .map(item => ({
+          role: item.role === "assistant" ? "assistant" as const : "user" as const,
+          content: String(item.content ?? "").slice(0, 2000),
+        }))
+        .filter(item => item.content.trim())
+        .slice(-12)
+    : [];
+
 const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> => {
   const cowilaContext = buildCowilaLiteraryContext(input);
+  const [canonDocument, memoryDocument] = await Promise.all([
+    readOptionalDocument(input.bookId ? `canon/${input.bookId}.json` : undefined),
+    readOptionalDocument(input.bookId ? `assistant/${input.bookId}.json` : undefined),
+  ]);
   const result = await json<{
     proposal?: string;
     canonWarnings?: string[];
@@ -172,12 +235,12 @@ const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> =>
       action: "literary_review",
       prompt: `${cowilaContext} ${literaryPrompt[input.focus]}`,
       literaryProfile: { genre: input.genre, subgenre: input.subgenre, audience: input.audience, role: input.role, task: input.task },
-      book: { id: "writerstudio-cloudflare", title: "Manuscrito Shakstory" },
-      scene: { id: "active-excerpt", title: "Trecho ativo", text: input.text },
-      canon: [],
-      planning: { characters: [], locations: [], timeline: [] },
-      story: { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
-      history: [],
+      book: { id: input.bookId ?? "writerstudio-cloudflare", title: input.bookTitle ?? "Manuscrito Shakstory" },
+      scene: { id: input.sceneId ?? "active-excerpt", title: input.sceneTitle ?? "Trecho ativo", text: input.text },
+      canon: factsFromDocument(canonDocument),
+      planning: input.planning ?? { characters: [], locations: [], timeline: [] },
+      story: input.story ?? { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+      history: historyFromDocument(memoryDocument),
     }),
   });
   const warnings = Array.isArray(result.canonWarnings) ? result.canonWarnings : [];
@@ -186,13 +249,84 @@ const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> =>
     strengths: [],
     suggestions: [],
     narrativeNotes: warnings,
-    model: "@cf/zai-org/glm-4.7-flash",
-    availableModels: ["@cf/zai-org/glm-4.7-flash"],
+    model: "@cf/meta/llama-3.1-8b-instruct-fast",
+    availableModels: ["@cf/meta/llama-3.1-8b-instruct-fast"],
+  };
+};
+
+const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<CoauthorResult> => {
+  const targetWords = clampContinuationWords(input.targetWords ?? 180);
+  const alternativeCount = clampAlternativeCount(input.alternativeCount ?? 3);
+  const literaryContext = buildCowilaLiteraryContext({
+    genre: input.genre,
+    subgenre: input.subgenre,
+    audience: input.audience,
+    role: "coauthor",
+    task: "continue_scene",
+  });
+  const [canonDocument, memoryDocument] = await Promise.all([
+    readOptionalDocument(`canon/${input.bookId}.json`),
+    readOptionalDocument(`assistant/${input.bookId}.json`),
+  ]);
+  const canon = factsFromDocument(canonDocument);
+  const history = historyFromDocument(memoryDocument);
+  const approaches = pickApproaches(alternativeCount);
+
+  const alternatives = await Promise.all(approaches.map(async (approach, index) => {
+    const prompt = buildContinuationPrompt({
+      intent: input.intent,
+      targetWords,
+      approach,
+      literaryContext,
+    });
+    const result = await json<{
+      proposal?: string;
+      canonWarnings?: string[];
+    }>("/api/assist", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "continue_scene",
+        prompt,
+        literaryProfile: {
+          genre: input.genre,
+          subgenre: input.subgenre,
+          audience: input.audience,
+          role: "coauthor",
+          task: "continue_scene",
+        },
+        book: { id: input.bookId, title: input.bookTitle },
+        scene: { id: input.sceneId, title: input.sceneTitle, text: input.text },
+        canon,
+        planning: input.planning ?? { characters: [], locations: [], timeline: [] },
+        story: input.story ?? { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+        history,
+      }),
+    });
+    return {
+      id: `${approach.id}-${index + 1}`,
+      label: approach.label,
+      approach: approach.instruction,
+      text: String(result.proposal ?? "").trim(),
+      warnings: Array.isArray(result.canonWarnings) ? result.canonWarnings : [],
+    } satisfies CoauthorAlternative;
+  }));
+
+  const usable = alternatives.filter(item => item.text);
+  if (!usable.length) throw new CloudflareApiError("A Cowila não retornou nenhuma continuação utilizável.", { code: "EMPTY_COAUTHOR_RESULT", status: 502 });
+  return {
+    alternatives: usable,
+    canonWarnings: [...new Set(usable.flatMap(item => item.warnings))],
+    model: "@cf/meta/llama-3.1-8b-instruct-fast",
+    context: {
+      canonFacts: canon.length,
+      memoryMessages: history.length,
+      requestedWords: targetWords,
+    },
   };
 };
 
 const modelResult = {
-  models: [{ id: "@cf/zai-org/glm-4.7-flash" }],
+  models: [{ id: "@cf/meta/llama-3.1-8b-instruct-fast" }],
 };
 
 export const trpc = {
@@ -253,6 +387,18 @@ export const trpc = {
       }) {
         return useMutation<LiteraryResult, CloudflareApiError, LiteraryInput>({
           mutationFn: analyzeLiterary,
+          onSuccess: options?.onSuccess,
+          onError: options?.onError,
+        });
+      },
+    },
+    coauthor: {
+      useMutation(options?: {
+        onSuccess?: (data: CoauthorResult) => void;
+        onError?: (error: CloudflareApiError) => void;
+      }) {
+        return useMutation<CoauthorResult, CloudflareApiError, CoauthorInput>({
+          mutationFn: generateCoauthorAlternatives,
           onSuccess: options?.onSuccess,
           onError: options?.onError,
         });
