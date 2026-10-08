@@ -43,7 +43,7 @@ it("previews a portable backup and preserves the current project before explicit
   await waitFor(() => expect(screen.getByRole("button", {name: "Confirmar restauração do backup"})).toBeTruthy());
   expect(onUpdate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", {name: "Confirmar restauração do backup"}));
-  expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({title: "Depois", nodes: restored.nodes}));
+  expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({title: "Depois", nodes: restored.nodes, publication: undefined, story: undefined, review: undefined}));
   expect(JSON.parse(localStorage.getItem("shakstory:snapshots:qa")!)[0].book).toEqual(current);
 });
 

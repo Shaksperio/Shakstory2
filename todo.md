@@ -375,7 +375,8 @@ Implementação e validação local concluídas: 99 testes aprovados, 3 opcionai
 - [x] Recuperação explícita de falhas de módulos, cópia local baixável, idioma, zoom e manifest próprios.
 - [x] Corrigir timeout do gateway, restringir ambiente do subprocesso e inspecionar ZIP com limites.
 - [x] Testar engine KicomAV real local com EICAR simples/ZIP e entradas recusadas; adicionar validação de container ao CI.
-- [ ] Conferir CI do container, publicar e verificar o bundle público desta entrega.
+- [x] Conferir CI do container real: oito casos passaram no job isolado do run 37706414677.
+- [ ] Publicar e verificar o bundle público desta entrega.
 - [ ] Validar login OAuth real e fluxo autenticado em sessão de usuário; testes DOM não substituem esta verificação.
 - [ ] Ativar/validar scanner no runtime Cloudflare e atualizar cobertura de assinaturas; worker Python Node não é executado pelo Worker público.
 - [ ] Paridade adicional Novelist: compartilhamento entre livros, menções, tipos/status configuráveis, Drive direto e exportação ODT.

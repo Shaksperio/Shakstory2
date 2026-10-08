@@ -48,7 +48,10 @@ Verificação local: 123 testes passaram; três testes opcionais de credenciais 
 
 - Restauração mantém texto, marcas e IDs; recusa outro livro, IDs duplicados e estrutura inválida.
 - Falha ao guardar a cópia atual interrompe a restauração.
+- Restauração limpa campos opcionais ausentes na cópia para não misturar planejamento/créditos atuais com o backup antigo.
 - Referências ausentes conservam o texto anterior e aparecem como indisponíveis no Story Engine.
 - Atividade diária mede diferenças na contagem de palavras de rascunhos salvos; não mede teclas, qualidade ou produtividade histórica anterior à atualização.
 - Backup inclui dados embutidos, mas URLs de imagens externas continuam dependendo da origem.
 - Testes DOM usam projetos QA isolados. Não equivalem a login OAuth real, acesso compartilhado entre usuários ou validação em Word/e-readers nativos.
+
+O CI 37706414677 passou a validação completa e os oito casos do engine real em container sem rede, com filesystem somente leitura e temporários limitados. A cobertura carregada continua sendo de 26 assinaturas; este resultado não ativa o scanner no Worker Cloudflare.
