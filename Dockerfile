@@ -9,7 +9,7 @@ COPY . .
 
 RUN python3 -m venv /opt/kicomav \
   && /opt/kicomav/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/kicomav/bin/pip install --no-cache-dir rich requests python-dotenv yara-python py7zr rarfile pycabfile
+  && /opt/kicomav/bin/pip install --no-cache-dir -r requirements-kicomav.txt
 
 RUN npm install -g corepack@latest \
   && corepack pnpm install \

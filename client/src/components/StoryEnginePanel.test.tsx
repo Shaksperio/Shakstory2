@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoryEnginePanel } from "./WriterStudio";
+
+afterEach(cleanup);
 
 describe("StoryEnginePanel", () => {
   it("persists objectives, conflicts and notes through the project callback", () => {
@@ -49,4 +51,31 @@ describe("StoryEnginePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adicionar ao projeto" }));
     expect(story.scenes[0].title).toBe("A travessia");
   });
+});
+
+it("keeps scene links through serialization, rename and missing references", () => {
+  const original = { objectives: [{ id: "goal", title: "Encontrar Joe", description: "" }], conflicts: [{ id: "conflict", title: "A floresta", description: "" }], scenes: [], relations: [], notes: [] };
+  let story: Parameters<typeof StoryEnginePanel>[0]["story"] = original;
+  const onUpdate = vi.fn(next => { story = JSON.parse(JSON.stringify(next)); });
+  const chapters = [{id: "chapter", label: "O envelope"}];
+  const { rerender } = render(<StoryEnginePanel story={story} chapterOptions={chapters} onUpdate={onUpdate} />);
+  fireEvent.change(screen.getByRole("combobox", {name: "Tipo de elemento"}), {target: {value: "scenes"}});
+  fireEvent.change(screen.getByPlaceholderText("Título da cena"), {target: {value: "A descoberta"}});
+  fireEvent.change(screen.getByRole("combobox", {name: "Vincular objetivo"}), {target: {value: "goal"}});
+  fireEvent.change(screen.getByRole("combobox", {name: "Vincular conflito"}), {target: {value: "conflict"}});
+  fireEvent.change(screen.getByRole("combobox", {name: "Vincular capítulo"}), {target: {value: "chapter"}});
+  fireEvent.click(screen.getByRole("button", {name: "Adicionar ao projeto"}));
+  expect(story.scenes[0]).toMatchObject({objectiveId: "goal", conflictId: "conflict", chapterId: "chapter"});
+  const sceneId = story.scenes[0].id;
+  story = {...story, objectives: [{...story.objectives[0], title: "Descobrir a verdade"}]};
+  rerender(<StoryEnginePanel story={story} chapterOptions={chapters} onUpdate={onUpdate} />);
+  expect(screen.getByText(/Objetivo: Descobrir a verdade/)).toBeTruthy();
+  expect(screen.getAllByText(/Cenas vinculadas: A descoberta/)).toHaveLength(2);
+  expect(screen.getByText("Capítulo: O envelope")).toBeTruthy();
+  story = {...story, objectives: []};
+  rerender(<StoryEnginePanel story={story} chapterOptions={chapters} onUpdate={onUpdate} />);
+  expect(screen.getByText(/Encontrar Joe \(vínculo indisponível\)/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", {name: "Editar A descoberta"}));
+  fireEvent.click(screen.getByRole("button", {name: "Salvar alterações"}));
+  expect(story.scenes[0]).toMatchObject({id: sceneId, objectiveId: "goal", objective: "Encontrar Joe"});
 });

@@ -363,3 +363,20 @@ Implementação e validação local concluídas: 99 testes aprovados, 3 opcionai
 - [x] Teclas físicas e visuais, maiúsculas, acentos, números, apagar e quebra de linha.
 - [x] Preservar o mesmo editor, rascunho formatado, salvamento e preferência local.
 - [x] Verificar inserção e movimento da folha com testes; validar a troca de modo com salvamento integrado.
+
+## Continuidade 2026-10-07 — pendências e referências Novelist/Reedsy
+
+- [x] Conferir pendências com o código atual, evitando declarar trabalho entregue como futuro.
+- [x] Vincular cenas a objetivos, conflitos e capítulos; apresentar nomes atuais no Story Engine e Contexto.
+- [x] Backup portátil com prévia, confirmação e cópia anterior obrigatória.
+- [x] Progresso por capítulo e registro diário de variação de palavras.
+- [x] Templates pessoais de fichas e renomeação de colunas.
+- [x] Analisar fontes oficiais Novelist e HTML Reedsy enviado, documentando evidências e inferências sem copiar implementação.
+- [x] Recuperação explícita de falhas de módulos, cópia local baixável, idioma, zoom e manifest próprios.
+- [x] Corrigir timeout do gateway, restringir ambiente do subprocesso e inspecionar ZIP com limites.
+- [x] Testar engine KicomAV real local com EICAR simples/ZIP e entradas recusadas; adicionar validação de container ao CI.
+- [ ] Conferir CI do container, publicar e verificar o bundle público desta entrega.
+- [ ] Validar login OAuth real e fluxo autenticado em sessão de usuário; testes DOM não substituem esta verificação.
+- [ ] Ativar/validar scanner no runtime Cloudflare e atualizar cobertura de assinaturas; worker Python Node não é executado pelo Worker público.
+- [ ] Paridade adicional Novelist: compartilhamento entre livros, menções, tipos/status configuráveis, Drive direto e exportação ODT.
+- [ ] Colaboração real entre usuários, leitores nativos e drag-and-drop de capa no card dependem de incrementos próprios.

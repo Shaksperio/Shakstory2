@@ -32,7 +32,7 @@ export type SemanticBlock = { id: string; kind: "paragraph" | "quote" | "scene_b
 export type SemanticScene = { id: string; title: string; blocks: SemanticBlock[]; richContent?: string; characterIds: string[]; locationIds: string[]; sortOrder: number };
 export type SemanticChapter = { id: string; title: string; scenes: SemanticScene[]; sortOrder: number };
 export type SemanticPart = { id: string; title: string; chapters: SemanticChapter[]; sortOrder: number };
-export type SemanticPlannedScene = { id: string; title: string; objective: string; conflict: string; notes: string };
+export type SemanticPlannedScene = { id: string; title: string; objective: string; conflict: string; objectiveId?: string; conflictId?: string; chapterId?: string; notes: string };
 export type SemanticBook = { schemaVersion: "1.1"; id: string; title: string; parts: SemanticPart[]; migratedFromLegacy: boolean; plannedScenes?: SemanticPlannedScene[] };
 export type LegacyNode = { id: string; title: string; kind: "part" | "chapter" | "scene" | "front_matter" | "back_matter"; content: string; sortOrder?: number };
 

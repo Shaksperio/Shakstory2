@@ -48,3 +48,15 @@ Validação: 108 testes aprovados e 3 testes opcionais de credenciais reais igno
 ## Máquina de escrever
 
 No Manuscrito, o botão **Máquina de escrever** ativa a folha em movimento e o teclado verde clássico. O teclado físico e as teclas visuais editam o mesmo rascunho, mantendo formatação e salvamento automático. Há maiúsculas, números, símbolos e acentos; a folha acompanha a linha de escrita. No celular, o teclado visual substitui o teclado do sistema neste modo. A preferência é lembrada no dispositivo; desativar retorna ao editor normal. O modo é silencioso e respeita a preferência de movimento reduzido.
+
+## Planejamento, progresso e backup
+
+Em Planejar → Story Engine, vincule a cena a objetivo, conflito e capítulo. Os cartões resolvem os nomes atuais pelos IDs; o Contexto do Manuscrito mostra as cenas associadas ao capítulo aberto. Relações também apresentam os nomes atuais de personagens, lugares e eventos.
+
+Em Projeto, o progresso mostra palavras e participação de cada capítulo/cena. O registro diário guarda acréscimos e remoções pela diferença de contagem entre rascunhos salvos, desde esta atualização. Não reconstrói atividade anterior.
+
+O backup JSON do projeto inclui manuscrito, planejamento e revisão. Abrir arquivo apenas mostra a prévia: restaurar exige confirmação e snapshot da cópia atual. Se o snapshot não puder ser gravado, a substituição é interrompida. Backups de outro livro são recusados. Imagens externas permanecem referências; imagens embutidas acompanham o JSON.
+
+Em Quadros, preencha uma ficha e salve como template pessoal para reutilizar no dispositivo. Aplicar o template preenche o formulário, sem criar ou alterar cartões automaticamente.
+
+Uma falha de carregamento de módulo oferece uma cópia de recuperação local, sem recarga automática. Abra esse JSON em Projeto → Abrir backup para restaurar o livro correspondente com seus rascunhos mais recentes.

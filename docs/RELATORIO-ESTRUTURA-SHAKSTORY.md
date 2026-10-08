@@ -49,7 +49,7 @@ A base atual contém:
 | Segurança | Sessões e auditoria KicomAV no código atual, upload de capa condicionado à varredura e rotas protegidas. |
 | QA | Suíte automatizada, typecheck, build, validação de dados e validação de repositório definidos no projeto. |
 
-**Importante:** o código atual contém uma integração KicomAV inicial (`server/antivirus.ts`, worker Python, schema e Dockerfile), enquanto partes antigas do README e da auditoria preliminar ainda descrevem a proteção como planejada. Essa divergência documental deve ser corrigida em uma atualização específica; o relatório não trata documentação antiga como fonte de verdade quando ela contradiz o código atual.
+A integração KicomAV inicial está documentada no README e na auditoria dedicada. A detecção controlada do engine Node/container é distinta da proteção no Worker Cloudflare, que não executa o subprocesso Python.
 
 ## 3. Stack e runtime
 
@@ -236,7 +236,7 @@ O módulo de planejamento usa CRUD persistido no documento editorial para:
 
 Os status editoriais são `planning`, `draft`, `editing`, `revision` e `completed`. Relações devem referenciar IDs, não copiar entidades inteiras; isso evita inconsistência quando um personagem ou local é editado.
 
-A principal evolução futura é tornar os vínculos entre cenas planejadas, objetivos e conflitos ainda mais visíveis no editor estrutural e no preview do Story Engine.
+Cenas planejadas podem vincular objetivos, conflitos e capítulos por ID. Renomeações refletem-se nos cartões e no Contexto do manuscrito; referências indisponíveis conservam o texto original e são indicadas no Story Engine.
 
 ## 8. Persistência, autosave e recuperação
 
