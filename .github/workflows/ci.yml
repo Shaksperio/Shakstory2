@@ -11,6 +11,17 @@ permissions:
 
 
 jobs:
+  kicomav-real:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build KicomAV application container
+        run: docker build -t shakstory-kicomav-qa .
+      - name: Verify real signatures, ZIP limits and fail-closed responses
+        run: docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --memory=512m --cpus=2 --entrypoint /opt/kicomav/bin/python shakstory-kicomav-qa scripts/kicomav_smoke.py
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 20

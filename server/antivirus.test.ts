@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSafeToPersist, scanWithLocalKicomAV, type AntivirusScanResult } from "./antivirus";
+import { isSafeToPersist, runWorker, scanWithLocalKicomAV, type AntivirusScanResult } from "./antivirus";
 
 describe("antivirus gateway", () => {
   it("only permits clean results to reach storage", () => {
@@ -30,6 +30,7 @@ describe("antivirus gateway", () => {
     ["qa-infected.bin", "infected"],
     ["qa-error.bin", "error"],
     ["qa-invalid.json", "error"],
+    ["qa-environment.bin", "clean"],
   ])("normalizes controlled worker response for %s", async (filename, expected) => {
     const previousPython = process.env.KICOMAV_PYTHON;
     const previousWorker = process.env.KICOMAV_WORKER_SCRIPT;
@@ -41,6 +42,18 @@ describe("antivirus gateway", () => {
     } finally {
       if (previousPython === undefined) delete process.env.KICOMAV_PYTHON; else process.env.KICOMAV_PYTHON = previousPython;
       if (previousWorker === undefined) delete process.env.KICOMAV_WORKER_SCRIPT; else process.env.KICOMAV_WORKER_SCRIPT = previousWorker;
+    }
+  });
+
+  it("reports timeout and can start a fresh scan afterward", async () => {
+    const previous = process.env.KICOMAV_WORKER_SCRIPT;
+    process.env.KICOMAV_WORKER_SCRIPT = "scripts/kicomav_test_worker.py";
+    try {
+      await expect(runWorker(JSON.stringify({filename: "qa-timeout.bin"}), 30)).rejects.toMatchObject({killed: true});
+      const result = await scanWithLocalKicomAV({bytes: Buffer.from("qa"), filename: "qa-clean.bin", contentType: "text/plain"});
+      expect(result.status).toBe("clean");
+    } finally {
+      if (previous === undefined) delete process.env.KICOMAV_WORKER_SCRIPT; else process.env.KICOMAV_WORKER_SCRIPT = previous;
     }
   });
 });

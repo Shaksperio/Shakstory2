@@ -58,30 +58,37 @@ export async function scanWithLocalKicomAV(input: {
   }
 }
 
-function runWorker(request: string): Promise<string> {
+export function runWorker(request: string, timeoutMs = SCAN_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     const pythonBin = process.env.KICOMAV_PYTHON ?? "python3";
     const workerScript = process.env.KICOMAV_WORKER_SCRIPT ?? "scripts/kicomav_worker.py";
     const child = spawn(pythonBin, [workerScript], {
       cwd: process.cwd(),
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      env: Object.fromEntries([
+        ...["PATH", "PYTHONPATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT"].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []),
+        ["PYTHONUNBUFFERED", "1"],
+      ]),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), SCAN_TIMEOUT_MS);
+    let failure: Error | undefined;
+    const stop = (error: Error) => { failure ??= error; child.kill("SIGKILL"); };
+    const timer = setTimeout(() => stop(Object.assign(new Error("A varredura excedeu o tempo limite."), { killed: true })), timeoutMs);
     child.stdout.on("data", chunk => {
       stdout += String(chunk);
-      if (stdout.length > 256 * 1024) child.kill("SIGKILL");
+      if (stdout.length > 256 * 1024) stop(new Error("Resposta do worker acima do limite."));
     });
     child.stderr.on("data", chunk => {
       stderr += String(chunk);
-      if (stderr.length > 32 * 1024) child.kill("SIGKILL");
+      if (stderr.length > 32 * 1024) stop(new Error("Diagnóstico do worker acima do limite."));
     });
-    child.once("error", reject);
+    child.once("error", error => { clearTimeout(timer); reject(error); });
+    child.stdin.on("error", error => stop(error));
     child.once("close", code => {
       clearTimeout(timer);
-      if (code === 0) resolve(stdout);
+      if (failure) reject(failure);
+      else if (code === 0) resolve(stdout);
       else reject(new Error(stderr.trim() || `Worker finalizado com código ${code ?? "desconhecido"}.`));
     });
     child.stdin.end(request);

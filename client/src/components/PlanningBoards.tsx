@@ -1,3 +1,4 @@
+import { safeLocalSet } from "@/lib/library-backup";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,7 +68,16 @@ export function createPlanningBoard(title = "Board principal"): PlanningBoard {
   };
 }
 
+type CardTemplate = { id: string; kind: BoardCardKind; label: string; title: string; body: string };
+const templateKey = "shakstory:planning-templates";
+function readTemplates(): CardTemplate[] {
+  try { const value: unknown = JSON.parse(localStorage.getItem(templateKey) ?? "[]"); return Array.isArray(value) ? value.filter((item): item is CardTemplate => Boolean(item && typeof item.id === "string" && typeof item.label === "string" && typeof item.title === "string" && typeof item.body === "string" && Object.hasOwn(cardLabels, item.kind))) : []; } catch { return []; }
+}
+
 export function PlanningBoards({ boards, onChange, onBack }: { boards: PlanningBoard[]; onChange: (boards: PlanningBoard[]) => void; onBack: () => void }) {
+  const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>(readTemplates);
+  const [templateName, setTemplateName] = useState("");
+  const [templateMessage, setTemplateMessage] = useState("");
   const [activeBoardId, setActiveBoardId] = useState(boards[0]?.id ?? "");
   const [newBoardTitle, setNewBoardTitle] = useState("");
   const [newColumnTitle, setNewColumnTitle] = useState("");
@@ -171,6 +181,14 @@ export function PlanningBoards({ boards, onChange, onBack }: { boards: PlanningB
     setEditingCardId(null);
   };
 
+  const saveTemplate = () => {
+    if (!templateName.trim() || !cardTitle.trim()) return;
+    const template = {id: uid("template"), kind: cardKind, label: templateName.trim(), title: cardTitle, body: cardBody};
+    const next = [...customTemplates, template];
+    if (!safeLocalSet(templateKey, JSON.stringify(next))) { setTemplateMessage("Não foi possível guardar o template neste dispositivo."); return; }
+    setCustomTemplates(next); setTemplateName(""); setTemplateMessage("Template salvo para reutilizar em outros livros neste dispositivo.");
+  };
+
   if (!activeBoard) {
     return <div className="animate-in fade-in-0 duration-300">
       <div className="flex items-start justify-between gap-4">
@@ -211,7 +229,7 @@ export function PlanningBoards({ boards, onChange, onBack }: { boards: PlanningB
         {activeBoard.columns.map((column, columnIndex) => {
           const cards = activeBoard.cards.filter(card => card.columnId === column.id).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || a.createdAt - b.createdAt);
           return <section key={column.id} className="rounded-2xl border border-border/70 bg-muted/25 p-3">
-            <div className="flex items-center justify-between px-1"><div><h2 className="text-sm font-semibold">{column.title}</h2><p className="mt-1 text-[10px] text-muted-foreground">{cards.length} card(s)</p></div><Badge variant="outline">{columnIndex + 1}</Badge></div>
+            <div className="flex items-center justify-between px-1"><div><Input aria-label={`Nome da coluna ${column.title}`} value={column.title} onChange={event => updateBoard(board => ({...board, columns: board.columns.map(item => item.id === column.id ? {...item, title: event.target.value} : item)}))} className="max-w-48 text-sm font-semibold" /><p className="mt-1 text-[10px] text-muted-foreground">{cards.length} card(s)</p></div><Badge variant="outline">{columnIndex + 1}</Badge></div>
             <div className="mt-3 space-y-3">
               {cards.map(card => <article key={card.id} className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-2">
@@ -240,7 +258,7 @@ export function PlanningBoards({ boards, onChange, onBack }: { boards: PlanningB
         <h2 className="mt-2 font-serif text-2xl">Comece com uma estrutura útil.</h2>
         <p className="mt-2 text-xs leading-5 text-muted-foreground">Templates só preenchem o formulário; você continua no controle do conteúdo.</p>
         <div className="mt-4 flex flex-wrap gap-2">{cardTemplates.map(template => <Button key={template.kind} variant="outline" size="sm" onClick={() => applyTemplate(template)}>{template.label}</Button>)}</div>
-        <div className="mt-6 border-t border-border/70 pt-4">
+        <div className="mt-4 flex flex-wrap gap-2">{customTemplates.map(template => <Button key={template.id} variant="outline" size="sm" onClick={() => applyTemplate(template)}>Usar template {template.label}</Button>)}</div><label className="mt-4 block text-xs font-medium">Nome do seu template<Input className="mt-2" aria-label="Nome do template" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Ex.: Ficha de personagem" /></label><Button className="mt-3" variant="outline" onClick={saveTemplate} disabled={!templateName.trim() || !cardTitle.trim()}>Salvar formulário como template</Button>{templateMessage && <p className="mt-2 text-xs" role="status">{templateMessage}</p>}<div className="mt-6 border-t border-border/70 pt-4">
           <p className="text-xs font-medium">Adicionar coluna ao board</p>
           <div className="mt-2 flex gap-2"><Input value={newColumnTitle} onChange={event => setNewColumnTitle(event.target.value)} placeholder="Ex.: Revisar depois" onKeyDown={event => event.key === "Enter" && addColumn()} /><Button variant="outline" onClick={addColumn} disabled={!newColumnTitle.trim()}><Plus className="mr-2 h-4 w-4" />Coluna</Button></div>
         </div>

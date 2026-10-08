@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Esta nota registra a avaliação inicial do repositório indicado pelo autor para uma etapa futura de proteção antivírus do Shakstory. A integração não foi ativada nesta etapa e nenhum arquivo de usuário foi enviado ao KicomAV.
+Esta nota preserva a pesquisa inicial e registra a implementação Node atual. O gateway, worker Python, sessões e auditoria já existem. A validação controlada usa somente fixtures; nenhum manuscrito real é enviado ao scanner. O runtime Cloudflare publicado não executa o worker Python.
 
 ## Constatações verificáveis
 
@@ -25,9 +25,16 @@ O arquivo só deve ser promovido ao armazenamento permanente depois de um result
 
 > O KicomAV oferece daemon HTTP e socket, mas a configuração documentada permite autenticação desativada por padrão. No Shakstory, essa configuração nunca deve ser aceita em uma exposição de produção.
 
-## Sequência de implementação
+## Estado de implementação e validação — 07/10/2026
 
-A próxima etapa deverá começar fixando a revisão auditada e construindo um adaptador de scanner com contrato próprio (`clean`, `infected`, `error`, `timeout`, `pending`). Em seguida, serão adicionados limites e quarentena, persistência apenas de metadados, observabilidade, autenticação server-side e testes controlados. A ativação em produção somente ocorrerá depois de validar dependências, licença, desempenho, falhas do serviço, recuperação e atualização de assinaturas.
+- Engine vendorizado v0.41/revisão `bad9493`, dependências fixadas em `requirements-kicomav.txt`.
+- Gateway por stdin/stdout com 8 MiB, timeout de 20 s e saída limitada. Timeout mantém seu estado próprio; reiniciar a próxima varredura é coberto por teste.
+- O subprocesso recebe apenas variáveis de runtime autorizadas; tokens GitHub/JWT não são herdados.
+- ZIP inspecionado em memória, sem extração de caminhos: até 128 entradas, 8 MiB expandidos totais, razão máxima 200:1, até três níveis. ZIP criptografado, inválido ou acima dos limites falha fechado.
+- Teste real local: conteúdo limpo aprovado, EICAR simples e em ZIP detectados; erro para ZIP inválido, expansão/entradas excessivas, vazio e tamanho excessivo. A revisão carregou 26 assinaturas; não representa atualização do catálogo de ameaças.
+- CI adiciona execução do mesmo teste no container sem rede, com filesystem somente leitura, temporários limitados e limite de memória/CPU. O resultado do job deve ser conferido antes de declarar o container validado.
+
+Continuam fora desta validação: atualização e abrangência de assinaturas, formatos compactados além de ZIP, benchmark de carga, banco/storage autenticados reais e ativação do scanner no Worker Cloudflare. O teste não comprova imunidade a arquivos maliciosos desconhecidos.
 
 ## Referências
 

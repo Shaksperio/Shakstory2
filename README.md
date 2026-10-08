@@ -39,6 +39,10 @@ O segundo anexo foi usado somente como referência para separação de camadas, 
 Defina a licença e o destino de hospedagem antes da publicação externa. O repositório GitHub recomendado é privado por padrão. Um ambiente novo deve ser capaz de clonar o repositório, configurar secrets, instalar dependências, validar os dados, iniciar o servidor e recuperar os documentos versionados sem depender do ambiente que originou o projeto.
 
 
-## Proteção antivírus planejada
+## Segurança de uploads
 
-A proteção de uploads baseada no [KicomAV](https://github.com/hanul93/kicomav) está planejada para uma etapa posterior. A decisão arquitetural é executar o scanner em worker/serviço isolado, com autenticação server-side, limites próprios de tamanho e tempo, quarentena separada e promoção para storage permanente somente após resultado limpo. O daemon não será exposto diretamente ao navegador ou à internet, e arquivos não verificados não serão servidos como se fossem seguros. A auditoria preliminar, a revisão de dependências/licença e os critérios de testes estão em [`docs/kicomav-integration-audit.md`](docs/kicomav-integration-audit.md). A proteção ainda não está ativa nesta versão.
+A integração inicial do KicomAV está implementada no backend Node: `server/antivirus.ts`, `scripts/kicomav_worker.py`, engine vendorizado, sessões/auditoria e dependências Python/YARA no Dockerfile. Só resultados `clean` permitem persistência; timeout, falha e conteúdo infectado são recusados. O processo recebe bytes por stdin e uma lista restrita de variáveis de ambiente, sem tokens da aplicação. ZIPs são inspecionados em memória com limites de expansão, entradas e recursão.
+
+O CI executa `scripts/kicomav_smoke.py` dentro do container, sem rede e com filesystem somente leitura (temporários em `/tmp`), usando EICAR inofensivo, ZIP e entradas inválidas. Isso valida a revisão incorporada, não uma atualização automática de assinaturas nem proteção universal.
+
+A produção atual usa Cloudflare Worker/D1 em https://shakstory.antonyopintor.workers.dev/ e fonte `Shaksperio/Shakstory2`, branch `turbo`. O Worker publicado não executa esse subprocesso Python. A detecção no container deve ser distinguida da proteção de uploads no runtime Cloudflare; R2, autenticação e integração de scanner nesse runtime continuam sujeitos a validação/configuração específicas. Ver [`docs/kicomav-integration-audit.md`](docs/kicomav-integration-audit.md).

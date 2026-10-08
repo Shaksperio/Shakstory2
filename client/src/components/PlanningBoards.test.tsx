@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import React, { useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { PlanningBoards, createPlanningBoard, type PlanningBoard } from "./PlanningBoards";
+
+afterEach(() => {cleanup(); localStorage.clear();});
 
 let currentBoards: PlanningBoard[] = [];
 
@@ -39,4 +41,21 @@ describe("PlanningBoards", () => {
     expect(currentBoards[0].cards[0].tags).toEqual(["protagonista", "NightGlen"]);
     expect(screen.getByText("Elia")).toBeTruthy();
   });
+});
+
+it("reuses a custom template in a fresh book without copying card IDs", () => {
+  const first = render(<Harness />);
+  fireEvent.click(screen.getByRole("button", {name: /Criar board/i}));
+  fireEvent.change(screen.getByPlaceholderText("Título do card"), {target: {value: "Desejo e consequência"}});
+  fireEvent.change(screen.getByPlaceholderText("Notas, pesquisa, perguntas ou estrutura..."), {target: {value: "Desejo:\nConsequência:"}});
+  fireEvent.change(screen.getByLabelText("Nome do template"), {target: {value: "Arco pessoal"}});
+  fireEvent.click(screen.getByRole("button", {name: "Salvar formulário como template"}));
+  first.unmount();
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", {name: /Criar board/i}));
+  fireEvent.click(screen.getByRole("button", {name: "Usar template Arco pessoal"}));
+  expect((screen.getByPlaceholderText("Título do card") as HTMLInputElement).value).toBe("Desejo e consequência");
+  expect(currentBoards[0].cards).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", {name: /Adicionar card/i}));
+  expect(currentBoards[0].cards[0].body).toBe("Desejo:\nConsequência:");
 });
