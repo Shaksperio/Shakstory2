@@ -78,6 +78,9 @@ export function ManuscriptNavigator({
         </button>
         {!collapsed[side] && (
           <div className="manuscript-group-content">
+            {values.length === 0 && (
+              <p className="matter-empty">Nenhuma seção ainda.</p>
+            )}
             {values.map((s, index) => (
               <div
                 key={s.id}
