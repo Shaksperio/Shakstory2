@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Upload } from "lucide-react";
 import { sanitizeRichContent } from "@shared/rich-text";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -609,21 +610,36 @@ export function ManuscriptImport({
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const fileInput = React.useRef<HTMLInputElement>(null);
   return (
-    <details className="mb-4 rounded-xl border bg-card p-4">
-      <summary className="cursor-pointer font-semibold">
-        Importar manuscrito DOCX ou ODT
-      </summary>
-      <p className="my-2 text-sm">
-        Até 25 MB. Confira capítulos, imagens e avisos antes de criar o livro.
-      </p>
+    <section className="mb-6 rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="font-serif text-xl">Já tem um manuscrito?</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Envie um arquivo DOCX ou ODT de até 25 MB. Você confere capítulos, imagens e avisos antes de criar o livro.
+          </p>
+        </div>
+        <Button
+          type="button"
+          className="shrink-0 rounded-xl"
+          disabled={busy}
+          onClick={() => fileInput.current?.click()}
+        >
+          <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+          Enviar manuscrito
+        </Button>
+      </div>
       <input
+        ref={fileInput}
+        className="hidden"
         aria-label="Arquivo do manuscrito"
         type="file"
         accept=".docx,.odt"
         disabled={busy}
         onChange={async e => {
           const file = e.target.files?.[0];
+          e.target.value = "";
           if (!file) return;
           setBusy(true);
           setError("");
@@ -684,6 +700,6 @@ export function ManuscriptImport({
           </Button>
         </div>
       )}
-    </details>
+    </section>
   );
 }
