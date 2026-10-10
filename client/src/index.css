@@ -337,3 +337,8 @@ h1, h2, h3, .font-serif { font-feature-settings: "ss01"; letter-spacing: -0.01em
 .editor-page h1 { text-align: center; }
 .editor-page { background: var(--background) !important; }
 .editor-page [data-editorial-page] { font-size: 1.125rem; }
+.editor-page [data-editorial-page] { background: transparent !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; min-height: 60vh; }
+.editor-page { padding-top: 1.5rem !important; }
+.manuscript-add { padding-left: .25rem; }
+@media (max-width: 1023px) { .manuscript-add { padding-left: .85rem; } .editorial-sidebar { max-height: none; } }
+@media (min-width: 1024px) { .editorial-sidebar { min-height: 100vh; } }
