@@ -15,6 +15,6 @@ let upstream=await fetchAsset(assetPath);
 if(upstream.status===404&&!immutable){assetPath='/index.html';upstream=await fetchAsset(assetPath)}
 if(!upstream.ok)return new Response('Leitor do Shakstory indisponivel',{status:502});
 const ext=(assetPath.split('.').pop()||'').toLowerCase();
-const types={html:'text/html; charset=utf-8',js:'application/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',ico:'image/x-icon',woff:'font/woff',woff2:'font/woff2'};
+const types={html:'text/html; charset=utf-8',js:'application/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',webmanifest:'application/manifest+json; charset=utf-8',svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',ico:'image/x-icon',woff:'font/woff',woff2:'font/woff2'};
 const h=new Headers();h.set('content-type',types[ext]||'application/octet-stream');h.set('cache-control',immutable?'public,max-age=31536000,immutable':'no-cache');h.set('x-content-type-options','nosniff');h.set('x-robots-tag','noindex, nofollow');
 return new Response(upstream.body,{status:upstream.status,headers:h})}}

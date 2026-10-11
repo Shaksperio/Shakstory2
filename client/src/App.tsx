@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
 import { LoadRecovery } from "./components/LoadRecovery";
+import { PwaPrompts } from "./components/PwaPrompts";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -38,6 +39,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <LoadRecovery />
+          <PwaPrompts />
           <Router />
         </TooltipProvider>
       </ThemeProvider>
