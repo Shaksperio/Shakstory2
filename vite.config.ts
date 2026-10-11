@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
+import { buildServiceWorker, precacheFromFiles, versionFor } from "./shared/pwa-sw";
 
 // =============================================================================
 // Manus Debug Collector - Vite Plugin
@@ -149,7 +150,33 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusDebugCollector()];
+// Gera dist/public/sw.js depois do build, com a lista de arquivos (com hash) para o pré-cache.
+function vitePluginShakstoryServiceWorker(): Plugin {
+  let outDir = "";
+  return {
+    name: "shakstory-service-worker",
+    apply: "build",
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      if (!outDir || !fs.existsSync(outDir)) return;
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else files.push(path.relative(outDir, full));
+        }
+      };
+      walk(outDir);
+      const precache = precacheFromFiles(files);
+      fs.writeFileSync(path.join(outDir, "sw.js"), buildServiceWorker({ version: versionFor(precache), precache }), "utf-8");
+    },
+  };
+}
+
+const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusDebugCollector(), vitePluginShakstoryServiceWorker()];
 
 export default defineConfig({
   plugins,
