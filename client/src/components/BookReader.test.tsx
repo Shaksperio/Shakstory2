@@ -2,7 +2,7 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BookPreview } from "./BookPreview";
+import { BookReader } from "./BookReader";
 
 const book = {
   title: "Livro Teste",
@@ -16,10 +16,10 @@ const book = {
 
 afterEach(cleanup);
 
-describe("BookPreview", () => {
+describe("BookReader", () => {
   it("abre no capítulo atual e permite navegar, trocar tema e fonte", () => {
     const onClose = vi.fn();
-    render(<BookPreview book={book} activeId="b" onClose={onClose} />);
+    render(<BookReader book={book} activeId="b" onClose={onClose} />);
     const nav = screen.getByRole("navigation", { name: "Capítulos da pré-visualização" });
     expect(nav.querySelector('[aria-current="true"]')?.textContent).toBe("Segundo");
     const doc = () => screen.getByTitle("Livro pré-visualizado").getAttribute("srcdoc") ?? "";
