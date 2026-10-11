@@ -1,3 +1,4 @@
+import { openShakstoryDb } from "@/lib/sync/kv";
 // IndexedDB keeps image-bearing manuscripts outside localStorage's small quota.
 export function safeLocalSet(key: string, value: string) {
   try {
@@ -7,18 +8,7 @@ export function safeLocalSet(key: string, value: string) {
     return false;
   }
 }
-function database(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("Armazenamento local indisponível"));
-      return;
-    }
-    const request = indexedDB.open("shakstory-editorial", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("backups");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
+const database = openShakstoryDb;
 export async function saveLibraryBackup(value: unknown) {
   const db = await database();
   try {
