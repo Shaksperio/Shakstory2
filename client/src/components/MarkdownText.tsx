@@ -7,8 +7,10 @@ export function InlineMarkdown({ text }: { text: string }) {
   const nodes: React.ReactNode[] = [];
   let last = 0;
   let index = 0;
-  for (const match of text.matchAll(INLINE)) {
-    const start = match.index ?? 0;
+  const pattern = new RegExp(INLINE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const start = match.index;
     if (start > last) nodes.push(text.slice(last, start));
     const token = match[0];
     const key = `m${index++}`;
@@ -29,7 +31,7 @@ type Block =
 
 const parse = (source: string): Block[] => {
   const blocks: Block[] = [];
-  let current: Block | null = null;
+  let current = null as Block | null;
   const flush = () => {
     if (current) blocks.push(current);
     current = null;
@@ -67,7 +69,8 @@ export function MarkdownText({ text, className = "" }: { text: string; className
         if (block.type === "hr") return <hr key={index} />;
         if (block.type === "ul") return <ul key={index}>{block.items.map((item, i) => <li key={i}><InlineMarkdown text={item} /></li>)}</ul>;
         if (block.type === "ol") return <ol key={index}>{block.items.map((item, i) => <li key={i}><InlineMarkdown text={item} /></li>)}</ol>;
-        return <p key={index}>{block.lines.map((line, i) => <React.Fragment key={i}>{i > 0 && <br />}<InlineMarkdown text={line} /></React.Fragment>)}</p>;
+        if (block.type !== "p") return null;
+        return <p key={index}>{block.lines.map((line: string, i: number) => <React.Fragment key={i}>{i > 0 && <br />}<InlineMarkdown text={line} /></React.Fragment>)}</p>;
       })}
     </div>
   );
