@@ -16,6 +16,7 @@ import {
   Trash2,
   X,
   ClipboardCheck,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +36,7 @@ export type AccountBook = {
 
 export type Profile = { name: string; photo: string };
 export type ExportFormat = "pdf" | "epub" | "docx" | "txt" | "html";
-export type EditorAction = "find" | "spell" | "split" | "delete" | "review";
+export type EditorAction = "find" | "spell" | "split" | "delete" | "review" | "preview";
 
 const PROFILE_KEY = "shakstory:profile";
 const PREFS_KEY = "shakstory:writing-preferences";
@@ -206,6 +207,7 @@ export function EditorMenu({
               {screen === "menu" && (
                 <>
                   {item("Metas e estatísticas", Target, run(onProject), !hasBook)}
+                  {item("Pré-visualizar livro", Eye, run(() => onEditorAction("preview")), !hasBook)}
                   {item("Revisão e controle de alterações", ClipboardCheck, run(() => onEditorAction("review")), !hasBook)}
                   {item("Localizar e substituir", Search, run(() => onEditorAction("find")), !hasBook)}
                   {item("Revisão ortográfica", SpellCheck, run(() => onEditorAction("spell")), !hasBook)}

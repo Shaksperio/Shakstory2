@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { buildPrintHtml, TYPOGRAPHY_PRESETS, type ExportBook, type TypographyPreset } from "@shared/book-export";
 
 type Scope = "chapter" | "book";
@@ -45,7 +44,7 @@ const readerCss = (prefs: Prefs, scope: Scope, activeIndex: number) => {
     `.toc a,h1,h2,p{color:${ink}!important}header,footer{display:none!important}${only}`;
 };
 
-export function BookPreview({ book, activeId, onClose }: { book: ExportBook; activeId: string | null; onClose: () => void }) {
+export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-visualização", extra }: { book: ExportBook; activeId: string | null; onClose?: () => void; closeLabel?: string; extra?: React.ReactNode }) {
   const chapters = book.chapters;
   const startIndex = Math.max(0, chapters.findIndex(chapter => chapter.id === activeId));
   const [index, setIndex] = useState(startIndex);
@@ -56,11 +55,10 @@ export function BookPreview({ book, activeId, onClose }: { book: ExportBook; act
   const update = (patch: Partial<Prefs>) => setPrefs(current => { const next = { ...current, ...patch }; savePrefs(next); return next; });
 
   useEffect(() => {
+    if (!onClose) return;
     const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", handler); document.body.style.overflow = previous; };
+    return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
   const html = useMemo(() => {
@@ -104,8 +102,8 @@ export function BookPreview({ book, activeId, onClose }: { book: ExportBook; act
   const btn = `inline-flex h-9 min-w-9 items-center justify-center rounded-md border px-2.5 text-sm ${night ? "border-[#34312a] hover:bg-[#24221d]" : "border-[#d8d3c8] hover:bg-[#ebe8e0]"}`;
   const active = night ? "bg-[#2c2a24]" : "bg-[#e9e5da]";
 
-  return createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Pré-visualização do livro" className={`fixed inset-0 z-[70] flex flex-col ${shell}`}>
+  return (
+    <div role="main" aria-label="Pré-visualização do livro" className={`fixed inset-0 z-[70] flex flex-col ${shell}`}>
       <div className={`flex flex-wrap items-center gap-2 border-b px-3 py-2 ${panel}`}>
         <button type="button" className={`${btn} lg:hidden`} aria-expanded={navOpen} onClick={() => setNavOpen(open => !open)}>Capítulos</button>
         <strong className="mr-auto min-w-0 truncate text-sm">Pré-visualização · {book.title}</strong>
@@ -122,7 +120,8 @@ export function BookPreview({ book, activeId, onClose }: { book: ExportBook; act
           {(Object.keys(TYPOGRAPHY_PRESETS) as TypographyPreset[]).map(key => <option key={key} value={key}>{TYPOGRAPHY_PRESETS[key].label}</option>)}
         </select>
         <button type="button" className={btn} aria-pressed={night} onClick={() => update({ theme: night ? "day" : "night" })}>{night ? "Modo dia" : "Modo noite"}</button>
-        <button type="button" className={btn} aria-label="Fechar pré-visualização" onClick={onClose}>✕</button>
+        {extra}
+        {onClose && <button type="button" className={btn} aria-label={closeLabel} onClick={onClose}>✕</button>}
       </div>
       <div className="relative flex min-h-0 flex-1">
         {navOpen && <button type="button" aria-label="Fechar capítulos" className="absolute inset-0 z-10 bg-black/45 lg:hidden" onClick={() => setNavOpen(false)} />}
@@ -144,7 +143,6 @@ export function BookPreview({ book, activeId, onClose }: { book: ExportBook; act
           )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }

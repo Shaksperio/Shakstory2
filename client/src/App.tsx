@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import EditorialPreview from "./pages/EditorialPreview";
+import ReaderPage from "./pages/ReaderPage";
 import { LoadRecovery } from "./components/LoadRecovery";
 
 function Router() {
@@ -13,6 +14,7 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/ler/:token"} component={ReaderPage} />
       <Route path={"/preview/editorial"} component={EditorialPreview} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
