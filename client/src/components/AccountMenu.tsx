@@ -304,6 +304,7 @@ export function AccountView({
   syncLabel,
   statusLabel,
   onProfile,
+  onClose,
   onOpen,
 }: {
   books: AccountBook[];
@@ -314,17 +315,25 @@ export function AccountView({
   syncLabel: string;
   statusLabel: (status?: string) => string;
   onProfile: (patch: Partial<Profile>) => void;
+  onClose: () => void;
   onOpen: (book: AccountBook) => void;
 }) {
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const active = books.filter(book => !book.archived);
   const totalWords = active.reduce((sum, book) => sum + wordsOf(book), 0);
   const completed = active.filter(book => book.status === "completed").length;
   const sorted = [...active].sort((left, right) => (right.lastOpenedAt ?? right.updatedAt) - (left.lastOpenedAt ?? left.updatedAt));
   return (
     <div className="account-view animate-in fade-in-0 duration-300">
-      <section className="account-card">
+      <section className="account-card relative"><button type="button" className="sk-sheet-close absolute right-3 top-3" aria-label="Fechar minha conta" onClick={onClose}><X className="h-5 w-5" aria-hidden="true" /></button>
         <div className="account-photo">
           <Avatar name={displayName} photo={profile.photo} size={96} />
           <button type="button" className="account-photo-btn" aria-label="Alterar foto" onClick={() => fileInput.current?.click()}>
