@@ -1,6 +1,7 @@
+// @vitest-environment jsdom
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BookPreview } from "./BookPreview";
 
 const book = {
@@ -12,6 +13,8 @@ const book = {
     { id: "b", title: "Segundo", kind: "chapter", content: "Texto dois." },
   ],
 };
+
+afterEach(cleanup);
 
 describe("BookPreview", () => {
   it("abre no capítulo atual e permite navegar, trocar tema e fonte", () => {
