@@ -8,6 +8,10 @@ import { selectionTextOffset } from "@shared/rich-structure";
 import { EditorialWorkbench, ManuscriptImport, WritingPreferences } from "./EditorialWorkbench";
 import { mergeTrackedRevision, publicationSections, type CopyrightData, type ReviewData } from "@shared/editorial-workflow";
 import { safeLocalSet, saveLibraryBackup, readLibraryBackup } from "@/lib/library-backup";
+import { cloudflareTransport } from "@/lib/trpc";
+import { IdbKV } from "@/lib/sync/kv";
+import { rememberSynced, syncLibrary } from "@/lib/sync/engine";
+import type { LibraryLike } from "@/lib/sync/merge";
 import { prepareExportAssets } from "@/lib/export-assets";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +136,11 @@ export default function WriterStudio() {
   const [draftHtml, setDraftHtml] = useState("");
   const [localOnly, setLocalOnly] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [manualOffline, setManualOffline] = useState(() => { try { return localStorage.getItem("shakstory:manual-offline") === "1"; } catch { return false; } });
+  const manualOfflineRef = useRef(manualOffline);
+  manualOfflineRef.current = manualOffline;
+  const syncKv = useRef<IdbKV | null>(null);
+  const kv = () => (syncKv.current ??= new IdbKV());
   const [query, setQuery] = useState("");
   const [newBookOpen, setNewBookOpen] = useState(false);
   const [newBookTitle, setNewBookTitle] = useState("");
@@ -182,6 +191,7 @@ export default function WriterStudio() {
       setLibrary(identified);
       setSha(libraryQuery.data.sha);
       saveQueue.current.sha=libraryQuery.data.sha;saveQueue.current.blocked=false;
+      void rememberSynced(kv(), remote as unknown as LibraryLike, libraryQuery.data.sha).catch(()=>{});
       const savedBookId = localStorage.getItem("shakstory:active-book");
       const savedNodeId = localStorage.getItem("shakstory:active-node");
       if (savedBookId && restored.books.some(book => book.id === savedBookId)) { setActiveBookId(savedBookId); const restoredBook = restored.books.find(book => book.id === savedBookId); setActiveNodeId(restoredBook?.nodes.some(node => node.id === savedNodeId) ? savedNodeId : restoredBook?.nodes[0]?.id ?? null); if (!restoredWorkspace.current) { setView(savedNodeId && restoredBook?.nodes.some(node => node.id === savedNodeId) ? "editor" : "project"); restoredWorkspace.current = true; } }
@@ -231,13 +241,31 @@ export default function WriterStudio() {
     },
     onError: error => {
       saveQueue.current.busy=false;saveQueue.current.pending??=saveQueue.current.inflight;saveQueue.current.inflight=undefined;
-      if (error.data?.code === "CONFLICT") {saveQueue.current.blocked=true;setConflict(true);}
+      if (error.data?.code === "CONFLICT") { void resolveConflict(); }
       else setLocalOnly(true);
     },
   });
 
+  const resolveConflict = async () => {
+    const queue = saveQueue.current;
+    const local = queue.pending ?? queue.inflight ?? library;
+    queue.busy = true; queue.pending = undefined;
+    try {
+      const result = await syncLibrary({ kv: kv(), transport: cloudflareTransport, local: local as unknown as LibraryLike });
+      const merged = result.doc as unknown as LibraryDocument;
+      queue.sha = result.sha; setSha(result.sha); queue.blocked = false;
+      safeLocalSet("shakstory:library", JSON.stringify(merged));
+      void saveLibraryBackup(merged).catch(() => {});
+      setLibrary(merged); setConflict(false); setLocalOnly(false);
+      setNotice(result.report.conflictCopies ? "Alterações de outro aparelho foram mescladas. Trechos em conflito ficaram como “cópia local”." : "Alterações de outro aparelho foram mescladas");
+      window.setTimeout(() => setNotice(null), 4000);
+      void utils.data.status.invalidate();
+    } catch {
+      queue.pending = local; setLocalOnly(true);
+    } finally { queue.busy = false; }
+  };
   const flushSave = () => {
-    const queue=saveQueue.current;if(queue.busy||queue.blocked||!queue.pending||!navigator.onLine)return;
+    const queue=saveQueue.current;if(queue.busy||queue.blocked||!queue.pending||!navigator.onLine||manualOfflineRef.current)return;
     const next=queue.pending;queue.pending=undefined;queue.inflight=next;queue.busy=true;
     saveMutation.mutate({path:"library.json",data:next as unknown as Record<string,unknown>,expectedSha:queue.sha??sha});
   };
@@ -247,10 +275,18 @@ export default function WriterStudio() {
     void saveLibraryBackup(persistedLibrary).catch(()=>{if(!navigator.onLine)setNotice("Não foi possível guardar a cópia offline. Mantenha esta página aberta até sincronizar.");});
     setLibrary(persistedLibrary);
     saveQueue.current.pending=persistedLibrary;
-    if (!navigator.onLine) { setLocalOnly(true); return; }
+    if (!navigator.onLine || manualOfflineRef.current) { setLocalOnly(true); return; }
     flushSave();
   };
 
+  const toggleManualOffline = () => {
+    const next = !manualOfflineRef.current;
+    manualOfflineRef.current = next; setManualOffline(next);
+    try { localStorage.setItem("shakstory:manual-offline", next ? "1" : "0"); } catch { /* sem armazenamento */ }
+    if (next) { setLocalOnly(true); setNotice("Modo offline: suas alterações ficam neste aparelho até você voltar ao modo online."); }
+    else { setLocalOnly(false); flushSave(); setNotice("De volta ao modo online"); }
+    window.setTimeout(() => setNotice(null), 3500);
+  };
   useEffect(()=>{const resume=()=>flushSave();window.addEventListener("online",resume);return()=>window.removeEventListener("online",resume);},[]);
   const skipTracking = useRef(false);
   const materializeDraft = (book: Book): Book => {
@@ -505,7 +541,7 @@ export default function WriterStudio() {
     setView(nextView);
   };
 
-  const syncLabel = statusQuery.data?.status === "syncing" || saveMutation.isPending ? "Sincronizando" : localOnly ? "Somente local" : statusQuery.data?.status === "conflict" || conflict ? "Conflito" : statusQuery.data?.status === "synced" ? "Sincronizado" : "Pronto para salvar";
+  const syncLabel = statusQuery.data?.status === "syncing" || saveMutation.isPending ? "Sincronizando" : manualOffline ? "Offline (escolhido)" : localOnly ? "Somente local" : statusQuery.data?.status === "conflict" || conflict ? "Conflito" : statusQuery.data?.status === "synced" ? "Sincronizado" : "Pronto para salvar";
 
   const runEditorAction = (action: EditorAction) => {
     if (action === "review") {
@@ -527,7 +563,7 @@ export default function WriterStudio() {
 
   return <div className="sk-app min-h-screen bg-background text-foreground">
     <aside className="sk-sidebar"><div className="sk-brand"><div className="sk-brand-mark"><BookOpen className="h-4 w-4" aria-hidden="true" /></div><div><p className="font-serif text-xl leading-none">Shakstory</p><p className="mt-1 text-[10px] uppercase tracking-[0.18em] opacity-60">Estúdio do autor</p></div></div>{activeBook && view !== "library" && <div className="sk-bookcard"><BookCover book={activeBook} className="sk-cover-mini" /><div className="min-w-0 flex-1"><p className="truncate font-serif text-sm">{activeBook.title}</p><p className="mt-0.5 text-[11px] opacity-60">{formatNumber(wordsOf(activeBook))} palavras · {statusLabel(activeBook.status)}</p><div className="sk-bookcard-bar"><span style={{ width: `${Math.min(100, Math.round(wordsOf(activeBook) / Math.max(1, activeBook.targetWordCount) * 100))}%` }} /></div></div></div>}<nav aria-label="Navegação principal" className="sk-nav"><RailButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => setView("library")} /><span className="sk-nav-label">Seu livro</span><RailButton active={view === "project"} icon={Target} label="Projeto" onClick={() => navigate("project")} /><RailButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => navigate("editor")} /><RailButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => navigate("planning")} /><RailButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => navigate("prepare")} /><span className="sk-nav-label">Proteção</span><RailButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => navigate("security")} /></nav></aside>
-    <div className="sk-main"><header className="sk-topbar sticky top-0 z-10 border-b border-border/70 bg-background/85 backdrop-blur"><div className="flex items-center gap-3 px-4 py-3 sm:px-6"><Button className="lg:hidden" variant="ghost" size="icon" aria-label="Abrir menu de navegação" onClick={() => setMenuOpen(current => !current)}><Menu className="h-4 w-4" /></Button><div className="flex items-center gap-2 lg:hidden"><div className="sk-brand-mark sk-brand-mark-sm"><BookOpen className="h-3.5 w-3.5" aria-hidden="true" /></div><span className="hidden font-serif text-lg leading-none min-[430px]:inline">Shakstory</span></div><div aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex"><span>Biblioteca</span>{view !== "library" && <><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /><span className="truncate font-medium text-foreground">{viewLabels[view]}</span></>}</div><div className="ml-auto flex items-center gap-2"><span className={`hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-xs sm:inline-flex ${localOnly || conflict ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary"}`}><SyncIcon localOnly={localOnly} conflict={conflict} />{syncLabel}</span><Button className="hidden md:inline-flex" variant="ghost" size="sm" onClick={() => toggleTheme?.()} aria-label="Alternar tema">{theme === "dark" ? "Tema clássico" : "Tema escuro"}</Button><Button variant="ghost" size="icon" aria-label="Buscar" onClick={() => { if (view !== "library") setView("library"); window.setTimeout(() => document.getElementById("library-search")?.focus(), 80); }}><Search className="h-4 w-4" /></Button>{accountControls}</div></div></header>
+    <div className="sk-main"><header className="sk-topbar sticky top-0 z-10 border-b border-border/70 bg-background/85 backdrop-blur"><div className="flex items-center gap-3 px-4 py-3 sm:px-6"><Button className="lg:hidden" variant="ghost" size="icon" aria-label="Abrir menu de navegação" onClick={() => setMenuOpen(current => !current)}><Menu className="h-4 w-4" /></Button><div className="flex items-center gap-2 lg:hidden"><div className="sk-brand-mark sk-brand-mark-sm"><BookOpen className="h-3.5 w-3.5" aria-hidden="true" /></div><span className="hidden font-serif text-lg leading-none min-[430px]:inline">Shakstory</span></div><div aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex"><span>Biblioteca</span>{view !== "library" && <><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /><span className="truncate font-medium text-foreground">{viewLabels[view]}</span></>}</div><div className="ml-auto flex items-center gap-2"><span className={`hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-xs sm:inline-flex ${localOnly || conflict ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary"}`}><SyncIcon localOnly={localOnly} conflict={conflict} />{syncLabel}</span><Button variant="ghost" size="sm" className="hidden sm:inline-flex" onClick={toggleManualOffline} aria-pressed={manualOffline}>{manualOffline ? "Voltar online" : "Trabalhar offline"}</Button><Button className="hidden md:inline-flex" variant="ghost" size="sm" onClick={() => toggleTheme?.()} aria-label="Alternar tema">{theme === "dark" ? "Tema clássico" : "Tema escuro"}</Button><Button variant="ghost" size="icon" aria-label="Buscar" onClick={() => { if (view !== "library") setView("library"); window.setTimeout(() => document.getElementById("library-search")?.focus(), 80); }}><Search className="h-4 w-4" /></Button>{accountControls}</div></div></header>
     {menuOpen && <div className="fixed inset-0 z-20 bg-black/10" onClick={() => setMenuOpen(false)}><aside className="absolute left-3 top-16 w-64 rounded-2xl border border-border bg-card p-3 shadow-xl" role="dialog" aria-label="Menu de navegação" onClick={event => event.stopPropagation()}><div className="mb-2 flex items-center justify-between px-2"><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">Navegação</p><Button variant="ghost" size="icon" aria-label="Fechar menu" onClick={() => setMenuOpen(false)}><X className="h-4 w-4" /></Button></div><div className="grid gap-1"><NavButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => { setView("library"); setMenuOpen(false); }} /><NavButton active={view === "project"} icon={Target} label="Projeto" onClick={() => { navigate("project"); setMenuOpen(false); }} /><NavButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => { navigate("editor"); setMenuOpen(false); }} /><NavButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => { navigate("planning"); setMenuOpen(false); }} /><NavButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => { navigate("prepare"); setMenuOpen(false); }} /><NavButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => { setView("security"); setMenuOpen(false); }} /></div></aside></div>}
     {conflict && <div className="border-b border-amber-500/25 bg-amber-500/10"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-2.5 text-sm text-amber-900 dark:text-amber-100"><span>Outra sessão alterou o documento antes deste salvamento. Recarregue antes de substituir o conteúdo.</span><Button size="sm" variant="outline" onClick={() => { setConflict(false); void libraryQuery.refetch(); }}>Recarregar</Button></div></div>}
     <main className="shakstory-workspace mx-auto max-w-6xl px-4 pb-28 pt-8 sm:px-6 sm:pt-10 lg:pb-14"><WritingPreferences hidden/>{view === "library" && <ManuscriptImport onImport={(title, preview) => { const now=Date.now(); const book=hydrateSemanticBook({id:stableId("book"),title,status:"draft",targetWordCount:50000,updatedAt:now,nodes:preview.chapters.map((chapter,index)=>({id:stableId("chapter"),title:chapter.title||`Capítulo ${index+1}`,kind:"chapter",content:chapter.content,richContent:sanitizeRichContent(chapter.richContent),updatedAt:now}))}); const next={...library,books:[book,...library.books]};setLibrary(next);saveLibrary(next); }} />}{(view === "editor" || view === "prepare") && activeBook && <EditorialWorkbench key={view} initiallyOpen={view==="prepare"} initialTab={view==="prepare"?"copyright":"review"} publication={{...(activeBook.publication ?? {author:"",genre:"",language:"pt-BR",description:""}),bookId:activeBook.id}} review={activeBook.review} node={activeNode} nodes={activeBook.nodes} onSelect={selectManuscriptNode} text={draft} html={draftHtml} onPublication={publication=>updateBook({publication:{...activeBook.publication,...publication} as PublicationData})} onReview={review=>updateBook({review})} onRestore={(text,html)=>{skipTracking.current=draft!==text || draftHtml!==html;updateDraft(text,html);}} />}{view === "library" && <LibraryView books={filteredBooks} totalWords={totalWords} query={query} onQuery={setQuery} onOpen={chooseBook} onNew={() => setNewBookOpen(true)} onEdit={book => { setActiveBookId(book.id); setBookDialog("edit"); }} onReset={book => { setActiveBookId(book.id); setBookDialog("reset"); }} onDelete={book => { setActiveBookId(book.id); setBookDialog("delete"); }} onExport={quickExport} />}{view === "project" && activeBook && <ProjectView book={materializeDraft(activeBook)} onNavigate={navigate} onUpdate={updateBook} />}{view === "editor" && activeBook && <EditorView book={activeBook} nodes={activeBook.nodes} activeNode={activeNode} draft={draft} richContent={draftHtml} onDraftChange={updateDraft} onRichDraftChange={(value, html) => updateDraft(value, html)} onSelectNode={selectManuscriptNode} onBack={() => setView("library")} onSave={() => updateBook({})} onUpdateBook={updateBook} onOpenPlanning={() => navigate("planning")} onOpenPrepare={() => navigate("prepare")} onAddChapter={() => updateNodeList(nodes => addChapter(nodes, Date.now()))} onAddPart={() => updateNodeList(nodes => addPart(nodes, Date.now()))} onRenameNode={(id, title) => updateNodeList(nodes => renameNode(nodes, id, title, Date.now()))} onDuplicateNode={id => updateNodeList(nodes => duplicateNode(nodes, id, Date.now()))} onMoveNode={(id, direction) => updateNodeList(nodes => moveNode(nodes, id, direction))} onRemoveNode={id => updateNodeList(nodes => removeNode(nodes, id))} onSplitNode={splitActiveNode} onMergeNode={mergeActiveNode} onPromotePlannedScene={scene => updateNodeList(nodes => nodes.some(node => node.id === scene.id) ? nodes : [...nodes, { id: scene.id, title: scene.title, kind: "scene", content: "", updatedAt: Date.now() }])} saving={saveMutation.isPending} notice={notice} assistant={{ focus: assistFocus, setFocus: setAssistFocus, result: assistResult, models: modelQuery.data?.models ?? [], isLoading: literaryMutation.isPending, error: literaryMutation.error?.message ?? null, onAnalyze: () => { if (activeNode && draft.trim()) literaryMutation.mutate({ text: draft, focus: assistFocus, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, role: assistFocus === "narrative" ? "developmental_editor" : assistFocus === "grammar" || assistFocus === "language" || assistFocus === "parts_of_speech" ? "copy_editor" : "line_editor", task: "analyze", bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onApply: (start, end, original, suggestion) => { if (!original || !suggestion || draft.slice(start, end) !== original) return; updateDraft(applySuggestionAtOffsets(draft, start, end, original, suggestion)); }, coauthorResult, coauthorLoading: coauthorMutation.isPending, coauthorError: coauthorMutation.error?.message ?? null, coauthorExpansion, coauthorExpansionLoading: expandCoauthorMutation.isPending, coauthorExpansionError: expandCoauthorMutation.error?.message ?? null, onGenerate: options => { if (!activeNode) return; setCoauthorExpansion(null); coauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, intent: options.intent, targetWords: 180, alternativeCount: 3, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onChoose: (alternative, intent) => { if (!activeNode) return; setCoauthorExpansion(null); expandCoauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, selectedAlternative: alternative, intent, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) }); }, onApplyExpansion: applyCoauthorExpansion, onBackToSamples: () => setCoauthorExpansion(null), onReject: () => { setCoauthorResult(null); setCoauthorExpansion(null); }, canUndoCoauthor: Boolean(activeNode && coauthorUndo?.nodeId === activeNode.id), onUndoCoauthor: undoCoauthorApplication }} continuity={{ result: continuityResult, loading: continuityMutation.isPending, error: continuityMutation.error?.message ?? null, onCheck: () => { if (!activeNode) return; continuityMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story }); }, onClear: () => setContinuityResult(null) }} />}{view === "planning" && activeBook && <PlanningView book={activeBook} onUpdate={updatePlanning} />}{view === "prepare" && activeBook && <PreparationView book={activeBook} onUpdate={updateBook} />}{view === "security" && <AntivirusSecurityView />}</main></div>

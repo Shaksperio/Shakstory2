@@ -226,6 +226,18 @@ const writeDocument = async (input: PutInput): Promise<PutResult> =>
     body: JSON.stringify(input),
   });
 
+export const cloudflareTransport = {
+  async read(path: string) {
+    const result = await readDocument(path);
+    return { data: result.data, sha: result.sha };
+  },
+  async write(input: PutInput) {
+    const result = await writeDocument(input);
+    if (!result || typeof result.sha !== "string") throw new CloudflareApiError("Resposta inválida do servidor");
+    return { sha: result.sha };
+  },
+};
+
 const getStatus = async (): Promise<StatusResult> => {
   const health = await json<{ ok: boolean; db: boolean; version?: string }>("/health");
   const status: SyncStatus = health.ok && health.db ? "synced" : "error";
