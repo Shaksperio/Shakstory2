@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Camera,
   ChevronRight,
@@ -189,7 +190,7 @@ export function EditorMenu({
       <button type="button" className="sk-more-btn" aria-label="Abrir menu do editor" title="Menu do editor" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
         <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
       </button>
-      {open && (
+      {open && createPortal(
         <div className="sk-sheet-scrim" onClick={close}>
           <div role="dialog" aria-modal="true" aria-label="Menu do editor" className="sk-sheet" onClick={event => event.stopPropagation()}>
             <div className="sk-sheet-head">
@@ -264,7 +265,8 @@ export function EditorMenu({
             </div>
             <div className="sk-sheet-foot">Shakstory · estúdio do autor</div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
