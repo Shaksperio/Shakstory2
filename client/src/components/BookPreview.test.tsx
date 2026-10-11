@@ -18,14 +18,14 @@ describe("BookPreview", () => {
     render(<BookPreview book={book} activeId="b" onClose={onClose} />);
     const nav = screen.getByRole("navigation", { name: "Capítulos da pré-visualização" });
     expect(nav.querySelector('[aria-current="true"]')?.textContent).toBe("Segundo");
-    const frame = screen.getByTitle("Livro pré-visualizado") as HTMLIFrameElement;
-    expect(frame.srcdoc).toContain("#chapter-2{display:block");
+    const doc = () => screen.getByTitle("Livro pré-visualizado").getAttribute("srcdoc") ?? "";
+    expect(doc()).toContain("#chapter-2{display:block");
     fireEvent.click(screen.getByRole("button", { name: "Aumentar fonte" }));
-    expect((screen.getByTitle("Livro pré-visualizado") as HTMLIFrameElement).srcdoc).toContain("font-size:20px");
+    expect(doc()).toContain("font-size:20px");
     fireEvent.click(screen.getByRole("button", { name: "Modo noite" }));
     expect(screen.getByRole("button", { name: "Modo dia" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Livro todo" }));
-    expect((screen.getByTitle("Livro pré-visualizado") as HTMLIFrameElement).srcdoc).not.toContain("display:block!important;min-height");
+    expect(doc()).not.toContain("display:block!important;min-height");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
