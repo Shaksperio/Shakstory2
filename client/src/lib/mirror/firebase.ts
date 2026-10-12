@@ -15,6 +15,8 @@ export const FIREBASE_CONFIG = {
 };
 
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
+/** Pasta única do espelho: a biblioteca é compartilhada pelos e-mails autorizados (proprietário e administradores). */
+export const MIRROR_ROOT = "workspaces/main";
 export const MIRROR_MIN_INTERVAL_MS = 2 * 60 * 1000;
 const HASHES_KEY = "mirror-hashes";
 const STATE_KEY = "mirror-state";
@@ -68,7 +70,7 @@ export async function readMirrorState(kv: KV): Promise<MirrorState> {
 /** Envia ao Firestore só o que mudou desde a última cópia. Retorna quantos documentos foram gravados. */
 export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser): Promise<number> {
   const sdk = await loadSdk();
-  const docs = await planMirror(user.uid, library);
+  const docs = await planMirror(MIRROR_ROOT, library);
   const previous = (await kv.get<Record<string, string>>("meta", HASHES_KEY)) ?? {};
   const toWrite = changedDocs(docs, previous);
   const toDelete = removedPaths(docs, previous);
@@ -98,7 +100,7 @@ export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser)
 export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> {
   const sdk = await loadSdk();
   const { collection, getDocs } = sdk.fs;
-  const root = "users/" + user.uid;
+  const root = MIRROR_ROOT;
   const raw: RawDocs = [];
   const metaSnap = await getDocs(collection(sdk.db, root + "/library"));
   metaSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
@@ -109,5 +111,5 @@ export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> 
     const nodesSnap = await getDocs(collection(sdk.db, root + "/books/" + bookId + "/nodes"));
     nodesSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
   }
-  return assembleMirror(user.uid, raw);
+  return assembleMirror(MIRROR_ROOT, raw);
 }

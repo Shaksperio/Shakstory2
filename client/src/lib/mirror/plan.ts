@@ -21,10 +21,9 @@ const bookMeta = (book: BookLike) => {
   return meta;
 };
 
-/** Gera todos os documentos do espelho para um usuário. */
-export async function planMirror(uid: string, library: LibraryLike): Promise<MirrorDoc[]> {
+/** Gera todos os documentos do espelho sob a pasta `root` (ex.: "workspaces/main"). */
+export async function planMirror(root: string, library: LibraryLike): Promise<MirrorDoc[]> {
   const docs: MirrorDoc[] = [];
-  const root = "users/" + uid;
   const libraryMeta: Record<string, unknown> = {};
   Object.keys(library).forEach(key => { if (key !== "books") libraryMeta[key] = library[key]; });
   const metaData = { kind: "library-meta", meta: JSON.stringify(libraryMeta), bookIds: library.books.map(book => book.id), mirroredAt: Date.now() };
@@ -50,8 +49,7 @@ export async function planMirror(uid: string, library: LibraryLike): Promise<Mir
 export type RawDocs = Array<{ path: string; data: Record<string, unknown> }>;
 
 /** Remonta a biblioteca a partir dos documentos lidos do espelho. Devolve null se estiver incompleto. */
-export function assembleMirror(uid: string, raw: RawDocs): LibraryLike | null {
-  const root = "users/" + uid;
+export function assembleMirror(root: string, raw: RawDocs): LibraryLike | null {
   const byPath: Record<string, Record<string, unknown>> = {};
   raw.forEach(item => { byPath[item.path] = item.data; });
   const meta = byPath[root + "/library/meta"];
