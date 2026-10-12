@@ -1,0 +1,57 @@
+name: GitHub Pages (contingência)
+
+# Origem alternativa do Shakstory. Sem API e sem Cloudflare Access: o editor roda no aparelho
+# e grava direto no espelho do Firebase (login com Google). Requer Settings → Pages → Source: GitHub Actions.
+on:
+  push:
+    branches: [turbo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_BASE: /Shakstory2/
+      VITE_CONTINGENCY: "1"
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_OAUTH_CLIENT_ID: ci-test-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-test-secret
+      GITHUB_WEBHOOK_SECRET: ci-test-webhook-secret
+      JWT_SECRET: ci-test-jwt-secret-for-unit-tests-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.4.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm exec vite build
+      - name: Fallback de rotas e Jekyll
+        run: |
+          cp dist/public/index.html dist/public/404.html
+          touch dist/public/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
