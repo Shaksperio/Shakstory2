@@ -1,17 +1,24 @@
 rules_version = '2';
 
 // Espelho do Shakstory: uma pasta compartilhada (workspaces/main) que só pode ser lida e gravada
-// por quem entrou com um dos e-mails autorizados (verificados pelo Google).
+// por quem entrou com um dos e-mails autorizados: pelo Google (GitHub Pages) ou pelo Cloudflare Access (endereço principal).
 // Para autorizar outro administrador, acrescente o e-mail na lista abaixo e publique as regras.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function emails() {
+      return [
+        'acpconsultorias@gmail.com',
+        'antonyopintor@gmail.com'
+      ];
+    }
     function autorizado() {
       return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email in [
-          'acpconsultorias@gmail.com',
-          'antonyopintor@gmail.com'
-        ];
+        && (
+          // Entrada pelo Google (GitHub Pages)
+          ('email' in request.auth.token && request.auth.token.email_verified == true && request.auth.token.email in emails())
+          // Entrada pelo Cloudflare Access: o Worker confere o e-mail e assina a credencial com a claim mirrorEmail
+          || ('mirrorEmail' in request.auth.token && request.auth.token.mirrorEmail in emails())
+        );
     }
     match /workspaces/main/{document=**} {
       allow read, write: if autorizado();

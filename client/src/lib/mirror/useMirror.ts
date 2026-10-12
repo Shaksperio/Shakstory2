@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { KV } from "../sync/kv";
 import type { LibraryLike } from "../sync/merge";
 import { CONTINGENCY } from "../contingency";
-import { MIRROR_MIN_INTERVAL_MS, currentMirrorUser, mirrorIO, pullMirror, readMirrorState, signInMirror, signOutMirror, type MirrorUser } from "./firebase";
+import { MIRROR_MIN_INTERVAL_MS, currentMirrorUser, mirrorIO, pullMirror, readMirrorState, signInMirror, signInMirrorWithAccess, signOutMirror, type MirrorUser } from "./firebase";
 import { syncWithMirror } from "./mirrorSync";
 import type { MergeReport } from "../sync/merge";
 
@@ -14,6 +14,7 @@ const flag = (value?: "1" | "0") => {
   } catch { /* armazenamento indisponível */ }
   return value === "1";
 };
+const explicitlyOff = () => { try { return localStorage.getItem(ENABLED_KEY) === "0"; } catch { return false; } };
 const explain = (error: unknown) => {
   const code = String((error as { code?: string } | undefined)?.code ?? "");
   if (code.indexOf("popup-closed") !== -1 || code.indexOf("cancelled") !== -1) return "Login cancelado.";
@@ -31,7 +32,7 @@ const MIN_INTERVAL = CONTINGENCY ? 15000 : MIRROR_MIN_INTERVAL_MS;
 export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, report: MergeReport) => void) | undefined) {
   const [user, setUser] = useState<MirrorUser | null>(null);
   const [busy, setBusy] = useState(false);
-  const [ready, setReady] = useState(() => !flag());
+  const [ready, setReady] = useState(() => (CONTINGENCY ? !flag() : false));
   const [sdkFailed, setSdkFailed] = useState(false);
   const [error, setError] = useState("");
   const [lastAt, setLastAt] = useState<number | undefined>();
@@ -44,9 +45,17 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   userRef.current = user;
 
   useEffect(() => {
-    if (!flag()) return;
+    if (CONTINGENCY && !flag()) return;
     let cancelled = false;
-    void currentMirrorUser().then(found => { if (!cancelled) { setUser(found); setReady(true); } }).catch(() => { if (!cancelled) { setSdkFailed(true); setReady(true); } });
+    (async () => {
+      try {
+        let found = await currentMirrorUser();
+        // Endereço principal: quem entrou pelo Cloudflare Access recebe a credencial do Firebase sem popup do Google.
+        if (!found && !CONTINGENCY && navigator.onLine && !explicitlyOff()) found = await signInMirrorWithAccess().catch(() => null);
+        if (found && !CONTINGENCY) flag("1");
+        if (!cancelled) { setUser(found); setReady(true); }
+      } catch { if (!cancelled) { setSdkFailed(true); setReady(true); } }
+    })();
     void readMirrorState(getKv()).then(state => { if (!cancelled && state) setLastAt(state.at); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
