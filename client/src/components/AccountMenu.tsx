@@ -19,6 +19,7 @@ import {
   Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CONTINGENCY } from "@/lib/contingency";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 
@@ -378,6 +379,13 @@ function AccountView({
         <div className="rounded-xl border border-border/70 bg-card p-4"><p className="text-xs text-muted-foreground">Concluídos</p><p className="mt-1 font-serif text-2xl">{completed}</p></div>
       </div>
       {dataSafety}
+      {!CONTINGENCY && (
+        <section className="mt-6 rounded-xl border border-border/70 bg-card p-4" aria-label="Sessão">
+          <h2 className="font-serif text-xl">Sessão</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Encerra o acesso do Cloudflare Access neste navegador. Na próxima abertura será pedido o e-mail e o código. Seus textos salvos neste aparelho não são apagados.</p>
+          <Button className="mt-3" size="sm" variant="outline" onClick={() => { window.location.href = "/cdn-cgi/access/logout"; }}>Sair da conta</Button>
+        </section>
+      )}
       <h2 className="mt-9 font-serif text-2xl">Meus livros e andamento</h2>
       {sorted.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">Nenhum livro ainda. Crie o primeiro na Biblioteca.</p>

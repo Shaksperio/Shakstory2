@@ -35,6 +35,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   const [sdkFailed, setSdkFailed] = useState(false);
   const [error, setError] = useState("");
   const [lastAt, setLastAt] = useState<number | undefined>();
+  const [remoteEmpty, setRemoteEmpty] = useState<boolean | null>(null);
   const userRef = useRef<MirrorUser | null>(null);
   const lastPush = useRef(0);
   const timer = useRef<number | undefined>(undefined);
@@ -60,6 +61,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
+      setRemoteEmpty(result.stamp === null);
       setError("");
       if (result.changedLocal) onMerged?.()?.(result.doc, result.report);
     } catch (failure) { setError(explain(failure)); }
@@ -104,5 +106,5 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     finally { setBusy(false); }
   }, []);
 
-  return { user, busy, ready, sdkFailed, error, lastAt, connect, disconnect, requestPush, sync, restore };
+  return { user, busy, ready, sdkFailed, error, lastAt, remoteEmpty, connect, disconnect, requestPush, sync, restore };
 }
