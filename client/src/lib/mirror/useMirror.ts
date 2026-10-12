@@ -29,8 +29,8 @@ export function useMirror(getKv: () => KV) {
   const [lastAt, setLastAt] = useState<number | undefined>();
   const userRef = useRef<MirrorUser | null>(null);
   const lastPush = useRef(0);
-  const timer = useRef<number | undefined>();
-  const latest = useRef<LibraryLike | undefined>();
+  const timer = useRef<number | undefined>(undefined);
+  const latest = useRef<LibraryLike | undefined>(undefined);
   userRef.current = user;
 
   useEffect(() => {
