@@ -9,6 +9,8 @@ import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
 import { LoadRecovery } from "./components/LoadRecovery";
 import { PwaPrompts } from "./components/PwaPrompts";
+import { ContingencyGate } from "./components/ContingencyGate";
+import { CONTINGENCY } from "./lib/contingency";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -41,7 +43,7 @@ function App() {
           <LoadRecovery />
           <PwaPrompts />
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
+            {CONTINGENCY ? <ContingencyGate><Router /></ContingencyGate> : <Router />}
           </WouterRouter>
         </TooltipProvider>
       </ThemeProvider>
