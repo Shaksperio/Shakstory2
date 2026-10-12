@@ -1,0 +1,113 @@
+// Cliente do espelho no Firebase (Auth com Google + Firestore). O SDK é carregado sob demanda do CDN oficial
+// do Firebase, para não adicionar dependência ao projeto nem peso ao carregamento normal do editor.
+import type { KV } from "../sync/kv";
+import type { LibraryLike } from "../sync/merge";
+import { assembleMirror, changedDocs, planMirror, removedPaths, type RawDocs } from "./plan";
+
+/** Valores públicos do app Web (não dão acesso aos dados; quem protege é firestore.rules). */
+export const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBjMvRIgKSVakvRNRT8GTSHjJxCdxQ9zFk",
+  authDomain: "shakstory-93bb1.firebaseapp.com",
+  projectId: "shakstory-93bb1",
+  storageBucket: "shakstory-93bb1.firebasestorage.app",
+  messagingSenderId: "588602461570",
+  appId: "1:588602461570:web:ce4353109367497450d39b",
+};
+
+const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
+export const MIRROR_MIN_INTERVAL_MS = 2 * 60 * 1000;
+const HASHES_KEY = "mirror-hashes";
+const STATE_KEY = "mirror-state";
+
+export type MirrorUser = { uid: string; email: string };
+export type MirrorState = { at: number; writes: number } | undefined;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Sdk = { app: any; auth: any; fs: any; appInstance: any; authInstance: any; db: any };
+let sdkPromise: Promise<Sdk> | null = null;
+
+function loadSdk(): Promise<Sdk> {
+  if (!sdkPromise) {
+    sdkPromise = (async () => {
+      const [app, auth, fs] = await Promise.all([
+        import(/* @vite-ignore */ SDK + "firebase-app.js"),
+        import(/* @vite-ignore */ SDK + "firebase-auth.js"),
+        import(/* @vite-ignore */ SDK + "firebase-firestore.js"),
+      ]);
+      const appInstance = app.getApps().length ? app.getApp() : app.initializeApp(FIREBASE_CONFIG);
+      return { app, auth, fs, appInstance, authInstance: auth.getAuth(appInstance), db: fs.getFirestore(appInstance) };
+    })();
+    sdkPromise.catch(() => { sdkPromise = null; });
+  }
+  return sdkPromise;
+}
+
+export async function currentMirrorUser(): Promise<MirrorUser | null> {
+  const sdk = await loadSdk();
+  await sdk.authInstance.authStateReady();
+  const user = sdk.authInstance.currentUser;
+  return user && user.email ? { uid: user.uid, email: user.email } : null;
+}
+
+export async function signInMirror(): Promise<MirrorUser> {
+  const sdk = await loadSdk();
+  const provider = new sdk.auth.GoogleAuthProvider();
+  const result = await sdk.auth.signInWithPopup(sdk.authInstance, provider);
+  return { uid: result.user.uid, email: result.user.email };
+}
+
+export async function signOutMirror() {
+  const sdk = await loadSdk();
+  await sdk.auth.signOut(sdk.authInstance);
+}
+
+export async function readMirrorState(kv: KV): Promise<MirrorState> {
+  return (await kv.get<MirrorState>("meta", STATE_KEY)) ?? undefined;
+}
+
+/** Envia ao Firestore só o que mudou desde a última cópia. Retorna quantos documentos foram gravados. */
+export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser): Promise<number> {
+  const sdk = await loadSdk();
+  const docs = await planMirror(user.uid, library);
+  const previous = (await kv.get<Record<string, string>>("meta", HASHES_KEY)) ?? {};
+  const toWrite = changedDocs(docs, previous);
+  const toDelete = removedPaths(docs, previous);
+  const { doc, writeBatch } = sdk.fs;
+  const next: Record<string, string> = { ...previous };
+  const operations: Array<{ kind: "set" | "delete"; path: string; data?: Record<string, unknown>; hash?: string }> = [
+    ...toWrite.map(item => ({ kind: "set" as const, path: item.path, data: item.data, hash: item.hash })),
+    ...toDelete.map(path => ({ kind: "delete" as const, path })),
+  ];
+  for (let at = 0; at < operations.length; at += 400) {
+    const batch = writeBatch(sdk.db);
+    const slice = operations.slice(at, at + 400);
+    slice.forEach(operation => {
+      const ref = doc(sdk.db, operation.path);
+      if (operation.kind === "set") batch.set(ref, operation.data);
+      else batch.delete(ref);
+    });
+    await batch.commit();
+    slice.forEach(operation => { if (operation.kind === "set") next[operation.path] = operation.hash as string; else delete next[operation.path]; });
+    await kv.put("meta", HASHES_KEY, next);
+  }
+  await kv.put("meta", STATE_KEY, { at: Date.now(), writes: operations.length });
+  return operations.length;
+}
+
+/** Lê o espelho inteiro. Retorna null se vazio ou incompleto. */
+export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> {
+  const sdk = await loadSdk();
+  const { collection, getDocs } = sdk.fs;
+  const root = "users/" + user.uid;
+  const raw: RawDocs = [];
+  const metaSnap = await getDocs(collection(sdk.db, root + "/library"));
+  metaSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
+  const booksSnap = await getDocs(collection(sdk.db, root + "/books"));
+  const bookIds: string[] = [];
+  booksSnap.forEach((item: { id: string; ref: { path: string }; data: () => Record<string, unknown> }) => { bookIds.push(item.id); raw.push({ path: item.ref.path, data: item.data() }); });
+  for (const bookId of bookIds) {
+    const nodesSnap = await getDocs(collection(sdk.db, root + "/books/" + bookId + "/nodes"));
+    nodesSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
+  }
+  return assembleMirror(user.uid, raw);
+}
