@@ -25,6 +25,8 @@ export type MirrorApi = ReturnType<typeof useMirror>;
 export function useMirror(getKv: () => KV) {
   const [user, setUser] = useState<MirrorUser | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(() => !flag());
+  const [sdkFailed, setSdkFailed] = useState(false);
   const [error, setError] = useState("");
   const [lastAt, setLastAt] = useState<number | undefined>();
   const userRef = useRef<MirrorUser | null>(null);
@@ -34,9 +36,9 @@ export function useMirror(getKv: () => KV) {
   userRef.current = user;
 
   useEffect(() => {
-    if (!flag() || !navigator.onLine) return;
+    if (!flag()) return;
     let cancelled = false;
-    void currentMirrorUser().then(found => { if (!cancelled) setUser(found); }).catch(() => {});
+    void currentMirrorUser().then(found => { if (!cancelled) { setUser(found); setReady(true); } }).catch(() => { if (!cancelled) { setSdkFailed(true); setReady(true); } });
     void readMirrorState(getKv()).then(state => { if (!cancelled && state) setLastAt(state.at); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -92,5 +94,5 @@ export function useMirror(getKv: () => KV) {
     finally { setBusy(false); }
   }, []);
 
-  return { user, busy, error, lastAt, connect, disconnect, requestPush, restore };
+  return { user, busy, ready, sdkFailed, error, lastAt, connect, disconnect, requestPush, restore };
 }
