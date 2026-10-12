@@ -1,14 +1,20 @@
 rules_version = '2';
 
-// Espelho do Shakstory: cada usuário só enxerga e grava a própria pasta,
-// e somente se entrou com o e-mail autorizado (verificado pelo Google).
+// Espelho do Shakstory: uma pasta compartilhada (workspaces/main) que só pode ser lida e gravada
+// por quem entrou com um dos e-mails autorizados (verificados pelo Google).
+// Para autorizar outro administrador, acrescente o e-mail na lista abaixo e publique as regras.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null
-        && request.auth.uid == uid
+    function autorizado() {
+      return request.auth != null
         && request.auth.token.email_verified == true
-        && request.auth.token.email == 'antonyopintor@gmail.com';
+        && request.auth.token.email in [
+          'acpconsultorias@gmail.com',
+          'antonyopintor@gmail.com'
+        ];
+    }
+    match /workspaces/main/{document=**} {
+      allow read, write: if autorizado();
     }
     match /{document=**} {
       allow read, write: if false;
