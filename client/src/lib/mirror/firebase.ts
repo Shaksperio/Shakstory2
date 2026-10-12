@@ -49,7 +49,20 @@ export async function currentMirrorUser(): Promise<MirrorUser | null> {
   const sdk = await loadSdk();
   await sdk.authInstance.authStateReady();
   const user = sdk.authInstance.currentUser;
-  return user && user.email ? { uid: user.uid, email: user.email } : null;
+  if (!user) return null;
+  const email = user.email || String((await user.getIdTokenResult()).claims.mirrorEmail ?? "");
+  return email ? { uid: user.uid, email } : null;
+}
+
+/** Entrada automática no endereço principal: o Worker confere o e-mail do Cloudflare Access e devolve a credencial do Firebase. null se não estiver configurado. */
+export async function signInMirrorWithAccess(): Promise<MirrorUser | null> {
+  const response = await fetch("/api/mirror-token", { credentials: "same-origin", headers: { accept: "application/json" } });
+  if (!response.ok || !(response.headers.get("content-type") ?? "").includes("json")) return null;
+  const data = (await response.json()) as { token?: string; email?: string };
+  if (!data.token || !data.email) return null;
+  const sdk = await loadSdk();
+  const result = await sdk.auth.signInWithCustomToken(sdk.authInstance, data.token);
+  return { uid: result.user.uid, email: data.email };
 }
 
 export async function signInMirror(): Promise<MirrorUser> {
