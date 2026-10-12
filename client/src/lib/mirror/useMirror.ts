@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KV } from "../sync/kv";
 import type { LibraryLike } from "../sync/merge";
-import { MIRROR_MIN_INTERVAL_MS, currentMirrorUser, pullMirror, pushMirror, readMirrorState, signInMirror, signOutMirror, type MirrorUser } from "./firebase";
+import { CONTINGENCY } from "../contingency";
+import { MIRROR_MIN_INTERVAL_MS, currentMirrorUser, mirrorIO, pullMirror, readMirrorState, signInMirror, signOutMirror, type MirrorUser } from "./firebase";
+import { syncWithMirror } from "./mirrorSync";
+import type { MergeReport } from "../sync/merge";
 
 const ENABLED_KEY = "shakstory:mirror-enabled";
 const flag = (value?: "1" | "0") => {
@@ -22,7 +25,10 @@ const explain = (error: unknown) => {
 
 export type MirrorApi = ReturnType<typeof useMirror>;
 
-export function useMirror(getKv: () => KV) {
+/** Na contingência o espelho é a fonte de verdade: grava com mais frequência. */
+const MIN_INTERVAL = CONTINGENCY ? 15000 : MIRROR_MIN_INTERVAL_MS;
+
+export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, report: MergeReport) => void) | undefined) {
   const [user, setUser] = useState<MirrorUser | null>(null);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(() => !flag());
@@ -33,6 +39,7 @@ export function useMirror(getKv: () => KV) {
   const lastPush = useRef(0);
   const timer = useRef<number | undefined>(undefined);
   const latest = useRef<LibraryLike | undefined>(undefined);
+  const syncing = useRef(false);
   userRef.current = user;
 
   useEffect(() => {
@@ -43,41 +50,44 @@ export function useMirror(getKv: () => KV) {
     return () => { cancelled = true; };
   }, []);
 
-  const pushNow = useCallback(async (library: LibraryLike) => {
+  /** Lê o espelho, mescla com a biblioteca daqui e grava o resultado. Se o espelho trouxe algo novo, avisa quem chamou. */
+  const sync = useCallback(async (library: LibraryLike) => {
     const who = userRef.current;
-    if (!who || !navigator.onLine) return;
+    if (!who || !navigator.onLine || syncing.current) return;
+    syncing.current = true;
     setBusy(true);
     try {
-      await pushMirror(getKv(), library, who);
+      const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
       setError("");
+      if (result.changedLocal) onMerged?.()?.(result.doc, result.report);
     } catch (failure) { setError(explain(failure)); }
-    finally { setBusy(false); }
+    finally { syncing.current = false; setBusy(false); }
   }, []);
 
   /** Chamado depois que o D1 confirmou. Respeita o intervalo mínimo e guarda a versão mais recente para o fim da espera. */
   const requestPush = useCallback((library: LibraryLike) => {
     if (!userRef.current) return;
     latest.current = library;
-    const wait = lastPush.current + MIRROR_MIN_INTERVAL_MS - Date.now();
-    if (wait <= 0) { void pushNow(library); return; }
+    const wait = lastPush.current + MIN_INTERVAL - Date.now();
+    if (wait <= 0) { void sync(library); return; }
     if (timer.current !== undefined) return;
     timer.current = window.setTimeout(() => {
       timer.current = undefined;
-      if (latest.current) void pushNow(latest.current);
+      if (latest.current) void sync(latest.current);
     }, wait);
-  }, [pushNow]);
+  }, [sync]);
 
   const connect = useCallback(async (library?: LibraryLike) => {
     setBusy(true); setError("");
     try {
       const who = await signInMirror();
       flag("1"); setUser(who); userRef.current = who;
-      if (library) { await pushMirror(getKv(), library, who); lastPush.current = Date.now(); setLastAt(lastPush.current); }
+      if (library) { syncing.current = false; await sync(library); }
     } catch (failure) { setError(explain(failure)); }
     finally { setBusy(false); }
-  }, []);
+  }, [sync]);
 
   const disconnect = useCallback(async () => {
     flag("0");
@@ -94,5 +104,5 @@ export function useMirror(getKv: () => KV) {
     finally { setBusy(false); }
   }, []);
 
-  return { user, busy, ready, sdkFailed, error, lastAt, connect, disconnect, requestPush, restore };
+  return { user, busy, ready, sdkFailed, error, lastAt, connect, disconnect, requestPush, sync, restore };
 }
