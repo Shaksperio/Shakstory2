@@ -33,9 +33,11 @@ export type AccountBook = {
   archived?: boolean;
   nodes: Array<{ kind: string; content: string }>;
   publication?: { coverImageUrl?: string; author?: string };
+  startedAt?: number;
+  writingProgress?: Array<{ date: string; added: number; removed: number }>;
 };
 
-export type Profile = { name: string; photo: string };
+export type Profile = { name: string; photo: string; bio?: string; location?: string; links?: string[]; store?: string };
 export type ExportFormat = "pdf" | "epub" | "docx" | "txt" | "html";
 export type EditorAction = "find" | "spell" | "split" | "delete" | "review" | "preview";
 
@@ -45,12 +47,15 @@ const countWords = (value: string) => (value.trim() ? value.trim().split(/\s+/).
 const wordsOf = (book: AccountBook) => book.nodes.reduce((sum, node) => sum + countWords(node.content), 0);
 const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 
+const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
 const readProfile = (): Profile => {
   try {
     const parsed = JSON.parse(localStorage.getItem(PROFILE_KEY) ?? "{}");
-    return { name: typeof parsed.name === "string" ? parsed.name : "", photo: typeof parsed.photo === "string" ? parsed.photo : "" };
+    const links = Array.isArray(parsed.links) ? parsed.links.map((item: unknown) => text(item, 300)).slice(0, 3) : [];
+    while (links.length < 3) links.push("");
+    return { name: text(parsed.name, 120), photo: typeof parsed.photo === "string" ? parsed.photo : "", bio: text(parsed.bio, 600), location: text(parsed.location, 120), links, store: text(parsed.store, 300) };
   } catch {
-    return { name: "", photo: "" };
+    return { name: "", photo: "", bio: "", location: "", links: ["", "", ""], store: "" };
   }
 };
 
@@ -275,7 +280,7 @@ export function EditorMenu({
   );
 }
 
-const resizePhoto = (file: File): Promise<string> =>
+export const resizePhoto = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
