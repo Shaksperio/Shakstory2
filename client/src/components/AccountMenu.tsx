@@ -307,6 +307,7 @@ function AccountView({
   statusLabel,
   onProfile,
   onOpen,
+  dataSafety,
 }: {
   books: AccountBook[];
   profile: Profile;
@@ -317,6 +318,7 @@ function AccountView({
   statusLabel: (status?: string) => string;
   onProfile: (patch: Partial<Profile>) => void;
   onOpen: (book: AccountBook) => void;
+  dataSafety?: React.ReactNode;
 }) {
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -375,6 +377,7 @@ function AccountView({
         <div className="rounded-xl border border-border/70 bg-card p-4"><p className="text-xs text-muted-foreground">Palavras escritas</p><p className="mt-1 font-serif text-2xl">{formatNumber(totalWords)}</p></div>
         <div className="rounded-xl border border-border/70 bg-card p-4"><p className="text-xs text-muted-foreground">Concluídos</p><p className="mt-1 font-serif text-2xl">{completed}</p></div>
       </div>
+      {dataSafety}
       <h2 className="mt-9 font-serif text-2xl">Meus livros e andamento</h2>
       {sorted.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">Nenhum livro ainda. Crie o primeiro na Biblioteca.</p>
