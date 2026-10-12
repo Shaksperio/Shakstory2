@@ -3,6 +3,7 @@
 import type { KV } from "../sync/kv";
 import type { LibraryLike } from "../sync/merge";
 import { assembleMirror, changedDocs, planMirror, removedPaths, type RawDocs } from "./plan";
+import type { MirrorIO } from "./mirrorSync";
 
 /** Valores públicos do app Web (não dão acesso aos dados; quem protege é firestore.rules). */
 export const FIREBASE_CONFIG = {
@@ -67,17 +68,23 @@ export async function readMirrorState(kv: KV): Promise<MirrorState> {
   return (await kv.get<MirrorState>("meta", STATE_KEY)) ?? undefined;
 }
 
-/** Envia ao Firestore só o que mudou desde a última cópia. Retorna quantos documentos foram gravados. */
-export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser): Promise<number> {
+/** Envia ao Firestore só o que mudou. Devolve o novo carimbo do espelho, ou null se nada mudou. */
+export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser): Promise<number | null> {
+  void user;
   const sdk = await loadSdk();
   const docs = await planMirror(MIRROR_ROOT, library);
   const previous = (await kv.get<Record<string, string>>("meta", HASHES_KEY)) ?? {};
   const toWrite = changedDocs(docs, previous);
   const toDelete = removedPaths(docs, previous);
+  if (toWrite.length === 0 && toDelete.length === 0) return null;
+  const stamp = Date.now();
+  const metaPath = MIRROR_ROOT + "/library/meta";
+  const metaDoc = docs.find(item => item.path === metaPath);
+  if (metaDoc && !toWrite.some(item => item.path === metaPath)) toWrite.push(metaDoc);
   const { doc, writeBatch } = sdk.fs;
   const next: Record<string, string> = { ...previous };
   const operations: Array<{ kind: "set" | "delete"; path: string; data?: Record<string, unknown>; hash?: string }> = [
-    ...toWrite.map(item => ({ kind: "set" as const, path: item.path, data: item.data, hash: item.hash })),
+    ...toWrite.map(item => ({ kind: "set" as const, path: item.path, data: item.path === metaPath ? { ...item.data, mirroredAt: stamp } : item.data, hash: item.hash })),
     ...toDelete.map(path => ({ kind: "delete" as const, path })),
   ];
   for (let at = 0; at < operations.length; at += 400) {
@@ -92,8 +99,21 @@ export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser)
     slice.forEach(operation => { if (operation.kind === "set") next[operation.path] = operation.hash as string; else delete next[operation.path]; });
     await kv.put("meta", HASHES_KEY, next);
   }
-  await kv.put("meta", STATE_KEY, { at: Date.now(), writes: operations.length });
-  return operations.length;
+  await kv.put("meta", STATE_KEY, { at: stamp, writes: operations.length });
+  return stamp;
+}
+
+/** Carimbo do último envio ao espelho (uma leitura). null se o espelho ainda está vazio. */
+export async function readMirrorStamp(): Promise<number | null> {
+  const sdk = await loadSdk();
+  const snap = await sdk.fs.getDoc(sdk.fs.doc(sdk.db, MIRROR_ROOT + "/library/meta"));
+  if (!snap.exists()) return null;
+  const value = Number(snap.data().mirroredAt);
+  return Number.isFinite(value) ? value : null;
+}
+
+export function mirrorIO(kv: KV, user: MirrorUser): MirrorIO {
+  return { stamp: readMirrorStamp, pull: () => pullMirror(user), push: library => pushMirror(kv, library, user) };
 }
 
 /** Lê o espelho inteiro. Retorna null se vazio ou incompleto. */
