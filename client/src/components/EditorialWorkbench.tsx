@@ -4,6 +4,7 @@ import { sanitizeRichContent } from "@shared/rich-text";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
+import { ProofreadPanel } from "./ProofreadPanel";
 import {
   MATTER_TEMPLATES,
   publicationSections,
@@ -91,6 +92,7 @@ export function EditorialWorkbench({
               ["manuscript", "Estrutura do livro"],
               ["copyright", "Copyright e créditos"],
               ["review", "Revisão e histórico"],
+              ["proofread", "Corretor"],
               ["preferences", "Preferências de escrita"],
             ].map(([id, label]) => (
               <Button
@@ -345,6 +347,9 @@ export function EditorialWorkbench({
                 </Button>
               </div>
             </div>
+          )}
+          {tab === "proofread" && (
+            <ProofreadPanel bookId={publication.bookId} text={text} html={html} onApply={onRestore} />
           )}
           {tab === "review" && (
             <div className="mt-4 space-y-4">
