@@ -300,6 +300,28 @@ const historyFromDocument = (document: Record<string, unknown> | null): Array<{ 
         .slice(-12)
     : [];
 
+export type CowilaAsk = { prompt: string; text?: string; history?: Array<{ role: "user" | "assistant"; content: string }>; bookTitle?: string; long?: boolean };
+/** Chamada genérica à Cowila (chat, extração de personagens, reescrita). "long" libera a resposta longa do servidor. */
+export const askCowila = async (input: CowilaAsk): Promise<string> => {
+  // O servidor trata "lembre/guarde…" sem interrogação como comando de memória e não chama o modelo; um trecho do livro não pode disparar isso.
+  const guarded = /\b(lembre|memorize|guarde)\b/i.test(input.prompt) && !/[?？]/.test(input.prompt) ? input.prompt + " (?)" : input.prompt;
+  const result = await json<{ proposal?: string }>("/api/assist", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "chat",
+      prompt: guarded.slice(0, input.long ? 12000 : 6000),
+      literaryProfile: { role: "coauthor", task: "chat", ...(input.long ? { phase: "expand_selected_sample" } : {}) },
+      book: { id: "cowila-chat", title: input.bookTitle ?? "Manuscrito Shakstory" },
+      scene: { id: "cowila-chat", title: "Projeto", text: (input.text ?? "").slice(0, 12000) },
+      canon: [],
+      planning: { characters: [], locations: [], timeline: [] },
+      story: { objectives: [], conflicts: [], relations: [], notes: [], scenes: [] },
+      history: (input.history ?? []).slice(-10),
+    }),
+  });
+  return String(result.proposal ?? "").trim();
+};
+
 const analyzeLiterary = async (input: LiteraryInput): Promise<LiteraryResult> => {
   const cowilaContext = buildCowilaLiteraryContext(input);
   const styleContext = buildStyleDnaPrompt(input.styleSample ?? input.text);

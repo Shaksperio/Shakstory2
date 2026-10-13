@@ -1,0 +1,215 @@
+// Cowila: leitura do projeto, ajuda para iniciantes e preenchimento de personagens.
+// Tudo aqui é determinístico e testável; a IA só entra com texto já recortado do próprio livro.
+import { detectBookNames } from "../proofread/engine";
+
+export type CNode = { id: string; title: string; kind: string; content: string };
+export type CCharacter = { id: string; name: string; role: string; notes: string; tags?: string[]; status?: string };
+export type CBook = {
+  id: string;
+  title: string;
+  status?: string;
+  nodes: CNode[];
+  planning?: { characters: CCharacter[]; locations?: Array<{ name: string }>; timeline?: unknown[] };
+  publication?: { genre?: string; category?: string; description?: string; author?: string };
+};
+export type Level = "iniciante" | "experiente";
+
+const words = (text: string) => (text.match(/\S+/g) ?? []).length;
+const bodyNodes = (book: CBook) => book.nodes.filter(node => node.kind !== "part");
+
+export function countBookWords(book: CBook): number {
+  return bodyNodes(book).reduce((sum, node) => sum + words(node.content), 0);
+}
+
+/** Iniciante: pouco texto escrito e projeto quase sem planejamento. O usuário pode forçar o nível. */
+export function assessLevel(books: CBook[]): Level {
+  const total = books.reduce((sum, book) => sum + countBookWords(book), 0);
+  const planned = books.some(book => (book.planning?.characters.length ?? 0) >= 2 || Boolean(book.publication?.description));
+  return total < 5000 || (!planned && books.length <= 1) ? "iniciante" : "experiente";
+}
+
+/** Resumo do projeto para a IA caber no limite do servidor (≈12 000 caracteres). */
+export function buildProjectDigest(books: CBook[], active: CBook | undefined, activeNodeId: string | undefined, draft: string, limit = 11500): string {
+  const out: string[] = [];
+  out.push("BIBLIOTECA DO AUTOR:");
+  for (const book of books.slice(0, 12)) {
+    out.push(`- ${book.title} (${book.status ?? "rascunho"}, ${countBookWords(book)} palavras, ${bodyNodes(book).length} capítulos${book.id === active?.id ? ", LIVRO ATIVO" : ""})`);
+  }
+  if (active) {
+    const pub = active.publication ?? {};
+    out.push("", `LIVRO ATIVO: ${active.title}`);
+    if (pub.genre || pub.category) out.push(`Gênero: ${[pub.genre, pub.category].filter(Boolean).join(" / ")}`);
+    if (pub.description) out.push(`Descrição: ${pub.description.slice(0, 600)}`);
+    const planning = active.planning;
+    if (planning?.characters.length) out.push("Personagens cadastrados: " + planning.characters.slice(0, 30).map(c => `${c.name}${c.role ? " (" + c.role + ")" : ""}`).join("; "));
+    if (planning?.locations?.length) out.push("Locais cadastrados: " + planning.locations.slice(0, 20).map(l => l.name).join("; "));
+    out.push("", "CAPÍTULOS (início de cada um):");
+    const chapters = bodyNodes(active);
+    const room = Math.max(120, Math.floor((limit - 3500) / Math.max(1, chapters.length)));
+    for (const node of chapters.slice(0, 60)) {
+      const flat = node.content.replace(/\s+/g, " ").trim();
+      out.push(`## ${node.title} (${words(node.content)} palavras)${node.id === activeNodeId ? " [CAPÍTULO ABERTO]" : ""}: ${flat.slice(0, Math.min(room, 700))}${flat.length > room ? "…" : ""}`);
+    }
+    const open = draft.replace(/\s+/g, " ").trim();
+    if (open) out.push("", "TRECHO FINAL DO CAPÍTULO ABERTO: " + open.slice(-1200));
+  }
+  const text = out.join("\n");
+  return text.length > limit ? text.slice(0, limit) : text;
+}
+
+// ---- Personagens ----
+const NOT_PEOPLE = new Set(
+  ("segunda terça quarta quinta sexta sábado domingo janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro " +
+    "deus senhor senhora dona dom capítulo parte prólogo epílogo brasil portugal").split(" ")
+);
+const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+export type Candidate = { name: string; count: number; snippets: string[] };
+
+/** Nomes próprios recorrentes no livro inteiro, com trechos de evidência. */
+export function candidateCharacters(book: CBook, max = 14): Candidate[] {
+  const full = bodyNodes(book).map(node => node.content).join("\n\n");
+  const names = detectBookNames(full, [], 2).filter(name => !NOT_PEOPLE.has(fold(name)));
+  const known = new Set((book.planning?.characters ?? []).map(c => fold(c.name)));
+  const result: Candidate[] = [];
+  for (const name of names) {
+    if (known.has(fold(name))) continue;
+    const pattern = new RegExp(`(?<![A-Za-zÀ-ÿ])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-zÀ-ÿ])`, "g");
+    const snippets: string[] = [];
+    let count = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(full))) {
+      count++;
+      if (snippets.length < 3) snippets.push(full.slice(Math.max(0, match.index - 110), Math.min(full.length, match.index + name.length + 110)).replace(/\s+/g, " ").trim());
+    }
+    result.push({ name, count, snippets });
+  }
+  return result.sort((a, b) => b.count - a.count).slice(0, max);
+}
+
+export function characterPrompt(candidates: Candidate[]): string {
+  return (
+    "Tarefa: a partir dos trechos de um romance, diga quais destes nomes são PERSONAGENS (pessoas ou seres que agem) e descreva cada um. " +
+    "Use somente o que os trechos mostram; se não der para saber, deixe role vazio e notes curto. Ignore lugares, objetos e títulos. " +
+    'Responda APENAS com JSON válido, sem texto antes ou depois, no formato {"characters":[{"name":"","role":"","notes":""}]}. ' +
+    "role: função na história em até 4 palavras (ex.: protagonista, mentor). notes: uma ou duas frases em português.\n\n" +
+    candidates.map(c => `NOME: ${c.name} (aparece ${c.count}x)\n` + c.snippets.map(s => `- ${s}`).join("\n")).join("\n\n")
+  );
+}
+
+/** Lê o JSON devolvido pela IA e só aceita nomes que realmente eram candidatos (a IA não inventa personagem). */
+export function parseCharacters(raw: string, candidates: Candidate[]): Array<{ name: string; role: string; notes: string }> {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end <= start) return [];
+  try {
+    const data = JSON.parse(raw.slice(start, end + 1));
+    const list = Array.isArray(data?.characters) ? data.characters : [];
+    const byKey = new Map(candidates.map(c => [fold(c.name), c.name] as [string, string]));
+    const seen = new Set<string>();
+    const out: Array<{ name: string; role: string; notes: string }> = [];
+    for (const item of list) {
+      const key = fold(String(item?.name ?? "").trim());
+      const canonical = byKey.get(key);
+      if (!canonical || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: canonical, role: String(item?.role ?? "").trim().slice(0, 60), notes: String(item?.notes ?? "").trim().slice(0, 400) });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Sem IA: cadastra o nome com a primeira evidência, marcado para o autor confirmar. */
+export function localCharacters(candidates: Candidate[]): Array<{ name: string; role: string; notes: string }> {
+  return candidates.map(c => ({ name: c.name, role: "", notes: `A confirmar. Aparece ${c.count}x. Trecho: “${c.snippets[0] ?? ""}”`.slice(0, 400) }));
+}
+
+/** Soma ao que já existe: nunca apaga nem sobrescreve campo preenchido pelo autor. */
+export function mergeCharacters(existing: CCharacter[], found: Array<{ name: string; role: string; notes: string }>, makeId: () => string): { characters: CCharacter[]; added: number; updated: number } {
+  const next = existing.map(c => ({ ...c }));
+  let added = 0;
+  let updated = 0;
+  for (const item of found) {
+    const hit = next.find(c => fold(c.name) === fold(item.name));
+    if (hit) {
+      let changed = false;
+      if (!hit.role.trim() && item.role) { hit.role = item.role; changed = true; }
+      if (!hit.notes.trim() && item.notes) { hit.notes = item.notes; changed = true; }
+      if (changed) updated++;
+    } else {
+      next.push({ id: makeId(), name: item.name, role: item.role, notes: item.notes, tags: ["cowila"], status: "draft" });
+      added++;
+    }
+  }
+  return { characters: next, added, updated };
+}
+
+// ---- Ajuda ----
+export const SHAKSTORY_GUIDE =
+  "Como o Shakstory se organiza:\n" +
+  "• Biblioteca: todos os seus livros. Crie, abra, arquive, exporte e exclua projetos.\n" +
+  "• Projeto: visão do livro aberto, com progresso, meta e próximos passos.\n" +
+  "• Planejamento: Personagens, Locais, Timeline, Story Boards e Story Engine (objetivos, conflitos e cenas).\n" +
+  "• Manuscrito: onde você escreve, por capítulos. As abas “Revisão e histórico”, “Corretor” e “Preferências” ficam logo acima.\n" +
+  "• Preparação: capa, créditos, copyright e a exportação (PDF, EPUB, DOCX…).\n" +
+  "• Segurança dos dados: cópia automática no seu aparelho e no Firebase.\n" +
+  "Comece assim: crie o livro, escreva o primeiro capítulo, e peça aqui “preencher personagens”. Eu leio o que você escreveu e monto a ficha, sem apagar nada que já esteja preenchido.";
+
+export type Intent = "guide" | "characters" | "synopsis" | "rewrite" | "summary" | "chat";
+export function detectIntent(message: string): Intent {
+  const m = fold(message);
+  if (/(preench|cri|extra|monte|cadastr|gere|adicion).{0,30}personagen/.test(m) || /personagen.{0,30}(automatic|sozinh|do manuscrito)/.test(m)) return "characters";
+  if (/(sinopse|descricao do livro|resumo de capa|orelha)/.test(m) && /(escrev|crie|gere|sugir|preench|fa[cz]a|monte)/.test(m)) return "synopsis";
+  if (/reescrev/.test(m)) return "rewrite";
+  if (/(como (eu )?(uso|funciona|comeco|faco)|o que (e|faz)|me ajud|explique|tutorial|nao sei|por onde)/.test(m) && /(shakstory|aba|opcao|opcoes|recurso|funcao|programa|sistema|comec|usar|usa)/.test(m)) return "guide";
+  if (/(entenda|resum|analis).{0,25}(meu )?(projeto|livro|historia|manuscrito)/.test(m)) return "summary";
+  return "chat";
+}
+
+export function cowilaSystemNote(level: Level): string {
+  return (
+    "Você é a Cowila, assistente literária do Shakstory, falando em português do Brasil. " +
+    "Baseie-se SOMENTE no resumo do projeto abaixo; se algo não estiver nele, diga que não leu essa parte. Nunca invente trechos, personagens ou fatos do livro. " +
+    (level === "iniciante"
+      ? "O autor é iniciante: use palavras simples, explique termos técnicos em uma frase e indique onde clicar no Shakstory. "
+      : "O autor é experiente: seja direta e técnica, sem explicar o básico. ") +
+    "Nunca altere o manuscrito sozinha: proponha, e o autor decide."
+  );
+}
+
+/** Divide um capítulo em blocos de parágrafos que cabem em uma chamada da IA. */
+export function chunkParagraphs(text: string, size = 3200): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  for (const paragraph of text.split(/\n/)) {
+    if (current && current.length + paragraph.length + 1 > size) { chunks.push(current); current = ""; }
+    // parágrafo gigante: corta em frases
+    if (paragraph.length > size) {
+      for (const sentence of paragraph.match(/[^.!?…]+[.!?…]*\s*/g) ?? [paragraph]) {
+        if (current && current.length + sentence.length > size) { chunks.push(current); current = ""; }
+        current += sentence;
+      }
+      current += "\n";
+    } else current += paragraph + "\n";
+  }
+  if (current.trim()) chunks.push(current);
+  return chunks.map(chunk => chunk.replace(/\n+$/, ""));
+}
+
+/** A reescrita só entra se mantiver a extensão e todos os nomes próprios do trecho original. */
+export function rewriteIsSafe(original: string, rewritten: string): boolean {
+  const a = original.trim().length;
+  const b = rewritten.trim().length;
+  if (!a || !b || b < a * 0.5 || b > a * 1.8) return false;
+  return detectBookNames(original, [], 1).every(name => rewritten.indexOf(name) !== -1);
+}
+
+export function rewritePrompt(level: Level): string {
+  return (
+    "Reescreva o trecho em 'Texto atual' mantendo exatamente os fatos, os nomes, as falas e a voz do autor. " +
+    (level === "iniciante" ? "Melhore clareza, ritmo e pontuação, corrigindo erros. " : "Refine ritmo e precisão, preservando as escolhas de estilo. ") +
+    "Mantenha extensão parecida e o mesmo número de parágrafos. Devolva SOMENTE o texto reescrito, sem comentários, aspas ou títulos."
+  );
+}
