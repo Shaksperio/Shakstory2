@@ -34,6 +34,7 @@ describe("CowilaChat", () => {
     const found = (onAdd.mock.calls[0] as unknown as [Array<{ name: string }>])[0];
     expect(found.map(f => f.name)).toEqual(["Élia"]);
     cleanup();
+    localStorage.clear();
     const onAdd2 = vi.fn(() => ({ added: 2, updated: 0 }));
     render(<CowilaChat {...base({ ask: vi.fn(async () => { throw new Error("fora do ar"); }), onAddCharacters: onAdd2 })} />);
     openChat();
