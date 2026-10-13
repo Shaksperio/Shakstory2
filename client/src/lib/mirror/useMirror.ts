@@ -42,6 +42,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   const timer = useRef<number | undefined>(undefined);
   const latest = useRef<LibraryLike | undefined>(undefined);
   const syncing = useRef(false);
+  const again = useRef<LibraryLike | undefined>(undefined);
   userRef.current = user;
 
   useEffect(() => {
@@ -61,20 +62,29 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   }, []);
 
   /** Lê o espelho, mescla com a biblioteca daqui e grava o resultado. Se o espelho trouxe algo novo, avisa quem chamou. */
-  const sync = useCallback(async (library: LibraryLike) => {
+  const sync = useCallback(async (library: LibraryLike): Promise<boolean> => {
     const who = userRef.current;
-    if (!who || !navigator.onLine || syncing.current) return;
+    if (!who || !navigator.onLine) return false;
+    if (syncing.current) { again.current = library; return false; }
     syncing.current = true;
     setBusy(true);
+    let ok = false;
     try {
       const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
       setRemoteEmpty(result.stamp === null);
       setError("");
+      ok = true;
       if (result.changedLocal) onMerged?.()?.(result.doc, result.report);
     } catch (failure) { setError(explain(failure)); }
-    finally { syncing.current = false; setBusy(false); }
+    finally {
+      syncing.current = false; setBusy(false);
+      // uma alteração chegou durante o envio: manda a versão mais nova em seguida
+      const next = again.current; again.current = undefined;
+      if (next && ok) void sync(next);
+    }
+    return ok;
   }, []);
 
   /** Chamado depois que o D1 confirmou. Respeita o intervalo mínimo e guarda a versão mais recente para o fim da espera. */

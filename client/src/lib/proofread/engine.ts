@@ -117,7 +117,7 @@ function levenshtein(a: string, b: string): number {
 }
 
 /** Nomes recorrentes: palavra capitalizada fora de início de frase, com 3+ ocorrências. */
-export function detectBookNames(text: string, extra: string[] = []): string[] {
+export function detectBookNames(text: string, extra: string[] = [], min = 3): string[] {
   const counts: Record<string, number> = {};
   const pattern = new RegExp(`(?<![${LETTER}])([${UPPER}][${LETTER}'’-]{2,})`, "gu");
   let match: RegExpExecArray | null;
@@ -127,7 +127,7 @@ export function detectBookNames(text: string, extra: string[] = []): string[] {
     if (match.index === 0 || /(^|\n)\s*$|[.!?…]\s+$|[—–-]\s*$|["“«]$/.test(before)) continue;
     counts[match[1]] = (counts[match[1]] ?? 0) + 1;
   }
-  const names = Object.keys(counts).filter(name => counts[name] >= 3);
+  const names = Object.keys(counts).filter(name => counts[name] >= min);
   extra.forEach(name => name.trim() && names.indexOf(name.trim()) === -1 && names.push(name.trim()));
   return names;
 }
