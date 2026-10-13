@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import type { ExportBook } from "@shared/book-export";
 import { BookReader } from "@/components/BookReader";
+import { CONTINGENCY } from "@/lib/contingency";
+import { IdbKV } from "@/lib/sync/kv";
 
 type Visibility = "private" | "public";
 type Loaded = { book: ExportBook; owner: boolean; visibility: Visibility; publicBase: string };
@@ -12,7 +14,16 @@ const asJson = async (response: Response) => {
   return response.json().catch(() => null) as Promise<Record<string, unknown> | null>;
 };
 
+async function loadLocalPreview(): Promise<State> {
+  try {
+    const saved = await new IdbKV().get<{ book?: ExportBook }>("meta", "preview-local");
+    if (saved?.book) return { status: "ready", book: saved.book, owner: false, visibility: "private", publicBase: window.location.origin };
+  } catch { /* armazenamento indisponível */ }
+  return { status: "error", message: "A pré-visualização não está mais neste aparelho. Volte ao editor e clique em Pré-visualizar." };
+}
+
 async function loadShare(token: string): Promise<State> {
+  if (CONTINGENCY && token === "local") return loadLocalPreview();
   try {
     const own = await fetch(`/api/share/${token}`, { credentials: "same-origin" });
     const ownData = own.ok ? await asJson(own) : null;
@@ -97,11 +108,12 @@ export default function ReaderPage() {
     );
   }
   const ready = state;
+  const localExtra = CONTINGENCY ? <a className="inline-flex h-9 items-center rounded-md border border-current/30 px-2.5 text-sm" href={import.meta.env.BASE_URL}>Voltar ao editor</a> : null;
   return (
     <BookReader
       book={ready.book}
       activeId={activeId}
-      extra={ready.owner ? <><a className="inline-flex h-9 items-center rounded-md border border-current/30 px-2.5 text-sm" href="/">Voltar ao editor</a><SharePanel token={token} visibility={ready.visibility} publicBase={ready.publicBase} onChange={next => setState({ ...ready, visibility: next })} /></> : null}
+      extra={CONTINGENCY ? localExtra : ready.owner ? <><a className="inline-flex h-9 items-center rounded-md border border-current/30 px-2.5 text-sm" href="/">Voltar ao editor</a><SharePanel token={token} visibility={ready.visibility} publicBase={ready.publicBase} onChange={next => setState({ ...ready, visibility: next })} /></> : null}
     />
   );
 }

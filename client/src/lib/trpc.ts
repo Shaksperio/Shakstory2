@@ -3,6 +3,8 @@ import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from
 import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, hasCompleteCoauthorSamples, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 import { buildStyleDnaPrompt } from "@shared/style-dna";
 import { buildContinuityPrompt } from "@shared/continuity-radar";
+import { CONTINGENCY } from "./contingency";
+import { mirrorIdToken } from "./mirror/firebase";
 
 type QueryOptions = {
   enabled?: boolean;
@@ -198,18 +200,26 @@ type User = {
   role: "admin";
 };
 
+/** Servidor de IA do modo de contingência (Cloudflare Worker público, protegido por login do Firebase). */
+export const CONTINGENCY_AI_URL = "https://shakstory-ai.antonyopintor.workers.dev";
+export const CONTINGENCY_UNAVAILABLE = "No modo de contingência este recurso usa só os dados deste aparelho e do Firebase; ele fica disponível no endereço principal.";
+
 const json = async <T>(url: string, init?: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let target = url;
+  const headers: Record<string, string> = { "content-type": "application/json", ...((init?.headers as Record<string, string> | undefined) ?? {}) };
+  if (CONTINGENCY) {
+    // Sem o servidor principal (D1) a hospedagem estática responderia 405 a qualquer POST. IA vai ao Worker de contingência; o resto não tem servidor.
+    if (url.indexOf("/api/assist") !== 0) throw new CloudflareApiError(CONTINGENCY_UNAVAILABLE, { code: "CONTINGENCY", status: 0 });
+    try { headers.authorization = "Bearer " + (await mirrorIdToken()); }
+    catch { throw new CloudflareApiError("Entre com o Google para usar a IA no modo de contingência.", { code: "UNAUTHORIZED", status: 401 }); }
+    target = CONTINGENCY_AI_URL + url;
+  }
+  const response = await fetch(target, { ...init, headers });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
     const code = response.status === 409 ? "CONFLICT" : String(payload.code ?? "");
-    const message = String(payload.error ?? payload.message ?? `HTTP ${response.status}`);
+    const fallback = response.status === 405 ? "O servidor não aceitou esta operação (HTTP 405)." : `HTTP ${response.status}`;
+    const message = String(payload.error ?? payload.message ?? fallback);
     throw new CloudflareApiError(message, { code, status: response.status });
   }
   return payload as T;
@@ -266,7 +276,7 @@ const literaryPrompt: Record<LiteraryInput["focus"], string> = {
 };
 
 const readOptionalDocument = async (path?: string): Promise<Record<string, unknown> | null> => {
-  if (!path) return null;
+  if (!path || CONTINGENCY) return null;
   try {
     const result = await readDocument(path);
     return result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : null;
