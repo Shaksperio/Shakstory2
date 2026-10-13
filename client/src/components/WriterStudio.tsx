@@ -17,7 +17,8 @@ import { CONTINGENCY } from "@/lib/contingency";
 import { DataSafetyPanel } from "@/components/DataSafetyPanel";
 import { CowilaChat } from "@/components/CowilaChat";
 import { mergeCharacters } from "@/lib/cowila/project";
-import { askCowila } from "@/lib/trpc";
+// Carregada só quando a Cowila é usada (os testes que simulam o trpc não precisam conhecê-la).
+const askCowila = (input: import("@/lib/trpc").CowilaAsk) => import("@/lib/trpc").then(module => module.askCowila(input));
 import { prepareExportAssets } from "@/lib/export-assets";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
