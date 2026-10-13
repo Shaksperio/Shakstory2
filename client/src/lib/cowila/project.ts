@@ -213,3 +213,24 @@ export function rewritePrompt(level: Level): string {
     "Mantenha extensão parecida e o mesmo número de parágrafos. Devolva SOMENTE o texto reescrito, sem comentários, aspas ou títulos."
   );
 }
+
+/** Pedido de sinopse: só o texto final, sem conversa. */
+export function synopsisPrompt(level: Level, strict = false): string {
+  return (
+    cowilaSystemNote(level) +
+    "\n\nTAREFA: escreva a sinopse de quarta capa deste livro, em 80 a 120 palavras, sem spoilers do final, usando SOMENTE o que está no resumo do projeto. " +
+    "FORMATO OBRIGATÓRIO: devolva apenas o texto da sinopse, em um ou dois parágrafos. Não cumprimente, não se apresente, não explique o que é uma sinopse, " +
+    "não faça perguntas, não dê opções e não comente o resultado." +
+    (strict ? " Sua resposta anterior continha conversa. Comece diretamente pela primeira frase da sinopse." : "")
+  );
+}
+
+/** Aceita só se parecer uma sinopse; resposta de conversa (saudação, pergunta, explicação) é descartada. */
+export function cleanSynopsis(raw: string): string | null {
+  let text = raw.trim().replace(/^(sinopse|quarta capa)\s*[:\-–]\s*/i, "").replace(/^["“«]+|["”»]+$/g, "").trim();
+  if (!text || /[?？]/.test(text)) return null;
+  if (new RegExp("(?<![\\p{L}])(ol[áa]|sou a cowila|assistente liter[áa]ria|vamos (come[cç]ar|criar)|o que voc[êe]|quer continuar|uma sinopse [ée]|aqui est[áa])(?![\\p{L}])", "iu").test(text)) return null;
+  if (text.split(/\n\s*\n/).length > 3) return null;
+  const count = (text.match(/\S+/g) ?? []).length;
+  return count >= 40 && count <= 170 ? text : null;
+}

@@ -72,3 +72,17 @@ describe("Cowila: projeto e personagens", () => {
     expect(chunks.join("").replace(/\s+/g, "")).toBe(long.replace(/\s+/g, ""));
   });
 });
+
+import { cleanSynopsis } from "./project";
+describe("sinopse limpa", () => {
+  const body = Array(60).fill("palavra").join(" ") + ".";
+  it("aceita só o texto da sinopse", () => {
+    expect(cleanSynopsis(`Sinopse: "${body}"`)).toBe(body);
+  });
+  it("descarta resposta de conversa (saudação, pergunta, explicação)", () => {
+    expect(cleanSynopsis("Olá! Sou a Cowila, assistente literária do Shakstory. " + body)).toBeNull();
+    expect(cleanSynopsis(body + " O que você acha?")).toBeNull();
+    expect(cleanSynopsis("Uma sinopse é uma breve descrição. " + body)).toBeNull();
+    expect(cleanSynopsis("Curto demais.")).toBeNull();
+  });
+});

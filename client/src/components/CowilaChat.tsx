@@ -4,7 +4,7 @@ import { Button } from "./ui/button";
 import type { CowilaAsk } from "@/lib/trpc";
 import {
   SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote,
-  detectIntent, localCharacters, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
+  cleanSynopsis, countBookWords, detectIntent, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
 } from "@/lib/cowila/project";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -41,6 +41,7 @@ export function CowilaChat(props: CowilaChatProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [undoDesc, setUndoDesc] = useState<{ previous: string } | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
   const end = useRef<HTMLDivElement | null>(null);
   const level: Level = levelPref === "auto" ? assessLevel(books) : levelPref;
@@ -112,8 +113,11 @@ export function CowilaChat(props: CowilaChatProps) {
       else if (intent === "rewrite") await runRewrite();
       else if (!online) say("Estou sem internet agora. Offline eu posso explicar o Shakstory e cadastrar nomes de personagens; pergunte “como uso o Shakstory?”.");
       else if (intent === "synopsis") {
-        const text = await ask({ prompt: cowilaSystemNote(level) + "\n\nEscreva uma sinopse de 80 a 120 palavras para a quarta capa deste livro, sem spoilers do final, em português do Brasil.", text: digest(), bookTitle: active?.title });
-        if (text) { setProposal({ kind: "synopsis", text }); say("Sugeri uma sinopse abaixo. Se gostar, use como descrição do livro."); } else say("Não consegui gerar a sinopse agora.");
+        if (!active || countBookWords(active) < 300) return say("Ainda há pouco texto neste livro (menos de 300 palavras) para eu escrever uma sinopse fiel, sem inventar. Escreva mais alguns parágrafos e peça de novo.");
+        let clean = cleanSynopsis(await ask({ prompt: synopsisPrompt(level), text: digest(), bookTitle: active.title }));
+        if (!clean) clean = cleanSynopsis(await ask({ prompt: synopsisPrompt(level, true), text: digest(), bookTitle: active.title }));
+        if (clean) { setProposal({ kind: "synopsis", text: clean }); say("Sugeri uma sinopse abaixo. Você pode editar o texto antes de usar."); }
+        else say("Não consegui gerar uma sinopse limpa agora (a IA respondeu em tom de conversa). Nada foi alterado no livro. Tente de novo em instantes.");
       } else {
         const prompt = cowilaSystemNote(level) + "\n\nPergunta do autor: " + message;
         say((await ask({ prompt, text: digest(), history, bookTitle: active?.title })) || "Não consegui responder agora.");
@@ -157,9 +161,13 @@ export function CowilaChat(props: CowilaChatProps) {
         {busy && <p className="text-xs text-muted-foreground">A Cowila está lendo o seu projeto…</p>}
         {proposal?.kind === "synopsis" && (
           <div className="rounded-lg border border-primary/30 p-3">
-            <p className="whitespace-pre-wrap text-[13px] leading-5">{proposal.text}</p>
+            <textarea aria-label="Sinopse sugerida" value={proposal.text} onChange={event => setProposal({ kind: "synopsis", text: event.target.value })} rows={8} className="w-full min-w-0 rounded-md border border-border bg-background p-2 text-[13px] leading-5" />
             <div className="mt-2 flex gap-2">
-              <Button size="sm" onClick={() => { props.onSetDescription(proposal.text); setProposal(null); say("Descrição do livro atualizada. Você pode editá-la em Preparação."); }}>Usar como descrição</Button>
+              <Button size="sm" onClick={() => {
+                const previous = active?.publication?.description ?? "";
+                if (previous.trim() && !window.confirm("O livro já tem uma descrição. Substituir por esta sinopse? Dá para restaurar a anterior em seguida.")) return;
+                setUndoDesc({ previous }); props.onSetDescription(proposal.text); setProposal(null); say("Descrição do livro atualizada. Você pode editá-la em Preparação ou restaurar a anterior abaixo.");
+              }}>Usar como descrição</Button>
               <Button size="sm" variant="outline" onClick={() => setProposal(null)}>Descartar</Button>
             </div>
           </div>
@@ -175,6 +183,9 @@ export function CowilaChat(props: CowilaChatProps) {
               <Button size="sm" variant="outline" onClick={() => setProposal(null)}>Descartar</Button>
             </div>
           </div>
+        )}
+        {undoDesc && !proposal && (
+          <Button size="sm" variant="outline" onClick={() => { props.onSetDescription(undoDesc.previous); setUndoDesc(null); say("Descrição anterior restaurada."); }}>Restaurar descrição anterior</Button>
         )}
         {undo && !proposal && (
           <Button size="sm" variant="outline" onClick={() => { if (draft !== undo.after && !window.confirm("Você editou o capítulo depois da reescrita. Desfazer vai voltar à versão anterior à reescrita. Continuar?")) return; props.onReplaceDraft(undo.before); setUndo(null); say("Reescrita desfeita."); }}>Desfazer reescrita</Button>
