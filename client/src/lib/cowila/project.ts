@@ -229,7 +229,7 @@ export function synopsisPrompt(level: Level, strict = false): string {
 export function cleanSynopsis(raw: string): string | null {
   let text = raw.trim().replace(/^(sinopse|quarta capa)\s*[:\-–]\s*/i, "").replace(/^["“«]+|["”»]+$/g, "").trim();
   if (!text || /[?？]/.test(text)) return null;
-  if (/(?<![\p{L}])(ol[áa]|sou a cowila|assistente liter[áa]ria|vamos (come[cç]ar|criar)|o que voc[êe]|quer continuar|uma sinopse [ée]|aqui est[áa])(?![\p{L}])/iu.test(text)) return null;
+  if (new RegExp("(?<![\\p{L}])(ol[áa]|sou a cowila|assistente liter[áa]ria|vamos (come[cç]ar|criar)|o que voc[êe]|quer continuar|uma sinopse [ée]|aqui est[áa])(?![\\p{L}])", "iu").test(text)) return null;
   if (text.split(/\n\s*\n/).length > 3) return null;
   const count = (text.match(/\S+/g) ?? []).length;
   return count >= 40 && count <= 170 ? text : null;
