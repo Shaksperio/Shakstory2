@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { CowilaChat, type CowilaChatProps } from "./CowilaChat";
 
 afterEach(cleanup);
-const text = "A noite caiu sobre Gareth. Então Élia abriu a janela e viu Gareth. Élia chamou Gareth. Élia sorriu.";
+const text = "A noite caiu sobre Gareth. Então Élia abriu a janela e viu Gareth. Depois chamou Élia baixinho, e Élia sorriu para Gareth.";
 const book = { id: "b1", title: "Livro", nodes: [{ id: "n1", title: "Cap 1", kind: "chapter", content: text }] };
 const base = (over: Partial<CowilaChatProps> = {}): CowilaChatProps => ({
   books: [book], active: book, activeNodeId: "n1", draft: text, online: true,
@@ -38,7 +38,7 @@ describe("CowilaChat", () => {
   });
   it("reescrita só é aplicada com o clique e pode ser desfeita", async () => {
     const onReplace = vi.fn();
-    const ask = vi.fn(async () => "A noite caiu sobre Gareth. Então Élia abriu a janela e avistou Gareth. Élia chamou Gareth. Élia sorriu.");
+    const ask = vi.fn(async () => text.replace("viu", "avistou"));
     render(<CowilaChat {...base({ ask, onReplaceDraft: onReplace })} />);
     fireEvent.click(screen.getByText("Reescrever capítulo"));
     await waitFor(() => expect(screen.getByText("Aplicar ao capítulo")).toBeTruthy());
