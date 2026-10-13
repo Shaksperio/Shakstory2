@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProofreadPanel } from "./ProofreadPanel";
+
+import { afterEach } from "vitest";
+afterEach(cleanup);
 
 describe("ProofreadPanel", () => {
   it("lista dúvidas, aceita só com clique e permite desfazer", () => {
