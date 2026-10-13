@@ -134,25 +134,25 @@ export function CowilaChat(props: CowilaChatProps) {
     return <button type="button" aria-label="Abrir a Cowila" onClick={() => setOpen(true)} className="fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg lg:bottom-6"><MessageCircle className="h-4 w-4" />Cowila</button>;
   }
   return (
-    <aside aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-border bg-card shadow-xl sm:w-[380px]">
-      <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <div>
-          <p className="text-sm font-semibold">Cowila · atendimento online</p>
-          <p className="text-[11px] text-muted-foreground">{online ? "Online" : "Sem internet"} · {active ? active.title : "nenhum livro aberto"}</p>
+    <aside aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden border-l border-border bg-card shadow-xl sm:w-[380px]">
+      <header className="border-b border-border px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold leading-tight">Cowila · atendimento online</p>
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{online ? "Online" : "Sem internet"} · {active ? active.title : "nenhum livro aberto"}</p>
+          </div>
+          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Fechar a Cowila" onClick={() => setOpen(false)}><X className="h-4 w-4" /></Button>
         </div>
-        <div className="flex items-center gap-1">
-          <select aria-label="Seu nível" value={levelPref} onChange={event => { const v = event.target.value as "auto" | Level; setLevelPref(v); put("shakstory:cowila:level", v); }} className="h-8 rounded-md border border-border bg-background px-1 text-[11px]">
-            <option value="auto">Nível: automático ({level})</option>
-            <option value="iniciante">Sou iniciante</option>
-            <option value="experiente">Sou experiente</option>
-          </select>
-          <Button size="icon" variant="ghost" aria-label="Fechar a Cowila" onClick={() => setOpen(false)}><X className="h-4 w-4" /></Button>
-        </div>
+        <select aria-label="Seu nível" value={levelPref} onChange={event => { const v = event.target.value as "auto" | Level; setLevelPref(v); put("shakstory:cowila:level", v); }} className="mt-2 h-8 w-full min-w-0 rounded-md border border-border bg-background px-2 text-[11px]">
+          <option value="auto">Nível: automático ({level})</option>
+          <option value="iniciante">Sou iniciante</option>
+          <option value="experiente">Sou experiente</option>
+        </select>
       </header>
-      <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm" aria-live="polite">
+      <div className="min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto p-4 text-sm" aria-live="polite">
         <p className="rounded-lg bg-secondary/60 p-3 text-xs leading-5">{WELCOME}</p>
         {messages.map((message, index) => (
-          <p key={index} className={"whitespace-pre-wrap rounded-lg p-3 text-[13px] leading-5 " + (message.role === "user" ? "ml-8 bg-primary/10" : "mr-4 border border-border")}>{message.content}</p>
+          <p key={index} className={"whitespace-pre-wrap break-words rounded-lg p-3 text-[13px] leading-5 " + (message.role === "user" ? "ml-8 bg-primary/10" : "mr-4 border border-border")}>{message.content}</p>
         ))}
         {busy && <p className="text-xs text-muted-foreground">A Cowila está lendo o seu projeto…</p>}
         {proposal?.kind === "synopsis" && (
@@ -181,13 +181,13 @@ export function CowilaChat(props: CowilaChatProps) {
         )}
         <div ref={end} />
       </div>
-      <div className="border-t border-border p-3">
+      <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="mb-2 flex flex-wrap gap-1.5">
           {quick.map(([label, text]) => <Button key={label} size="sm" variant="outline" className="h-7 px-2 text-[11px]" disabled={busy} onClick={() => void send(text)}>{label}</Button>)}
         </div>
         <form className="flex gap-2" onSubmit={event => { event.preventDefault(); void send(input); }}>
-          <input aria-label="Mensagem para a Cowila" value={input} onChange={event => setInput(event.target.value)} placeholder="Pergunte ou peça algo…" className="h-9 flex-1 rounded-md border border-border bg-background px-3 text-sm" />
-          <Button type="submit" size="icon" aria-label="Enviar" disabled={busy || !input.trim()}><Send className="h-4 w-4" /></Button>
+          <input aria-label="Mensagem para a Cowila" value={input} onChange={event => setInput(event.target.value)} placeholder="Pergunte ou peça algo…" className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm" />
+          <Button type="submit" size="icon" className="shrink-0" aria-label="Enviar" disabled={busy || !input.trim()}><Send className="h-4 w-4" /></Button>
         </form>
       </div>
     </aside>
