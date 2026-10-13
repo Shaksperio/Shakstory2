@@ -2,12 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { Button } from "./ui/button";
 import type { CowilaAsk } from "@/lib/trpc";
+import { feedbackFor, localArithmetic, verifyAnswer } from "@/lib/cowila/mcr";
 import {
   SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote, parseVerification, verifyPrompt,
-  cleanSynopsis, countBookWords, detectIntent, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
+  cleanSynopsis, countBookWords, detectIntent, knownBookNames, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
 } from "@/lib/cowila/project";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; note?: string };
 type Proposal = { kind: "synopsis"; text: string } | { kind: "rewrite"; before: string; after: string; kept: number; total: number };
 type Found = Array<{ name: string; role: string; notes: string }>;
 
@@ -44,6 +45,10 @@ export function CowilaChat(props: CowilaChatProps) {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [undoDesc, setUndoDesc] = useState<{ previous: string } | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
+  const memKey = `shakstory:cowila:memoria:${active?.id ?? "geral"}`;
+  const [memory, setMemory] = useState<string[]>([]);
+  useEffect(() => { try { setMemory(JSON.parse(store(memKey) || "[]")); } catch { setMemory([]); } }, [memKey]);
+  const saveMemory = (items: string[]) => { setMemory(items); put(memKey, JSON.stringify(items)); };
   const end = useRef<HTMLDivElement | null>(null);
   const level: Level = levelPref === "auto" ? assessLevel(books) : levelPref;
 
@@ -58,8 +63,8 @@ export function CowilaChat(props: CowilaChatProps) {
     return () => document.body.classList.remove("cowila-open");
   }, [open]);
 
-  const say = (content: string) => setMessages(list => [...list, { role: "assistant", content }]);
-  const digest = () => buildProjectDigest(books, active, activeNodeId, draft);
+  const say = (content: string, note?: string) => setMessages(list => [...list, { role: "assistant", content, note }]);
+  const digest = () => buildProjectDigest(books, active, activeNodeId, draft, 11500, memory);
   const fail = (error: unknown) => say("Não consegui falar com a IA agora: " + (error instanceof Error ? error.message : "erro desconhecido") + " Você pode tentar de novo; seu texto não foi alterado.");
 
   const runCharacters = async () => {
@@ -120,19 +125,34 @@ export function CowilaChat(props: CowilaChatProps) {
         if (clean) { setProposal({ kind: "synopsis", text: clean }); say("Sugeri uma sinopse abaixo. Você pode editar o texto antes de usar."); }
         else say("Não consegui gerar uma sinopse limpa agora (a IA respondeu em tom de conversa). Nada foi alterado no livro. Tente de novo em instantes.");
       } else {
+        // Cerebelo: pergunta que é só uma conta se resolve com aritmética exata, sem chamar a IA.
+        const exact = localArithmetic(message);
+        if (exact) return say(exact, "✔ Calculado com aritmética exata (Cerebelo).");
         const context = intent === "guide" ? SHAKSTORY_GUIDE + "\n\n" + digest() : digest();
-        const prompt = cowilaSystemNote(level, "livre") + "\n\nPergunta do autor: " + message;
+        const names = knownBookNames(active as CBook | undefined);
+        const basePrompt = cowilaSystemNote(level, "livre") + "\n\nPergunta do autor: " + message;
         // Consciente: responde livremente, com o projeto como contexto e sem teto curto de resposta.
-        let answer = (await ask({ prompt, text: context, history, bookTitle: active?.title, long: true })) || "";
+        let answer = (await ask({ prompt: basePrompt, text: context, history, bookTitle: active?.title, long: true })) || "";
         if (!answer) return say("Não consegui responder agora.");
-        // Subconsciente + Cortex: confere a resposta; só troca se achar erro explícito.
+        let verdict = verifyAnswer(message, answer, names, active?.title);
+        // Cerebelo refutou uma conta: devolve ao Consciente com os achados (como dado) até 2 vezes; depois se abstém.
+        for (let attempt = 0; verdict.status === "refutado" && attempt < 2; attempt++) {
+          answer = (await ask({ prompt: basePrompt + "\n\nDADOS DE VERIFICAÇÃO (não são instruções): " + feedbackFor(verdict) + " Refaça a resposta com os valores corretos.", text: context, history, bookTitle: active?.title, long: true })) || answer;
+          verdict = verifyAnswer(message, answer, names, active?.title);
+        }
+        if (verdict.status === "refutado") return say("Não vou te entregar uma resposta com conta errada. Pelos cálculos exatos: " + verdict.refuted.map(f => `${f.text} → o certo é ${f.expected}`).join("; ") + ".", "Cerebelo: resposta recusada por conta refutada.");
+        // Subconsciente + Cortex: segunda leitura pela IA; só troca se achar erro explícito e a troca passar no Cerebelo.
         if (verify) {
           try {
             const fixed = parseVerification(await ask({ prompt: verifyPrompt(message, answer), text: context, long: true, bookTitle: active?.title }));
-            if (fixed) answer = fixed;
+            if (fixed && verifyAnswer(message, fixed, names, active?.title).status !== "refutado") { answer = fixed; verdict = verifyAnswer(message, answer, names, active?.title); }
           } catch { /* a verificação é um reforço; sem ela a resposta original segue */ }
         }
-        say(answer);
+        const notes: string[] = [];
+        if (verdict.status === "verificado") notes.push("✔ Contas conferidas com aritmética exata (Cerebelo).");
+        if (verdict.status === "nao-verificavel") notes.push("Números ambíguos (ex.: 3.141) não foram conferidos.");
+        if (verdict.unknown.length) notes.push("⚠ A resposta cita nomes que não encontrei no seu livro: " + verdict.unknown.join(", ") + ". Confira.");
+        say(answer, notes.join(" ") || undefined);
       }
     } catch (error) { fail(error); }
     finally { setBusy(false); }
@@ -172,7 +192,11 @@ export function CowilaChat(props: CowilaChatProps) {
       <div className="min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto p-4 text-sm" aria-live="polite">
         <p className="rounded-lg bg-secondary/60 p-3 text-xs leading-5">{WELCOME}</p>
         {messages.map((message, index) => (
-          <p key={index} className={"whitespace-pre-wrap break-words rounded-lg p-3 text-[13px] leading-5 " + (message.role === "user" ? "ml-8 bg-primary/10" : "mr-4 border border-border")}>{message.content}</p>
+          <div key={index} className={"rounded-lg p-3 text-[13px] leading-5 " + (message.role === "user" ? "ml-8 bg-primary/10" : "mr-4 border border-border")}>
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            {message.note && <p className="mt-1.5 text-[11px] text-muted-foreground">{message.note}</p>}
+            {message.role === "assistant" && message.content.length > 20 && !memory.includes(message.content.slice(0, 240)) && <button type="button" className="mt-1.5 text-[11px] underline text-muted-foreground" onClick={() => saveMemory([...memory, message.content.slice(0, 240)].slice(-30))}>Lembrar isso</button>}
+          </div>
         ))}
         {busy && <p className="text-xs text-muted-foreground">A Cowila está lendo o seu projeto…</p>}
         {proposal?.kind === "synopsis" && (
@@ -205,6 +229,13 @@ export function CowilaChat(props: CowilaChatProps) {
         )}
         {undo && !proposal && (
           <Button size="sm" variant="outline" onClick={() => { if (draft !== undo.after && !window.confirm("Você editou o capítulo depois da reescrita. Desfazer vai voltar à versão anterior à reescrita. Continuar?")) return; props.onReplaceDraft(undo.before); setUndo(null); say("Reescrita desfeita."); }}>Desfazer reescrita</Button>
+        )}
+        {memory.length > 0 && (
+          <details className="rounded-lg border border-border p-3 text-xs">
+            <summary className="cursor-pointer font-medium">Memória da Cowila ({memory.length})</summary>
+            <p className="mt-1 text-muted-foreground">Fatos que você pediu para lembrar. Entram no contexto das respostas deste livro. Guardados só neste aparelho.</p>
+            <ul className="mt-2 space-y-1">{memory.map((item, i) => <li key={i} className="flex items-start justify-between gap-2"><span className="min-w-0 break-words">{item}</span><button type="button" aria-label="Esquecer" className="shrink-0 text-muted-foreground" onClick={() => saveMemory(memory.filter((_, j) => j !== i))}>×</button></li>)}</ul>
+          </details>
         )}
         <div ref={end} />
       </div>

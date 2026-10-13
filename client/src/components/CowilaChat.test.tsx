@@ -77,4 +77,24 @@ describe("CowilaChat", () => {
     fireEvent.click(screen.getByLabelText("Enviar"));
     await waitFor(() => expect(screen.getByText("Camberra é a capital.")).toBeTruthy());
   });
+  it("Cerebelo responde conta pura sem chamar a IA", async () => {
+    const ask = vi.fn();
+    render(<CowilaChat {...base({ ask })} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Quanto é 17*23?" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => expect(screen.getByText("17 × 23 = 391")).toBeTruthy());
+    expect(ask).not.toHaveBeenCalled();
+  });
+  it("conta errada é devolvida com os achados e, se persistir, a resposta é recusada", async () => {
+    const ask = vi.fn(async () => "Então 17 × 23 = 392, certo.");
+    render(<CowilaChat {...base({ ask })} />);
+    openChat();
+    fireEvent.click(screen.getByLabelText("Modo livre com verificação: responde qualquer assunto e confere a própria resposta (Consciente → Subconsciente → Cortex) antes de mostrar. Mais lento.") );
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Explique a multiplicação de dezessete por vinte e três" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => expect(screen.getByText(/Não vou te entregar uma resposta com conta errada/)).toBeTruthy());
+    expect(ask).toHaveBeenCalledTimes(3);
+    expect((ask.mock.calls[1][0] as { prompt: string }).prompt).toContain("o valor exato é 391");
+  });
 });
