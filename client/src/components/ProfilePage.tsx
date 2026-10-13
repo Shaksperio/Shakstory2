@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Camera, ExternalLink, LogOut, MapPin } from "lucide-react";
+import { ArrowLeft, BookOpen, Camera, ExternalLink, LogOut, MapPin, RotateCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -90,13 +90,16 @@ export type ProfilePageProps = {
   onOpen: (book: AccountBook) => void;
   onClose: () => void;
   onSignOut: () => void;
+  onDeleteBook?: (book: AccountBook) => void;
+  onResetBook?: (book: AccountBook) => void;
   dataSafety?: React.ReactNode;
 };
 
 const LINK_HINTS = ["https://instagram.com/seu-perfil", "https://x.com/seu-perfil", "https://tiktok.com/@seu-perfil"];
 
-export function ProfilePage({ books, profile, email, online, displayName, syncLabel, statusLabel, onProfile, onOpen, onClose, onSignOut, dataSafety }: ProfilePageProps) {
+export function ProfilePage({ books, profile, email, online, displayName, syncLabel, statusLabel, onProfile, onOpen, onClose, onSignOut, onDeleteBook, onResetBook, dataSafety }: ProfilePageProps) {
   const [error, setError] = useState("");
+  const [pending, setPending] = useState<{ book: AccountBook; mode: "delete" | "reset" } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const active = books.filter(book => !book.archived);
   const finished = active.filter(book => book.status === "completed");
@@ -258,7 +261,11 @@ export function ProfilePage({ books, profile, email, online, displayName, syncLa
                     <p className="mt-1 text-[11px] text-muted-foreground">Criado em {dateOf(book.startedAt ?? book.updatedAt)} · atualizado em {dateOf(book.lastOpenedAt ?? book.updatedAt)}</p>
                     <p className="text-[11px] text-muted-foreground">{number(wordsOf(book))} palavras · {chapters} {chapters === 1 ? "capítulo" : "capítulos"}</p>
                     <Progress value={percent(book)} className="mt-2 h-1.5" />
-                    <Button className="mt-auto self-start" size="sm" variant="outline" onClick={() => onOpen(book)}><BookOpen className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Abrir</Button>
+                    <div className="mt-auto flex flex-wrap gap-2 pt-2">
+                      <Button size="sm" variant="outline" onClick={() => onOpen(book)}><BookOpen className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Abrir</Button>
+                      {onResetBook && <Button size="sm" variant="outline" className="border-destructive/30 text-destructive hover:text-destructive" aria-label={`Zerar manuscrito de ${book.title}`} onClick={() => setPending({ book, mode: "reset" })}><RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Zerar manuscrito</Button>}
+                      {onDeleteBook && <Button size="sm" variant="outline" className="border-destructive/30 text-destructive hover:text-destructive" aria-label={`Excluir projeto ${book.title}`} onClick={() => setPending({ book, mode: "delete" })}><Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Excluir projeto</Button>}
+                    </div>
                   </div>
                 </li>
               );
@@ -274,6 +281,23 @@ export function ProfilePage({ books, profile, email, online, displayName, syncLa
         <p className="mt-1 text-xs text-muted-foreground">Encerra o acesso neste navegador; na próxima abertura será pedido o login de novo. Os textos salvos neste aparelho não são apagados.</p>
         <Button className="mt-3" size="sm" variant="outline" onClick={onSignOut}><LogOut className="mr-1.5 h-4 w-4" aria-hidden="true" />Sair da conta</Button>
       </section>
+
+      {pending && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-5 backdrop-blur-sm" onClick={() => setPending(null)}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl" onClick={event => event.stopPropagation()}>
+            <h2 id="confirm-title" className="font-serif text-2xl">{pending.mode === "delete" ? "Excluir projeto?" : "Zerar manuscrito?"}</h2>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {pending.mode === "delete"
+                ? `“${pending.book.title}” será removido da biblioteca e dos endereços sincronizados (principal, Firebase e contingência). Uma cópia de segurança fica guardada neste aparelho.`
+                : `Todo o texto, os capítulos, o planejamento e as notas de “${pending.book.title}” serão substituídos por um manuscrito vazio. O livro, a capa e os dados de publicação continuam. Uma cópia de segurança fica guardada neste aparelho.`}
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setPending(null)}>Cancelar</Button>
+              <Button variant="destructive" onClick={() => { const { book, mode } = pending; setPending(null); if (mode === "delete") onDeleteBook?.(book); else onResetBook?.(book); }}>{pending.mode === "delete" ? "Excluir projeto" : "Zerar manuscrito"}</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

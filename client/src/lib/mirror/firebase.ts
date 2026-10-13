@@ -72,6 +72,15 @@ export async function signInMirror(): Promise<MirrorUser> {
   return { uid: result.user.uid, email: result.user.email };
 }
 
+/** Token de identidade do Firebase do usuário atual (para autenticar chamadas ao Worker de IA). */
+export async function mirrorIdToken(): Promise<string> {
+  const sdk = await loadSdk();
+  await sdk.authInstance.authStateReady();
+  const user = sdk.authInstance.currentUser;
+  if (!user) throw new Error("sem login");
+  return user.getIdToken();
+}
+
 export async function signOutMirror() {
   const sdk = await loadSdk();
   await sdk.auth.signOut(sdk.authInstance);

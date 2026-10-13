@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProfilePage, safeUrl } from "./ProfilePage";
 import type { AccountBook, Profile } from "./AccountMenu";
@@ -67,5 +67,22 @@ describe("ProfilePage", () => {
     const props = setup();
     fireEvent.click(screen.getByRole("button", { name: /Sair da conta/ }));
     expect(props.onSignOut).toHaveBeenCalled();
+  });
+
+  it("exclui e zera só depois de confirmar", () => {
+    const onDeleteBook = vi.fn();
+    const onResetBook = vi.fn();
+    setup({ onDeleteBook, onResetBook });
+    fireEvent.click(screen.getByRole("button", { name: "Excluir projeto Ideia Solta" }));
+    expect(onDeleteBook).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Excluir projeto Ideia Solta" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Excluir projeto" }));
+    expect(onDeleteBook).toHaveBeenCalledTimes(1);
+    expect(onDeleteBook.mock.calls[0][0].id).toBe("c");
+    fireEvent.click(screen.getByRole("button", { name: "Zerar manuscrito de Livro Pronto" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Zerar manuscrito" }));
+    expect(onResetBook.mock.calls[0][0].id).toBe("b");
   });
 });
