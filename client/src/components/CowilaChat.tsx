@@ -35,7 +35,7 @@ const WELCOME = "Oi! Eu sou a Cowila. Leio seu manuscrito, capítulos e livros p
 export function CowilaChat(props: CowilaChatProps) {
   const { books, active, activeNodeId, draft, online, ask } = props;
   const chatKey = `shakstory:cowila:chat:${active?.id ?? "geral"}`;
-  const [open, setOpen] = useState(() => store("shakstory:cowila:open") !== "0");
+  const [open, setOpen] = useState(() => store("shakstory:cowila:aberta") === "1");
   const [levelPref, setLevelPref] = useState<"auto" | Level>(() => (store("shakstory:cowila:level") as "auto" | Level) || "auto");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -52,7 +52,7 @@ export function CowilaChat(props: CowilaChatProps) {
   useEffect(() => { put(chatKey, JSON.stringify(messages.slice(-30))); end.current?.scrollIntoView?.({ block: "end" }); }, [messages, chatKey]);
   useEffect(() => {
     document.body.classList.toggle("cowila-open", open);
-    put("shakstory:cowila:open", open ? "1" : "0");
+    put("shakstory:cowila:aberta", open ? "1" : "0");
     return () => document.body.classList.remove("cowila-open");
   }, [open]);
 
