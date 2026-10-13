@@ -3,7 +3,7 @@ import { MessageCircle, Send, X } from "lucide-react";
 import { Button } from "./ui/button";
 import type { CowilaAsk } from "@/lib/trpc";
 import {
-  SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote,
+  SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote, parseVerification, verifyPrompt,
   cleanSynopsis, countBookWords, detectIntent, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
 } from "@/lib/cowila/project";
 
@@ -30,7 +30,7 @@ const put = (key: string, value: string) => {
   try { localStorage.setItem(key, value); } catch { /* conveniência */ }
 };
 
-const WELCOME = "Oi! Eu sou a Cowila. Leio seu manuscrito, capítulos e livros para entender o projeto. Posso explicar o Shakstory, preencher os personagens, sugerir a sinopse e reescrever capítulos — sempre com a sua aprovação.";
+const WELCOME = "Oi! Eu sou a Cowila. Pergunte o que quiser — sobre o seu livro, escrita, publicação ou qualquer outro assunto. Leio seu manuscrito para entender o projeto, e posso explicar o Shakstory, preencher personagens, sugerir a sinopse e reescrever capítulos, sempre com a sua aprovação.";
 
 export function CowilaChat(props: CowilaChatProps) {
   const { books, active, activeNodeId, draft, online, ask } = props;
@@ -40,6 +40,7 @@ export function CowilaChat(props: CowilaChatProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [verify, setVerify] = useState(() => store("shakstory:cowila:verificar") !== "0");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [undoDesc, setUndoDesc] = useState<{ previous: string } | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
@@ -89,7 +90,7 @@ export function CowilaChat(props: CowilaChatProps) {
     let kept = 0;
     for (const chunk of chunks) {
       try {
-        const result = await ask({ prompt: cowilaSystemNote(level) + "\n\n" + rewritePrompt(level), text: chunk, long: true, bookTitle: active.title });
+        const result = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + rewritePrompt(level), text: chunk, long: true, bookTitle: active.title });
         if (rewriteIsSafe(chunk, result)) out.push(result.trim()); else { out.push(chunk); kept++; }
       } catch (error) { out.push(chunk); kept++; if (kept === chunks.length) throw error; }
     }
@@ -108,10 +109,10 @@ export function CowilaChat(props: CowilaChatProps) {
     setBusy(true);
     try {
       const intent = detectIntent(message);
-      if (intent === "guide") say(SHAKSTORY_GUIDE);
+      if (intent === "guide" && (!online || message === "Como uso o Shakstory?")) say(SHAKSTORY_GUIDE);
       else if (intent === "characters") await runCharacters();
       else if (intent === "rewrite") await runRewrite();
-      else if (!online) say("Estou sem internet agora. Offline eu posso explicar o Shakstory e cadastrar nomes de personagens; pergunte “como uso o Shakstory?”.");
+      else if (!online) say("Estou sem internet agora. Offline eu posso explicar o Shakstory e cadastrar nomes de personagens; pergunte “como uso o Shakstory?”. Para o resto, preciso de conexão.");
       else if (intent === "synopsis") {
         if (!active || countBookWords(active) < 300) return say("Ainda há pouco texto neste livro (menos de 300 palavras) para eu escrever uma sinopse fiel, sem inventar. Escreva mais alguns parágrafos e peça de novo.");
         let clean = cleanSynopsis(await ask({ prompt: synopsisPrompt(level), text: digest(), bookTitle: active.title }));
@@ -119,8 +120,19 @@ export function CowilaChat(props: CowilaChatProps) {
         if (clean) { setProposal({ kind: "synopsis", text: clean }); say("Sugeri uma sinopse abaixo. Você pode editar o texto antes de usar."); }
         else say("Não consegui gerar uma sinopse limpa agora (a IA respondeu em tom de conversa). Nada foi alterado no livro. Tente de novo em instantes.");
       } else {
-        const prompt = cowilaSystemNote(level) + "\n\nPergunta do autor: " + message;
-        say((await ask({ prompt, text: digest(), history, bookTitle: active?.title })) || "Não consegui responder agora.");
+        const context = intent === "guide" ? SHAKSTORY_GUIDE + "\n\n" + digest() : digest();
+        const prompt = cowilaSystemNote(level, "livre") + "\n\nPergunta do autor: " + message;
+        // Consciente: responde livremente, com o projeto como contexto e sem teto curto de resposta.
+        let answer = (await ask({ prompt, text: context, history, bookTitle: active?.title, long: true })) || "";
+        if (!answer) return say("Não consegui responder agora.");
+        // Subconsciente + Cortex: confere a resposta; só troca se achar erro explícito.
+        if (verify) {
+          try {
+            const fixed = parseVerification(await ask({ prompt: verifyPrompt(message, answer), text: context, long: true, bookTitle: active?.title }));
+            if (fixed) answer = fixed;
+          } catch { /* a verificação é um reforço; sem ela a resposta original segue */ }
+        }
+        say(answer);
       }
     } catch (error) { fail(error); }
     finally { setBusy(false); }
@@ -147,6 +159,10 @@ export function CowilaChat(props: CowilaChatProps) {
           </div>
           <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Fechar a Cowila" onClick={() => setOpen(false)}><X className="h-4 w-4" /></Button>
         </div>
+        <label className="mt-2 flex items-start gap-2 text-[11px] leading-4 text-muted-foreground">
+          <input type="checkbox" className="mt-0.5" checked={verify} onChange={event => { setVerify(event.target.checked); put("shakstory:cowila:verificar", event.target.checked ? "1" : "0"); }} />
+          <span>Modo livre com verificação: responde qualquer assunto e confere a própria resposta (Consciente → Subconsciente → Cortex) antes de mostrar. Mais lento.</span>
+        </label>
         <select aria-label="Seu nível" value={levelPref} onChange={event => { const v = event.target.value as "auto" | Level; setLevelPref(v); put("shakstory:cowila:level", v); }} className="mt-2 h-8 w-full min-w-0 rounded-md border border-border bg-background px-2 text-[11px]">
           <option value="auto">Nível: automático ({level})</option>
           <option value="iniciante">Sou iniciante</option>

@@ -56,4 +56,25 @@ describe("CowilaChat", () => {
     fireEvent.click(screen.getByText("Desfazer reescrita"));
     expect(onReplace).toHaveBeenLastCalledWith(text);
   });
+  it("modo livre: responde assunto geral e troca a resposta só se o verificador corrigir", async () => {
+    const ask = vi.fn()
+      .mockResolvedValueOnce("A capital da Austrália é Sydney.")
+      .mockResolvedValueOnce("CORREÇÃO: A capital da Austrália é Camberra, não Sydney.");
+    render(<CowilaChat {...base({ ask })} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Qual a capital da Austrália?" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => expect(screen.getByText(/Camberra/)).toBeTruthy());
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect((ask.mock.calls[0][0] as { prompt: string }).prompt).toContain("QUALQUER pergunta");
+    expect(screen.queryByText(/é Sydney\.$/)).toBeNull();
+  });
+  it("modo livre: com OK mantém a resposta original", async () => {
+    const ask = vi.fn().mockResolvedValueOnce("Camberra é a capital.").mockResolvedValueOnce("OK");
+    render(<CowilaChat {...base({ ask })} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Qual a capital da Austrália?" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => expect(screen.getByText("Camberra é a capital.")).toBeTruthy());
+  });
 });
