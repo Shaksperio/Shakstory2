@@ -86,3 +86,18 @@ describe("sinopse limpa", () => {
     expect(cleanSynopsis("Curto demais.")).toBeNull();
   });
 });
+
+import { cowilaSystemNote, parseVerification } from "./project";
+describe("modo livre e verificação", () => {
+  it("modo livre não restringe a pergunta ao Shakstory nem ao livro", () => {
+    const livre = cowilaSystemNote("experiente", "livre");
+    expect(livre).toContain("QUALQUER pergunta");
+    expect(livre).not.toContain("SOMENTE");
+    expect(cowilaSystemNote("iniciante", "projeto")).toContain("SOMENTE");
+  });
+  it("só aceita correção explícita", () => {
+    expect(parseVerification("OK")).toBeNull();
+    expect(parseVerification("Parece boa.")).toBeNull();
+    expect(parseVerification("CORREÇÃO: A resposta correta e completa é esta aqui.")).toBe("A resposta correta e completa é esta aqui.");
+  });
+});
