@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { MessageCircle, Send, X } from "lucide-react";
 import { Button } from "./ui/button";
 import type { CowilaAsk } from "@/lib/trpc";
+import { openPlans, usePlan } from "@/lib/plans";
 import { feedbackFor, localArithmetic, verifyAnswer } from "@/lib/cowila/mcr";
 import {
   SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote, parseVerification, verifyPrompt,
@@ -36,6 +37,7 @@ const WELCOME = "Oi! Eu sou a Cowila. Pergunte o que quiser — sobre o seu livr
 export function CowilaChat(props: CowilaChatProps) {
   const { books, active, activeNodeId, draft, online, ask } = props;
   const chatKey = `shakstory:cowila:chat:${active?.id ?? "geral"}`;
+  const plan = usePlan();
   const [open, setOpen] = useState(() => store("shakstory:cowila:aberta") === "1");
   const [levelPref, setLevelPref] = useState<"auto" | Level>(() => (store("shakstory:cowila:level") as "auto" | Level) || "auto");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -168,6 +170,20 @@ export function CowilaChat(props: CowilaChatProps) {
 
   if (!open) {
     return <button type="button" aria-label="Abrir a Cowila" onClick={() => setOpen(true)} className="fixed bottom-20 right-4 z-30 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-sm font-medium text-primary-foreground shadow-lg lg:bottom-6"><MessageCircle className="h-4 w-4" />Cowila</button>;
+  }
+  if (!plan.features.cowila) {
+    return (
+      <aside aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden border-l border-border bg-card shadow-xl sm:w-[380px]">
+        <header className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+          <p className="text-sm font-semibold leading-tight">Cowila · atendimento online</p>
+          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Fechar a Cowila" onClick={() => setOpen(false)}><X className="h-4 w-4" /></Button>
+        </header>
+        <div className="space-y-3 p-4 text-sm">
+          <p className="rounded-lg bg-secondary/60 p-3 text-xs leading-5">O atendimento da Cowila não está incluído no seu plano atual ({plan.label}). {plan.plan === "expirado" ? "Seu teste de 7 dias terminou." : "Ele faz parte dos planos Premium e VIP."} Você continua podendo escrever e baixar o backup.</p>
+          <Button onClick={openPlans}>Ver planos</Button>
+        </div>
+      </aside>
+    );
   }
   return (
     <aside aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden border-l border-border bg-card shadow-xl sm:w-[380px]">
