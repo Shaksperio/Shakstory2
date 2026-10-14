@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
+import { CONTINGENCY } from "@/lib/contingency";
 import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
@@ -7,7 +8,7 @@ export function PlanBanner() {
   const info = usePlan();
   const [admin, setAdmin] = useState(false);
   if (info.owner) {
-    if (!info.email) return null;
+    if (!info.email || CONTINGENCY) return null; // o painel de contas fica no endereço principal
     return <><div className="border-b border-border/50"><p className="mx-auto flex max-w-7xl items-center justify-end gap-3 px-5 py-1 text-xs text-muted-foreground">Administrador<Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setAdmin(true)}>Contas e planos</Button></p></div>{admin && <AdminPanel onClose={() => setAdmin(false)} />}</>;
   }
   if (info.plan === "trial") {

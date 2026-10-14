@@ -1,7 +1,11 @@
 // Worker público de IA para o modo de contingência (GitHub Pages).
 // O GitHub Pages não tem servidor (qualquer POST responde 405), então a IA do Shakstory roda aqui.
-// Só responde a quem apresenta um token de identidade do Firebase válido, de um e-mail autorizado.
-// Não lê nem grava o D1: o texto, o cânone e o planejamento chegam no corpo da requisição.
+// Responde a quem apresenta um token de identidade do Firebase válido (Google, e-mail verificado).
+// Donos (ALLOWED_EMAILS) têm tudo liberado; os demais seguem o teste de 7 dias e os planos, guardados no mesmo D1
+// do Worker principal (tabelas shak_users e shak_usage, por e-mail), de modo que o plano vale nos dois endereços.
+// O texto, o cânone e o planejamento chegam no corpo da requisição; este Worker não lê os livros do D1.
+// Este arquivo é montado com plans.js por scripts/build-contingency-ai.mjs antes de publicar.
+import { loadAccount, useCowila } from "./plans.js";
 
 export const ALLOWED_ORIGINS = ["https://shaksperio.github.io"];
 export const FIREBASE_PROJECT = "shakstory-93bb1";
@@ -31,7 +35,7 @@ async function firebaseKeys(fetcher, fresh) {
 export async function verifyFirebaseToken(jwt, options = {}) {
   const project = options.project || FIREBASE_PROJECT;
   const fetcher = options.fetcher || fetch;
-  const allowed = options.emails || ALLOWED_EMAILS;
+  const allowed = options.emails || null; // sem lista: qualquer Google com e-mail verificado; o plano decide o que pode
   try {
     const parts = String(jwt || "").split(".");
     if (parts.length !== 3) return null;
@@ -51,7 +55,7 @@ export async function verifyFirebaseToken(jwt, options = {}) {
     if (typeof payload.sub !== "string" || !payload.sub) return null;
     const email = payload.email_verified === true && typeof payload.email === "string" ? payload.email : typeof payload.mirrorEmail === "string" ? payload.mirrorEmail : "";
     const lower = email.toLowerCase();
-    return lower && allowed.indexOf(lower) !== -1 ? lower : null;
+    return lower && (!allowed || allowed.indexOf(lower) !== -1) ? lower : null;
   } catch {
     return null;
   }
@@ -62,7 +66,7 @@ const corsHeaders = origin => {
   if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
     headers["access-control-allow-origin"] = origin;
     headers["access-control-allow-headers"] = "authorization, content-type";
-    headers["access-control-allow-methods"] = "POST, OPTIONS";
+    headers["access-control-allow-methods"] = "GET, POST, OPTIONS";
     headers["access-control-max-age"] = "86400";
   }
   return headers;
@@ -120,11 +124,27 @@ export async function handle(req, env, options = {}) {
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(origin) });
   if (url.pathname === "/health") return reply(origin, { ok: true, service: "shakstory-ai" });
+  const owner = email => ALLOWED_EMAILS.indexOf(email) !== -1;
+  const authorization = req.headers.get("Authorization") || "";
+  const token = authorization.indexOf("Bearer ") === 0 ? authorization.slice(7) : "";
+  if (url.pathname === "/api/me") {
+    if (req.method !== "GET") return reply(origin, { error: "method not allowed" }, 405);
+    const who = await verifyFirebaseToken(token, options);
+    if (!who) return reply(origin, { error: "Entre com o Google para continuar." }, 401);
+    if (owner(who)) return reply(origin, { email: who, owner: true, plan: "owner", label: "Administrador", features: { export: true, cowila: true, share: true } });
+    if (!env.DB) return reply(origin, { error: "Planos indisponíveis no momento." }, 503);
+    const account = await loadAccount(env.DB, who, options.now ?? Date.now());
+    return reply(origin, { email: who, owner: false, ...account.info, cowilaUsedToday: account.used });
+  }
   if (url.pathname !== "/api/assist") return reply(origin, { error: "not found" }, 404);
   if (req.method !== "POST") return reply(origin, { error: "method not allowed" }, 405);
-  const authorization = req.headers.get("Authorization") || "";
-  const email = await verifyFirebaseToken(authorization.indexOf("Bearer ") === 0 ? authorization.slice(7) : "", options);
-  if (!email) return reply(origin, { error: "Entre com o Google (conta autorizada) para usar a IA." }, 401);
+  const email = await verifyFirebaseToken(token, options);
+  if (!email) return reply(origin, { error: "Entre com o Google para usar a IA." }, 401);
+  if (!owner(email)) {
+    if (!env.DB) return reply(origin, { error: "Planos indisponíveis no momento." }, 503);
+    const stop = await useCowila(env.DB, email, await loadAccount(env.DB, email, options.now ?? Date.now()));
+    if (stop) return new Response(stop.body, { status: stop.status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders(origin) } });
+  }
   const raw = await req.text();
   if (raw.length > MAX_BODY) return reply(origin, { error: "Pedido grande demais." }, 413);
   let body;
