@@ -62,7 +62,7 @@ describe("Worker de IA da contingência", () => {
     const db = fakeDb();
     const env = { DB: db, AI: { run: async () => ({ response: "oi" }) } };
     const pages = "https://shaksperio.github.io";
-    const auth = { Origin: pages, Authorization: "Bearer " + token({ email: "ana@example.com" }) };
+    const auth = { Origin: pages, Authorization: "Bearer " + token({ email: "ana@example.com", exp: Math.floor(Date.now() / 1000) + 40 * 86400 }) };
     const call = (method: string, path: string, now?: number, body = "{}") => m.handle(new Request("https://x" + path, { method, headers: auth, body: method === "POST" ? body : undefined }), env, { ...opts, now });
     const me = await (await call("GET", "/api/me")).json();
     expect(me).toMatchObject({ email: "ana@example.com", owner: false, plan: "trial" });
