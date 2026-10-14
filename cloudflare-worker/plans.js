@@ -136,7 +136,7 @@ async function bodyBytes(req) {
  * Porta de entrada do Worker. Devolve {} para seguir como sempre, { response } para responder já,
  * ou { env } com o D1 isolado da conta.
  */
-export async function shakGate(req, env, u, options = {}) {
+async function shakGateCore(req, env, u, options = {}) {
   const path = u.pathname;
   if (path === "/health" || path === "/self-test" || path === "/api/mirror-token" || path === "/api/share/login" || path.indexOf("/api/public/") === 0) return {};
   if (path.indexOf("/api/share/") === 0 && req.method === "GET") return {};
@@ -202,4 +202,42 @@ export async function shakGate(req, env, u, options = {}) {
     if (bytes + (await bodyBytes(req)) > (options.maxStorage ?? MAX_STORAGE_BYTES)) return { response: planJson({ error: "storage_full", message: "O espaço da sua conta está cheio. Exclua livros ou versões antigas, ou fale com o administrador." }, 413) };
   }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
+}
+
+/** IA opcional: se o segredo GEMINI_API_KEY existir no Worker, usa o Gemini e cai no Workers AI se ele falhar. Sem o segredo, nada muda. */
+export function withGemini(env, fetchFn) {
+  if (!env || !env.GEMINI_API_KEY || !env.AI || env.AI.__gemini) return env;
+  const base = env.AI;
+  const doFetch = fetchFn || ((...args) => fetch(...args));
+  const model = String(env.GEMINI_MODEL || "gemini-2.0-flash").replace(/[^A-Za-z0-9._-]/g, "");
+  const wrapped = {
+    __gemini: true,
+    async run(name, input) {
+      try {
+        const messages = (input && input.messages) || [];
+        const system = messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
+        const contents = messages.filter(item => item.role !== "system").map(item => ({ role: item.role === "assistant" ? "model" : "user", parts: [{ text: String(item.content) }] }));
+        const res = await doFetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": String(env.GEMINI_API_KEY) },
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: (input && input.max_tokens) || 900 } }),
+        });
+        if (!res.ok) throw new Error("gemini_" + res.status);
+        const data = await res.json();
+        const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+        const text = Array.isArray(parts) ? parts.map(part => part.text || "").join("").trim() : "";
+        if (!text) throw new Error("gemini_empty");
+        return { response: text };
+      } catch {
+        return base.run(name, input);
+      }
+    },
+  };
+  return { ...env, AI: wrapped };
+}
+
+export async function shakGate(req, env, u, options = {}) {
+  const result = await shakGateCore(req, env, u, options);
+  if (result.response || !env.GEMINI_API_KEY) return result;
+  return { ...result, env: withGemini(result.env || env, options.fetch) };
 }

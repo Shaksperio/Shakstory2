@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -159,5 +159,32 @@ describe("patch-worker-plans", () => {
     expect(out).not.toMatch(/^import /m);
     expect(spawnSync("node", ["--check", output]).status).toBe(0);
     expect(spawnSync("node", [new URL("../scripts/patch-worker-plans.mjs", import.meta.url).pathname, output, output], { encoding: "utf8" }).status).toBe(3);
+  });
+});
+
+describe("withGemini (IA opcional)", () => {
+  const messages = [{ role: "system", content: "regras" }, { role: "user", content: "oi" }];
+  it("sem segredo, não muda nada", async () => {
+    const { withGemini } = await load();
+    const env = { AI: { run: vi.fn() } };
+    expect(withGemini(env)).toBe(env);
+  });
+  it("com segredo usa o Gemini e envia a chave só no cabeçalho", async () => {
+    const { withGemini } = await load();
+    const base = { run: vi.fn(async () => ({ response: "workers" })) };
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini" }] } }] })));
+    const env = withGemini({ AI: base, GEMINI_API_KEY: "chave" }, fetchFn as unknown as typeof fetch) as { AI: { run: (n: string, i: unknown) => Promise<{ response: string }> } };
+    expect((await env.AI.run("m", { messages })).response).toBe("gemini");
+    const [url, init] = fetchFn.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+    expect(url).not.toContain("chave");
+    expect(init.headers["x-goog-api-key"]).toBe("chave");
+    expect(base.run).not.toHaveBeenCalled();
+  });
+  it("se o Gemini falhar, cai no Workers AI", async () => {
+    const { withGemini } = await load();
+    const base = { run: vi.fn(async () => ({ response: "workers" })) };
+    const fetchFn = vi.fn(async () => new Response("erro", { status: 500 }));
+    const env = withGemini({ AI: base, GEMINI_API_KEY: "chave" }, fetchFn as unknown as typeof fetch) as { AI: { run: (n: string, i: unknown) => Promise<{ response: string }> } };
+    expect((await env.AI.run("m", { messages })).response).toBe("workers");
   });
 });
