@@ -60,6 +60,27 @@ async function userKey(email) {
   return Array.from(new Uint8Array(bytes)).slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Conta do e-mail (criada no primeiro acesso, o que inicia o teste), plano vigente e uso do Cowila hoje. */
+export async function loadAccount(db, email, now = Date.now()) {
+  await ensurePlanTables(db);
+  await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(email, new Date(now).toISOString()).run();
+  const row = await db.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(email).first();
+  const info = resolvePlan(row, now);
+  const day = brDay(now);
+  const used = Number((await db.prepare("SELECT cowila FROM shak_usage WHERE email = ? AND day = ?").bind(email, day).first())?.cowila || 0);
+  return { info, day, used };
+}
+
+export const planBlocked = (info, feature) => planJson({ error: "plan_required", feature, plan: info.plan, label: info.label, message: info.plan === "expirado" ? "Seu teste de " + TRIAL_DAYS + " dias terminou. Ative um plano para continuar." : "Este recurso não está incluído no seu plano." }, 402);
+
+/** Libera (e contabiliza) uma mensagem do Cowila. Devolve null se pode seguir, ou a resposta de bloqueio (402 plano, 429 limite do dia). */
+export async function useCowila(db, email, account) {
+  if (!account.info.features.cowila) return planBlocked(account.info, "cowila");
+  if (account.used >= account.info.cowilaDaily) return planJson({ error: "quota", message: "Limite diário de mensagens do Cowila atingido. Volta amanhã ou fale com o administrador.", limit: account.info.cowilaDaily }, 429);
+  await db.prepare("INSERT INTO shak_usage (email, day, cowila) VALUES (?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET cowila = cowila + 1").bind(email, account.day).run();
+  return null;
+}
+
 export const MAX_VERSIONS = 30;
 export const MAX_DOC_BYTES = 1900000;
 export const MAX_STORAGE_BYTES = 40000000;
@@ -164,23 +185,17 @@ export async function shakGate(req, env, u, options = {}) {
 
   // Conta comum: cria no primeiro acesso e isola os dados.
   const db = env.DB;
-  await ensurePlanTables(db);
-  await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(email, new Date(now).toISOString()).run();
-  const row = await db.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(email).first();
-  const info = resolvePlan(row, now);
-  const day = brDay(now);
-  const used = Number((await db.prepare("SELECT cowila FROM shak_usage WHERE email = ? AND day = ?").bind(email, day).first())?.cowila || 0);
+  const account = await loadAccount(db, email, now);
+  const info = account.info;
 
-  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: used }) };
+  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: account.used }) };
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
 
-  const blocked = feature => planJson({ error: "plan_required", feature, plan: info.plan, label: info.label, message: info.plan === "expirado" ? "Seu teste de " + TRIAL_DAYS + " dias terminou. Ative um plano para continuar." : "Este recurso não está incluído no seu plano." }, 402);
   if (path === "/api/assist" && req.method === "POST") {
-    if (!info.features.cowila) return { response: blocked("cowila") };
-    if (used >= info.cowilaDaily) return { response: planJson({ error: "quota", message: "Limite diário de mensagens do Cowila atingido. Volta amanhã ou fale com o administrador.", limit: info.cowilaDaily }, 429) };
-    await db.prepare("INSERT INTO shak_usage (email, day, cowila) VALUES (?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET cowila = cowila + 1").bind(email, day).run();
+    const stop = await useCowila(db, email, account);
+    if (stop) return { response: stop };
   }
-  if (path === "/api/share/visibility" && req.method === "POST" && !info.features.share) return { response: blocked("share") };
+  if (path === "/api/share/visibility" && req.method === "POST" && !info.features.share) return { response: planBlocked(info, "share") };
   const prefix = "u/" + (await userKey(email)) + "/";
   if (path === "/api/book" && req.method === "POST") {
     const bytes = await storageUsed(db, prefix);

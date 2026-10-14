@@ -40,9 +40,17 @@ export const currentPlan = () => info;
 export const setPlanForTest = (next: PlanInfo | null) => { info = next ?? FULL; dialog = { open: false }; emit(); };
 
 export async function refreshPlan(): Promise<PlanInfo> {
-  if (CONTINGENCY || typeof fetch !== "function") return info;
+  if (typeof fetch !== "function") return info;
   try {
-    const response = await fetch("/api/me", { headers: { accept: "application/json" } });
+    let url = "/api/me";
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (CONTINGENCY) {
+      // GitHub Pages não tem servidor: o plano vem do Worker de contingência, com o token do Google/Firebase.
+      const [{ CONTINGENCY_AI_URL }, { mirrorIdToken }] = await Promise.all([import("./trpc"), import("./mirror/firebase")]);
+      url = CONTINGENCY_AI_URL + "/api/me";
+      headers.authorization = "Bearer " + (await mirrorIdToken());
+    }
+    const response = await fetch(url, { headers });
     if (!response.ok) return info;
     const data = await response.json() as Partial<PlanInfo>;
     if (!data || typeof data.plan !== "string" || !data.features) return info;

@@ -4,6 +4,7 @@ import type { KV } from "../sync/kv";
 import type { LibraryLike } from "../sync/merge";
 import { assembleMirror, changedDocs, planMirror, removedPaths, type RawDocs } from "./plan";
 import type { MirrorIO } from "./mirrorSync";
+import { isOwnerEmail } from "../contingency";
 
 /** Valores públicos do app Web (não dão acesso aos dados; quem protege é firestore.rules). */
 export const FIREBASE_CONFIG = {
@@ -16,8 +17,10 @@ export const FIREBASE_CONFIG = {
 };
 
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
-/** Pasta única do espelho: a biblioteca é compartilhada pelos e-mails autorizados (proprietário e administradores). */
+/** Pasta compartilhada dos administradores. */
 export const MIRROR_ROOT = "workspaces/main";
+/** Pasta do espelho de cada pessoa: administradores em workspaces/main; os demais em mirrors/<e-mail> (firestore.rules confere o e-mail). */
+export const mirrorRoot = (email: string) => (isOwnerEmail(email) ? MIRROR_ROOT : "mirrors/" + email.toLowerCase());
 export const MIRROR_MIN_INTERVAL_MS = 2 * 60 * 1000;
 const HASHES_KEY = "mirror-hashes";
 const STATE_KEY = "mirror-state";
@@ -92,15 +95,15 @@ export async function readMirrorState(kv: KV): Promise<MirrorState> {
 
 /** Envia ao Firestore só o que mudou. Devolve o novo carimbo do espelho, ou null se nada mudou. */
 export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser): Promise<number | null> {
-  void user;
+  const root = mirrorRoot(user.email);
   const sdk = await loadSdk();
-  const docs = await planMirror(MIRROR_ROOT, library);
+  const docs = await planMirror(root, library);
   const previous = (await kv.get<Record<string, string>>("meta", HASHES_KEY)) ?? {};
   const toWrite = changedDocs(docs, previous);
   const toDelete = removedPaths(docs, previous);
   if (toWrite.length === 0 && toDelete.length === 0) return null;
   const stamp = Date.now();
-  const metaPath = MIRROR_ROOT + "/library/meta";
+  const metaPath = root + "/library/meta";
   const metaDoc = docs.find(item => item.path === metaPath);
   if (metaDoc && !toWrite.some(item => item.path === metaPath)) toWrite.push(metaDoc);
   const { doc, writeBatch } = sdk.fs;
@@ -126,23 +129,23 @@ export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser)
 }
 
 /** Carimbo do último envio ao espelho (uma leitura). null se o espelho ainda está vazio. */
-export async function readMirrorStamp(): Promise<number | null> {
+export async function readMirrorStamp(user: MirrorUser): Promise<number | null> {
   const sdk = await loadSdk();
-  const snap = await sdk.fs.getDoc(sdk.fs.doc(sdk.db, MIRROR_ROOT + "/library/meta"));
+  const snap = await sdk.fs.getDoc(sdk.fs.doc(sdk.db, mirrorRoot(user.email) + "/library/meta"));
   if (!snap.exists()) return null;
   const value = Number(snap.data().mirroredAt);
   return Number.isFinite(value) ? value : null;
 }
 
 export function mirrorIO(kv: KV, user: MirrorUser): MirrorIO {
-  return { stamp: readMirrorStamp, pull: () => pullMirror(user), push: library => pushMirror(kv, library, user) };
+  return { stamp: () => readMirrorStamp(user), pull: () => pullMirror(user), push: library => pushMirror(kv, library, user) };
 }
 
 /** Lê o espelho inteiro. Retorna null se vazio ou incompleto. */
 export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> {
   const sdk = await loadSdk();
   const { collection, getDocs } = sdk.fs;
-  const root = MIRROR_ROOT;
+  const root = mirrorRoot(user.email);
   const raw: RawDocs = [];
   const metaSnap = await getDocs(collection(sdk.db, root + "/library"));
   metaSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
@@ -153,5 +156,5 @@ export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> 
     const nodesSnap = await getDocs(collection(sdk.db, root + "/books/" + bookId + "/nodes"));
     nodesSnap.forEach((item: { ref: { path: string }; data: () => Record<string, unknown> }) => raw.push({ path: item.ref.path, data: item.data() }));
   }
-  return assembleMirror(MIRROR_ROOT, raw);
+  return assembleMirror(root, raw);
 }
