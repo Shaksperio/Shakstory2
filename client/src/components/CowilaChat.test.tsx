@@ -95,6 +95,6 @@ describe("CowilaChat", () => {
     fireEvent.click(screen.getByLabelText("Enviar"));
     await waitFor(() => expect(screen.getByText(/Não vou te entregar uma resposta com conta errada/)).toBeTruthy());
     expect(ask).toHaveBeenCalledTimes(3);
-    expect((ask.mock.calls[1][0] as { prompt: string }).prompt).toContain("o valor exato é 391");
+    expect(((ask.mock.calls as unknown as Array<[{ prompt: string }]>)[1][0]).prompt).toContain("o valor exato é 391");
   });
 });

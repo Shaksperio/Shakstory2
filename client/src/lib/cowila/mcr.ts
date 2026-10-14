@@ -4,8 +4,9 @@
 // o ganho vinha do Cerebelo). Aritmética exata com BigInt; nada de eval.
 
 type Frac = { n: bigint; d: bigint };
-const gcd = (a: bigint, b: bigint): bigint => { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) { [a, b] = [b, a % b]; } return a; };
-const mk = (n: bigint, d: bigint = 1n): Frac => { if (d < 0n) { n = -n; d = -d; } const g = gcd(n, d) || 1n; return { n: n / g, d: d / g }; };
+const pow10 = (e: number): bigint => { let r = BigInt(1); for (let i = 0; i < e; i++) r = r * BigInt(10); return r; };
+const gcd = (a: bigint, b: bigint): bigint => { a = a < BigInt(0) ? -a : a; b = b < BigInt(0) ? -b : b; while (b) { [a, b] = [b, a % b]; } return a; };
+const mk = (n: bigint, d: bigint = BigInt(1)): Frac => { if (d < BigInt(0)) { n = -n; d = -d; } const g = gcd(n, d) || BigInt(1); return { n: n / g, d: d / g }; };
 const add = (a: Frac, b: Frac) => mk(a.n * b.d + b.n * a.d, a.d * b.d);
 const sub = (a: Frac, b: Frac) => mk(a.n * b.d - b.n * a.d, a.d * b.d);
 const mul = (a: Frac, b: Frac) => mk(a.n * b.n, a.d * b.d);
@@ -34,24 +35,24 @@ export function parseNumber(token: string): Parsed {
     else return null;
   }
   const digits = BigInt(intPart + frac);
-  const d = 10n ** BigInt(frac.length);
+  const d = pow10(frac.length);
   return { value: mk(neg ? -digits : digits, d), decimals: frac.length };
 }
 
 export function formatNumber(f: Frac, maxDecimals = 6): string {
-  const scale = 10n ** BigInt(maxDecimals);
-  let scaled = (f.n * scale * 2n + (f.n < 0n ? -f.d : f.d)) / (f.d * 2n); // arredonda ao mais próximo
-  const neg = scaled < 0n;
+  const scale = pow10(maxDecimals);
+  let scaled = (f.n * scale * BigInt(2) + (f.n < BigInt(0) ? -f.d : f.d)) / (f.d * BigInt(2)); // arredonda ao mais próximo
+  const neg = scaled < BigInt(0);
   if (neg) scaled = -scaled;
   const whole = scaled / scale;
   let rest = (scaled % scale).toString().padStart(maxDecimals, "0").replace(/0+$/, "");
   const w = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return (neg && (whole !== 0n || rest) ? "-" : "") + w + (rest ? "," + rest : "");
+  return (neg && (whole !== BigInt(0) || rest) ? "-" : "") + w + (rest ? "," + rest : "");
 }
 
 const OPS: Record<string, (a: Frac, b: Frac) => Frac | null> = {
   "+": add, "-": sub, "*": mul, "×": mul, x: mul, X: mul,
-  "/": (a, b) => (b.n === 0n ? null : div(a, b)), "÷": (a, b) => (b.n === 0n ? null : div(a, b)),
+  "/": (a, b) => (b.n === BigInt(0) ? null : div(a, b)), "÷": (a, b) => (b.n === BigInt(0) ? null : div(a, b)),
 };
 const NUM = String.raw`-?\d[\d.,]*\d|-?\d`;
 const OP = String.raw`[+\-−*×xX÷/]`;
@@ -60,11 +61,11 @@ export type Finding = { status: "verified" | "refuted" | "unverifiable"; text: s
 
 function same(expected: Frac, stated: Frac, decimals: number, isDivision: boolean): boolean {
   const diff = sub(expected, stated);
-  if (!isDivision) return diff.n === 0n;
+  if (!isDivision) return diff.n === BigInt(0);
   // divisão: o resultado informado está arredondado na própria precisão
-  const half = mk(1n, 2n * 10n ** BigInt(decimals));
-  const abs = mk(diff.n < 0n ? -diff.n : diff.n, diff.d);
-  return sub(abs, half).n <= 0n;
+  const half = mk(BigInt(1), BigInt(2) * pow10(decimals));
+  const abs = mk(diff.n < BigInt(0) ? -diff.n : diff.n, diff.d);
+  return sub(abs, half).n <= BigInt(0);
 }
 
 /** Procura contas "a op b = c" e "X% de Y é Z" na resposta e recalcula. */
@@ -88,7 +89,7 @@ export function checkArithmetic(answer: string): Finding[] {
     const [pp, py, pz] = [parseNumber(p), parseNumber(y), parseNumber(z)];
     if (!pp || !py || !pz) continue;
     if (pp === "ambiguous" || py === "ambiguous" || pz === "ambiguous") { out.push({ status: "unverifiable", text: whole }); continue; }
-    const result = div(mul(pp.value, py.value), mk(100n));
+    const result = div(mul(pp.value, py.value), mk(BigInt(100)));
     out.push(same(result, pz.value, pz.decimals, true) ? { status: "verified", text: whole } : { status: "refuted", text: whole, expected: formatNumber(result), found: z });
   }
   return out;
