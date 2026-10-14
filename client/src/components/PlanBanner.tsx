@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
-import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
+import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
 export function PlanBanner() {
@@ -35,7 +35,7 @@ export function PlansDialog() {
         <h2 className="font-serif text-2xl">Planos do Shakstory</h2>
         <p className="mt-1 text-sm text-muted-foreground">{state.reason ? `${FEATURE_LABEL[state.reason]} não está incluído no seu plano atual (${info.label}).` : `Seu plano atual: ${info.label}.`}</p></div>
         <Button size="sm" variant="ghost" aria-label="Fechar planos" onClick={closePlans}>✕</Button></div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => <section key={card.id} className="rounded-xl border border-border p-3 text-sm"><h3 className="font-semibold">{card.label}</h3><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(f => <li key={f}>{f}</li>)}</ul></section>)}</div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => <section key={card.id} className="rounded-xl border border-border p-3 text-sm"><h3 className="font-semibold">{card.label}</h3><p className="text-xs">{PLAN_PRICES[card.id] ? `${PLAN_PRICES[card.id]} / mês` : "Valor: consulte o administrador"}</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(f => <li key={f}>{f}</li>)}</ul></section>)}</div>
       <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
     </div></div>;
