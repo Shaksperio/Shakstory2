@@ -29,8 +29,9 @@ export function assessLevel(books: CBook[]): Level {
 }
 
 /** Resumo do projeto para a IA caber no limite do servidor (≈12 000 caracteres). */
-export function buildProjectDigest(books: CBook[], active: CBook | undefined, activeNodeId: string | undefined, draft: string, limit = 11500): string {
+export function buildProjectDigest(books: CBook[], active: CBook | undefined, activeNodeId: string | undefined, draft: string, limit = 11500, memory: string[] = []): string {
   const out: string[] = [];
+  if (memory.length) out.push("MEMÓRIA APROVADA PELO AUTOR (fatos que ele pediu para lembrar):", ...memory.slice(0, 20).map(item => "- " + item.slice(0, 240)), "");
   out.push("BIBLIOTECA DO AUTOR:");
   for (const book of books.slice(0, 12)) {
     out.push(`- ${book.title} (${book.status ?? "rascunho"}, ${countBookWords(book)} palavras, ${bodyNodes(book).length} capítulos${book.id === active?.id ? ", LIVRO ATIVO" : ""})`);
@@ -264,4 +265,14 @@ export function cleanSynopsis(raw: string): string | null {
   if (text.split(/\n\s*\n/).length > 3) return null;
   const count = (text.match(/\S+/g) ?? []).length;
   return count >= 40 && count <= 170 ? text : null;
+}
+
+/** Nomes que existem no livro: fichas de personagens e locais + nomes próprios recorrentes no manuscrito. */
+export function knownBookNames(book: CBook | undefined): string[] {
+  if (!book) return [];
+  const full = bodyNodes(book).map(node => node.content).join("\n\n");
+  const names = detectBookNames(full, [], 2);
+  for (const c of book.planning?.characters ?? []) names.push(c.name);
+  for (const l of book.planning?.locations ?? []) names.push(l.name);
+  return names.filter(name => name.trim());
 }
