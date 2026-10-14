@@ -6,11 +6,11 @@ import { openPlans, usePlan } from "@/lib/plans";
 import { feedbackFor, localArithmetic, verifyAnswer } from "@/lib/cowila/mcr";
 import {
   SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote, parseVerification, verifyPrompt,
-  cleanSynopsis, countBookWords, detectIntent, knownBookNames, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
+  alternativesPrompt, parseAlternatives, cleanSynopsis, countBookWords, detectIntent, knownBookNames, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
 } from "@/lib/cowila/project";
 
 type Msg = { role: "user" | "assistant"; content: string; note?: string };
-type Proposal = { kind: "synopsis"; text: string } | { kind: "rewrite"; before: string; after: string; kept: number; total: number };
+type Proposal = { kind: "synopsis"; text: string } | { kind: "alternatives"; before: string; options: string[] } | { kind: "rewrite"; before: string; after: string; kept: number; total: number };
 type Found = Array<{ name: string; role: string; notes: string }>;
 
 export type CowilaChatProps = {
@@ -45,6 +45,8 @@ export function CowilaChat(props: CowilaChatProps) {
   const [busy, setBusy] = useState(false);
   const [verify, setVerify] = useState(() => store("shakstory:cowila:verificar") !== "0");
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const selection = useRef("");
+  const asideRef = useRef<HTMLElement | null>(null);
   const [undoDesc, setUndoDesc] = useState<{ previous: string } | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
   const memKey = `shakstory:cowila:memoria:${active?.id ?? "geral"}`;
@@ -87,6 +89,29 @@ export function CowilaChat(props: CowilaChatProps) {
     );
   };
 
+  useEffect(() => {
+    // guarda o último trecho selecionado no editor (clicar no botão da Cowila tira o foco, mas a seleção fica guardada aqui)
+    const onSelect = () => {
+      const current = window.getSelection?.();
+      const text = current ? current.toString().trim() : "";
+      const anchor = current?.anchorNode;
+      if (text.length >= 20 && text.length <= 1500 && !(anchor && asideRef.current?.contains(anchor as Node))) selection.current = text;
+    };
+    document.addEventListener("selectionchange", onSelect);
+    return () => document.removeEventListener("selectionchange", onSelect);
+  }, []);
+
+  const runAlternatives = async () => {
+    const chosen = selection.current;
+    if (!chosen) return say("Selecione no editor o trecho que quer reescrever (de uma frase a alguns parágrafos) e clique de novo em “Alternativas do trecho”.");
+    if (!online) return say("As alternativas precisam de internet. Seu texto continua intacto.");
+    const raw = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + alternativesPrompt(level), text: chosen, long: true, bookTitle: active?.title });
+    const options = parseAlternatives(raw, chosen);
+    if (!options.length) return say("A IA não devolveu alternativas que preservem nomes e tamanho do trecho. Nada foi alterado. Tente de novo ou selecione um trecho menor.");
+    setProposal({ kind: "alternatives", before: chosen, options });
+    say(`Preparei ${options.length} alternativa(s) para o trecho selecionado. Nenhuma é aplicada sozinha: escolha uma abaixo.`);
+  };
+
   const runRewrite = async () => {
     const text = draft.trim();
     if (!active || !text) return say("Abra um capítulo com texto e eu proponho a reescrita.");
@@ -118,6 +143,7 @@ export function CowilaChat(props: CowilaChatProps) {
       const intent = detectIntent(message);
       if (intent === "guide" && (!online || message === "Como uso o Shakstory?")) say(SHAKSTORY_GUIDE);
       else if (intent === "characters") await runCharacters();
+      else if (/alternativas do trecho/i.test(message)) await runAlternatives();
       else if (intent === "rewrite") await runRewrite();
       else if (!online) say("Estou sem internet agora. Offline eu posso explicar o Shakstory e cadastrar nomes de personagens; pergunte “como uso o Shakstory?”. Para o resto, preciso de conexão.");
       else if (intent === "synopsis") {
@@ -166,6 +192,7 @@ export function CowilaChat(props: CowilaChatProps) {
     ["Preencher personagens", "Preencher personagens automaticamente"],
     ["Sugerir sinopse", "Sugira a sinopse do livro"],
     ["Reescrever capítulo", "Reescreva este capítulo"],
+    ["Alternativas do trecho", "Alternativas do trecho selecionado"],
   ];
 
   if (!open) {
@@ -186,7 +213,7 @@ export function CowilaChat(props: CowilaChatProps) {
     );
   }
   return (
-    <aside aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden border-l border-border bg-card shadow-xl sm:w-[380px]">
+    <aside ref={asideRef} aria-label="Cowila, atendimento online" className="fixed inset-y-0 right-0 z-30 flex h-[100dvh] w-full max-w-full flex-col overflow-hidden border-l border-border bg-card shadow-xl sm:w-[380px]">
       <header className="border-b border-border px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -226,6 +253,25 @@ export function CowilaChat(props: CowilaChatProps) {
               }}>Usar como descrição</Button>
               <Button size="sm" variant="outline" onClick={() => setProposal(null)}>Descartar</Button>
             </div>
+          </div>
+        )}
+        {proposal?.kind === "alternatives" && (
+          <div className="rounded-lg border border-primary/30 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Trecho original</p>
+            <p className="mt-1 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs">{proposal.before}</p>
+            {proposal.options.map((option, index) => (
+              <div key={index} className="mt-3 border-t border-border pt-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Alternativa {index + 1}</p>
+                <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs">{option}</p>
+                <Button size="sm" className="mt-1.5" onClick={() => {
+                  const first = draft.indexOf(proposal.before);
+                  if (first < 0 || draft.indexOf(proposal.before, first + 1) !== -1) { say("Não consegui localizar esse trecho com exatidão no capítulo (ele mudou ou aparece mais de uma vez). Copie a alternativa e cole no lugar." ); return; }
+                  const next = draft.slice(0, first) + option + draft.slice(first + proposal.before.length);
+                  props.onReplaceDraft(next); setUndo({ before: draft, after: next }); setProposal(null); selection.current = ""; say("Alternativa aplicada ao trecho. Se não gostou, use “Desfazer reescrita”.");
+                }}>Usar a alternativa {index + 1}</Button>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" className="mt-3" onClick={() => setProposal(null)}>Descartar</Button>
           </div>
         )}
         {proposal?.kind === "rewrite" && (

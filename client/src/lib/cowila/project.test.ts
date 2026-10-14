@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assessLevel, buildProjectDigest, candidateCharacters, chunkParagraphs, detectIntent, localCharacters,
-  mergeCharacters, parseCharacters, rewriteIsSafe, type CBook,
+  mergeCharacters, parseAlternatives, parseCharacters, rewriteIsSafe, type CBook,
 } from "./project";
 
 const text =
@@ -99,5 +99,26 @@ describe("modo livre e verificação", () => {
     expect(parseVerification("OK")).toBeNull();
     expect(parseVerification("Parece boa.")).toBeNull();
     expect(parseVerification("CORREÇÃO: A resposta correta e completa é esta aqui.")).toBe("A resposta correta e completa é esta aqui.");
+  });
+});
+
+describe("parseAlternatives", () => {
+  const original = "Gareth abriu a janela e viu Marta no jardim, sob a chuva fina.";
+  it("lê o JSON e descarta versões que mudam nomes ou repetem o original", () => {
+    const raw = JSON.stringify({ alternativas: [
+      "Gareth abriu a janela e avistou Marta no jardim, sob a chuva fina.",
+      original,
+      "Pedro abriu a janela e viu Ana no jardim, sob a chuva fina.",
+      "Gareth escancarou a janela e viu Marta lá embaixo, no jardim, sob a chuva fina.",
+    ] });
+    const out = parseAlternatives(raw, original);
+    expect(out).toContain("Gareth abriu a janela e avistou Marta no jardim, sob a chuva fina.");
+    expect(out).not.toContain(original);
+    expect(out.some(item => item.includes("Pedro"))).toBe(false);
+  });
+  it("aceita lista numerada como plano B e devolve vazio para lixo", () => {
+    const raw = "Aqui estão:\n1. Gareth abriu a janela e avistou Marta no jardim, sob a chuva fina.\n2. Gareth abriu a janela e notou Marta no jardim, sob a chuva fina.";
+    expect(parseAlternatives(raw, original)).toHaveLength(2);
+    expect(parseAlternatives("não sei", original)).toEqual([]);
   });
 });

@@ -73,4 +73,21 @@ describe("corretor local", () => {
     expect(applyIssueToHtml(html2, text, issue)).toBe("<p>Ela disse: Você chegou.</p><p>Outra linha.</p>");
     expect(applyIssueToHtml(html2 + html2, text, issue)).toBeNull();
   });
+
+  it("tipografia é opcional: reticências e aspas curvas viram sugestão com aceite", () => {
+    const text = 'Ela disse "venha cá" e esperou... Depois "fechou a porta.';
+    expect(proofread(text, { mode: "preserve" }).some(i => i.kind === "typography")).toBe(false);
+    const found = proofread(text, { mode: "preserve", typography: true }).filter(i => i.kind === "typography");
+    const dots = found.find(i => i.rule === "reticencias");
+    expect(dots?.suggestion).toBe("…");
+    expect(dots?.risk).toBe("low");
+    // linha com número ímpar de aspas: não arrisca (aspas abertas)
+    expect(found.some(i => i.rule === "aspas-curvas")).toBe(false);
+    const paired = proofread('Ele disse "oi" e saiu.', { mode: "preserve", typography: true }).find(i => i.rule === "aspas-curvas");
+    expect(paired?.suggestion).toBe("“oi”");
+    expect(paired?.risk).toBe("medium");
+    expect(applyIssue('Ele disse "oi" e saiu.', paired!)).toBe("Ele disse “oi” e saiu.");
+    // quatro pontos não são reticências
+    expect(proofread("Espera....", { typography: true }).some(i => i.rule === "reticencias")).toBe(false);
+  });
 });

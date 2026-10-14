@@ -56,6 +56,31 @@ describe("CowilaChat", () => {
     fireEvent.click(screen.getByText("Desfazer reescrita"));
     expect(onReplace).toHaveBeenLastCalledWith(text);
   });
+  it("alternativas do trecho: só troca o trecho exato, com o clique, e pode desfazer", async () => {
+    const onReplace = vi.fn();
+    const chosen = "Então Élia abriu a janela e viu Gareth.";
+    const ask = vi.fn(async () => JSON.stringify({ alternativas: ["Então Élia abriu a janela e avistou Gareth.", "Élia abriu a janela e então viu Gareth."] }));
+    render(<CowilaChat {...base({ ask, onReplaceDraft: onReplace })} />);
+    openChat();
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => chosen, anchorNode: document.body } as unknown as Selection);
+    document.dispatchEvent(new Event("selectionchange"));
+    spy.mockRestore();
+    fireEvent.click(screen.getByText("Alternativas do trecho"));
+    await waitFor(() => expect(screen.getByText("Usar a alternativa 1")).toBeTruthy());
+    expect(onReplace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Usar a alternativa 1"));
+    expect(onReplace).toHaveBeenCalledWith(text.replace(chosen, "Então Élia abriu a janela e avistou Gareth."));
+  });
+
+  it("alternativas sem seleção pedem para selecionar e não chamam a IA", async () => {
+    const ask = vi.fn(async () => "");
+    render(<CowilaChat {...base({ ask })} />);
+    openChat();
+    fireEvent.click(screen.getByText("Alternativas do trecho"));
+    await waitFor(() => expect(screen.getByText(/Selecione no editor/)).toBeTruthy());
+    expect(ask).not.toHaveBeenCalled();
+  });
+
   it("modo livre: responde assunto geral e troca a resposta só se o verificador corrigir", async () => {
     const ask = vi.fn()
       .mockResolvedValueOnce("A capital da Austrália é Sydney.")

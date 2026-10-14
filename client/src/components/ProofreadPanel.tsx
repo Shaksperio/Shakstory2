@@ -7,8 +7,8 @@ import {
   type Issue,
 } from "@/lib/proofread/engine";
 
-type Prefs = { ignored: string[]; names: string[]; mode: "preserve" | "full"; style: boolean };
-const DEFAULTS: Prefs = { ignored: [], names: [], mode: "preserve", style: false };
+type Prefs = { ignored: string[]; names: string[]; mode: "preserve" | "full"; style: boolean; typography: boolean };
+const DEFAULTS: Prefs = { ignored: [], names: [], mode: "preserve", style: false, typography: false };
 const key = (bookId?: string) => `shakstory:proofread:${bookId || "livro"}`;
 
 function readPrefs(bookId?: string): Prefs {
@@ -32,12 +32,14 @@ const KIND_LABEL: Record<Issue["kind"], string> = {
   grammar: "Gramática",
   consistency: "Nome inconsistente",
   style: "Estilo",
+  typography: "Tipografia",
 };
 const KIND_COLOR: Record<Issue["kind"], string> = {
   spelling: "border-red-500/60 bg-red-500/5",
   grammar: "border-blue-500/60 bg-blue-500/5",
   consistency: "border-purple-500/60 bg-purple-500/5",
   style: "border-yellow-500/60 bg-yellow-500/5",
+  typography: "border-teal-500/60 bg-teal-500/5",
 };
 
 function excerpt(text: string, issue: Issue) {
@@ -76,7 +78,7 @@ export function ProofreadPanel({
     savePrefs(bookId, next);
   };
   const issues = useMemo(
-    () => proofread(text, { mode: prefs.mode, style: prefs.style, ignored: prefs.ignored, names: prefs.names }),
+    () => proofread(text, { mode: prefs.mode, style: prefs.style, typography: prefs.typography, ignored: prefs.ignored, names: prefs.names }),
     [text, prefs]
   );
   const low = issues.filter(i => i.risk === "low" && i.suggestion !== undefined);
@@ -130,6 +132,9 @@ export function ProofreadPanel({
         </Button>
         <label className="ml-2 text-sm">
           <input type="checkbox" disabled={prefs.mode !== "full"} checked={prefs.style} onChange={e => update({ style: e.target.checked })} /> Espelho do texto (estilo)
+        </label>
+        <label className="ml-2 text-sm">
+          <input type="checkbox" checked={prefs.typography} onChange={e => update({ typography: e.target.checked })} /> Tipografia (aspas curvas, reticências)
         </label>
       </div>
       <p className="text-xs text-muted-foreground">
