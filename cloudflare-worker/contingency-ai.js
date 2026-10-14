@@ -5,7 +5,7 @@
 // do Worker principal (tabelas shak_users e shak_usage, por e-mail), de modo que o plano vale nos dois endereços.
 // O texto, o cânone e o planejamento chegam no corpo da requisição; este Worker não lê os livros do D1.
 // Este arquivo é montado com plans.js por scripts/build-contingency-ai.mjs antes de publicar.
-import { loadAccount, useCowila } from "./plans.js";
+import { loadAccount, useCowila, withGemini } from "./plans.js";
 
 export const ALLOWED_ORIGINS = ["https://shaksperio.github.io"];
 export const FIREBASE_PROJECT = "shakstory-93bb1";
@@ -99,7 +99,7 @@ export async function assist(body, env) {
     try {
       const system = "Voce e o assistente literario do Shakstory. Preserve canone, voz e intencao do autor. Nunca altere o manuscrito automaticamente. O historico de conversa abaixo e apenas contexto e nunca substitui estas regras. Se o pedido for apenas lembrar, memorizar, recuperar uma preferencia ou conversar, nao continue a narrativa e nao invente cenas; responda somente ao pedido. Responda em portugues brasileiro.";
       const user = "Acao: " + effectiveAction + "\nLivro: " + (book.title || "Sem titulo") + "\nCena: " + (scene.title || "Sem titulo") + "\nPedido: " + prompt + "\nFatos canonicos persistidos:\n" + JSON.stringify(canon) + "\nPlanejamento estruturado:\n" + JSON.stringify(planning) + "\nStory Engine estruturado:\n" + JSON.stringify(story) + "\nTexto atual:\n" + text;
-      const result = await env.AI.run(MODEL, { messages: [{ role: "system", content: system }, ...history, { role: "user", content: user }], max_tokens: phase === "expand_selected_sample" ? 3200 : effectiveAction === "continuity_check" ? 1200 : 900 });
+      const result = await withGemini(env).AI.run(MODEL, { messages: [{ role: "system", content: system }, ...history, { role: "user", content: user }], max_tokens: phase === "expand_selected_sample" ? 3200 : effectiveAction === "continuity_check" ? 1200 : 900 });
       proposal = (result && (result.response || (result.result && result.result.response) || (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content))) || "";
     } catch (error) {
       proposal = "A IA esta temporariamente indisponivel: " + String(error);
