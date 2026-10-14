@@ -25,6 +25,8 @@ export const PLAN_CARDS = [
   { id: "premium", label: "Premium", features: ["Tudo do Econômico", "Cowila atendimento (até 100 mensagens por dia)"] },
   { id: "vip", label: "VIP", features: ["Tudo do Premium", "Cowila com limite ampliado (400 por dia)", "Leitura pública do livro"] },
 ] as const;
+/** Valores mostrados na tela de planos, por mês (ex.: { economico: "R$ 9,90" }). Vazio = "consulte o administrador". */
+export const PLAN_PRICES: Partial<Record<"economico" | "premium" | "vip", string>> = {};
 export const ADMIN_CONTACT = "antonyopintor@gmail.com";
 
 const FULL: PlanInfo = { owner: true, plan: "owner", label: "Administrador", features: { export: true, cowila: true, share: true } };
@@ -48,6 +50,12 @@ export async function refreshPlan(): Promise<PlanInfo> {
     emit();
   } catch { /* sem servidor: mantém tudo aberto */ }
   return info;
+}
+
+/** Como guard, mas relê o plano no servidor antes (o teste pode ter acabado com o app aberto). */
+export async function guardFresh(feature: Feature): Promise<boolean> {
+  await refreshPlan();
+  return guard(feature);
 }
 
 /** true se o plano libera o recurso; senão abre a tela de planos e devolve false. */

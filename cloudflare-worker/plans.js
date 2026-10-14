@@ -60,21 +60,55 @@ async function userKey(email) {
   return Array.from(new Uint8Array(bytes)).slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+export const MAX_VERSIONS = 30;
+export const MAX_DOC_BYTES = 1900000;
+export const MAX_STORAGE_BYTES = 40000000;
+
 /** Mesmo D1, mas todo caminho de documento do usuário ganha o prefixo da conta. Compartilhamentos por token (shares/) ficam globais. */
 export function scopeDb(db, prefix) {
-  const fix = arg => (typeof arg === "string" && arg.indexOf("/") !== -1 && arg.indexOf("shares/") !== 0 && /^[A-Za-z0-9_.\/%-]+(\.json|\/%)$/.test(arg) ? prefix + arg : arg);
+  // Qualquer caminho "*.json" (inclusive library.json, sem barra) ou padrão "x/%" é da conta; só shares/ é global.
+  const fix = arg => (typeof arg === "string" && arg.indexOf("shares/") !== 0 && arg.indexOf(prefix) !== 0 && /^[A-Za-z0-9_.\/%-]+(\.json|\/%)$/.test(arg) ? prefix + arg : arg);
   return {
     prepare(sql) {
-      const statement = db.prepare(String(sql).replace(/'(books)\/%\.json'/g, "'" + prefix + "$1/%.json'"));
+      const text = String(sql);
+      const statement = db.prepare(text.replace(/'(books)\/%\.json'/g, "'" + prefix + "$1/%.json'"));
+      const snapshot = /INSERT OR REPLACE INTO editorial_documents/.test(text);
+      const wrap = (bound, args) => ({
+        first: (...a) => bound.first(...a),
+        all: (...a) => bound.all(...a),
+        async run(...a) {
+          const result = await bound.run(...a);
+          // histórico limitado: depois de gravar o snapshot de um livro, mantém só os mais recentes
+          const path = snapshot ? String(args[0] || "") : "";
+          const book = path.indexOf(prefix + "versions/") === 0 ? path.slice((prefix + "versions/").length).split("/")[0] : "";
+          if (book) {
+            try {
+              await db.prepare("DELETE FROM editorial_documents WHERE document_path LIKE ? AND document_path NOT IN (SELECT document_path FROM editorial_documents WHERE document_path LIKE ? ORDER BY version DESC LIMIT ?)").bind(prefix + "versions/" + book + "/%", prefix + "versions/" + book + "/%", MAX_VERSIONS).run();
+            } catch { /* limpeza é só higiene */ }
+          }
+          return result;
+        },
+      });
       return {
-        bind: (...args) => statement.bind(...args.map(fix)),
-        first: (...a) => statement.first(...a),
-        all: (...a) => statement.all(...a),
-        run: (...a) => statement.run(...a),
+        bind: (...args) => { const fixed = args.map(fix); return wrap(statement.bind(...fixed), fixed); },
+        ...wrap(statement, []),
       };
     },
     batch: list => db.batch(list),
   };
+}
+
+/** Bytes já usados pela conta (dados + histórico). */
+async function storageUsed(db, prefix) {
+  const row = await db.prepare("SELECT COALESCE(SUM(LENGTH(data_json)), 0) AS n FROM editorial_documents WHERE document_path LIKE ?").bind(prefix + "%").first();
+  return Number(row?.n || 0);
+}
+
+/** Tamanho do corpo de uma gravação, medido de verdade quando o cabeçalho não informa. */
+async function bodyBytes(req) {
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > 0) return declared;
+  try { return (await req.clone().text()).length; } catch { return 0; }
 }
 
 /**
@@ -85,6 +119,10 @@ export async function shakGate(req, env, u, options = {}) {
   const path = u.pathname;
   if (path === "/health" || path === "/self-test" || path === "/api/mirror-token" || path === "/api/share/login" || path.indexOf("/api/public/") === 0) return {};
   if (path.indexOf("/api/share/") === 0 && req.method === "GET") return {};
+  // Limite de uma linha do D1: avisa com clareza em vez de deixar o banco recusar sem explicação (vale para todos, inclusive donos).
+  if (path === "/api/book" && req.method === "POST" && (await bodyBytes(req)) > MAX_DOC_BYTES) {
+    return { response: planJson({ error: "too_large", message: "Este documento passou do limite de 1,9 MB do banco. Exporte um backup e divida o conteúdo em outro livro." }, 413) };
+  }
   const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
   const now = options.now ?? Date.now();
   const owners = (env.MIRROR_EMAILS ? String(env.MIRROR_EMAILS).split(",") : MIRROR_EMAILS).map(item => item.trim().toLowerCase());
@@ -143,10 +181,10 @@ export async function shakGate(req, env, u, options = {}) {
     await db.prepare("INSERT INTO shak_usage (email, day, cowila) VALUES (?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET cowila = cowila + 1").bind(email, day).run();
   }
   if (path === "/api/share/visibility" && req.method === "POST" && !info.features.share) return { response: blocked("share") };
-  if (path === "/api/book" && req.method === "POST") {
-    const length = Number(req.headers.get("content-length") || 0);
-    if (length > 1900000) return { response: planJson({ error: "too_large" }, 413) };
-  }
   const prefix = "u/" + (await userKey(email)) + "/";
+  if (path === "/api/book" && req.method === "POST") {
+    const bytes = await storageUsed(db, prefix);
+    if (bytes + (await bodyBytes(req)) > (options.maxStorage ?? MAX_STORAGE_BYTES)) return { response: planJson({ error: "storage_full", message: "O espaço da sua conta está cheio. Exclua livros ou versões antigas, ou fale com o administrador." }, 413) };
+  }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
 }

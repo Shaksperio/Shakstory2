@@ -12,12 +12,13 @@ function fakeDb() {
   const users = new Map<string, any>();
   const usage = new Map<string, number>();
   const docs: Array<{ sql: string; args: unknown[] }> = [];
-  const db = {
-    users, usage, docs,
+  const db: any = {
+    users, usage, docs, stored: 0,
     prepare(sql: string) {
       const make = (args: unknown[]) => ({
         async first() {
           if (/FROM shak_users WHERE email/.test(sql)) return users.get(args[0] as string) ?? null;
+          if (/SUM\(LENGTH/.test(sql)) return { n: (db as any).stored ?? 0 };
           if (/FROM shak_usage/.test(sql)) { const n = usage.get(args[0] + "|" + args[1]); return n === undefined ? null : { cowila: n }; }
           docs.push({ sql, args }); return null;
         },
@@ -134,6 +135,41 @@ describe("planos e teste de 7 dias", () => {
 });
 
 function docsPrefix(path: unknown) { return String(path).replace(/books\/a\.json$/, ""); }
+
+describe("isolamento, limites e histórico", () => {
+  it("library.json (sem barra) também é isolado por conta", async () => {
+    const mod = await load(); const db = fakeDb();
+    const result = await gate(mod, db, "ana@example.com", "/api/book", "POST", { path: "library.json" });
+    await result.env.DB.prepare("SELECT 1 FROM editorial_documents WHERE document_path=?").bind("library.json").first();
+    expect(String(db.docs[0].args[0])).toMatch(/^u\/[0-9a-f]{24}\/library\.json$/);
+  });
+
+  it("mantém só as últimas 30 versões de cada livro e não mexe em outros caminhos", async () => {
+    const mod = await load(); const db = fakeDb();
+    const result = await gate(mod, db, "ana@example.com", "/api/book", "POST", { path: "books/a.json" });
+    await result.env.DB.prepare("INSERT OR REPLACE INTO editorial_documents (document_path,data_json,sha,version,updated_at) VALUES (?,?,?,?,?)").bind("versions/a/31.json", "{}", "x", 31, "t").run();
+    const cleanup = db.docs.find((d: any) => /^DELETE FROM editorial_documents/.test(d.sql));
+    expect(cleanup).toBeTruthy();
+    expect(cleanup.args[0]).toMatch(/^u\/[0-9a-f]{24}\/versions\/a\/%$/);
+    expect(cleanup.args[2]).toBe(30);
+    const before = db.docs.length;
+    await result.env.DB.prepare("INSERT OR REPLACE INTO editorial_documents (document_path,data_json,sha,version,updated_at) VALUES (?,?,?,?,?)").bind("planning/a.json", "{}", "x", 1, "t").run();
+    expect(db.docs.slice(before).some((d: any) => /^DELETE/.test(d.sql))).toBe(false);
+  });
+
+  it("recusa documento acima de 1,9 MB (para todos) e conta sem espaço", async () => {
+    const mod = await load(); const db = fakeDb();
+    const big = new Request("https://x/api/book", { method: "POST", headers: { "content-length": "2000000" }, body: "{}" });
+    const owner = await mod.shakGate(big, { DB: db }, new URL(big.url), { verify: async () => "antonyopintor@gmail.com" });
+    expect(owner.response.status).toBe(413);
+    expect((await owner.response.json()).error).toBe("too_large");
+    db.stored = 39900000;
+    const r = new Request("https://x/api/book", { method: "POST", headers: { "content-type": "application/json", "Cf-Access-Jwt-Assertion": "j" }, body: JSON.stringify({ path: "books/a.json", data: "x".repeat(200000) }) });
+    const full = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => "ana@example.com" });
+    expect(full.response.status).toBe(413);
+    expect((await full.response.json()).error).toBe("storage_full");
+  });
+});
 
 describe("patch-worker-plans", () => {
   it("injeta o portão no Worker e o resultado continua sendo JavaScript válido", () => {
