@@ -6,7 +6,7 @@ import { ReviewPanel } from "./ReviewPanel";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 const chapters = [
-  { id: "c1", title: "Um", text: "Élia entrou em Nightglen. Élia saiu de Nightglen. Élia voltou para Nightglen. Élia riu em Nightglen." },
+  { id: "c1", title: "Um", text: "Ontem Élia entrou em Nightglen. Depois Élia saiu de Nightglen. Então Élia voltou para Nightglen. Por fim Élia riu em Nightglen." },
   { id: "c2", title: "Dois", text: "" },
 ];
 
