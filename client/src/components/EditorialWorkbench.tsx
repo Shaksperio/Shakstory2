@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { ProofreadPanel } from "./ProofreadPanel";
+import { ReviewPanel } from "./ReviewPanel";
 import {
   MATTER_TEMPLATES,
   publicationSections,
@@ -93,6 +94,7 @@ export function EditorialWorkbench({
               ["copyright", "Copyright e créditos"],
               ["review", "Revisão e histórico"],
               ["proofread", "Corretor"],
+              ["passes", "Passagens de revisão"],
               ["preferences", "Preferências de escrita"],
             ].map(([id, label]) => (
               <Button
@@ -350,6 +352,15 @@ export function EditorialWorkbench({
           )}
           {tab === "proofread" && (
             <ProofreadPanel bookId={publication.bookId} text={text} html={html} onApply={onRestore} />
+          )}
+          {tab === "passes" && (
+            <ReviewPanel
+              bookId={publication.bookId}
+              chapters={(nodes as Array<{ id: string; title: string; kind?: string; content?: string }>)
+                .filter(item => item.kind !== "part")
+                .map(item => ({ id: item.id, title: item.title, text: item.id === node?.id ? text : item.content ?? "" }))}
+              onSelect={onSelect}
+            />
           )}
           {tab === "review" && (
             <div className="mt-4 space-y-4">

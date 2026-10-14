@@ -238,6 +238,37 @@ export function rewriteIsSafe(original: string, rewritten: string): boolean {
   return detectBookNames(original, [], 1).every(name => rewritten.indexOf(name) !== -1);
 }
 
+export function alternativesPrompt(level: Level): string {
+  return (
+    "Reescreva o trecho em 'Texto atual' de TRÊS maneiras diferentes entre si, mantendo exatamente os fatos, os nomes, as falas e a voz do autor. " +
+    (level === "iniciante" ? "Melhore clareza, ritmo e pontuação. " : "Varie ritmo e precisão, preservando as escolhas de estilo. ") +
+    "Cada versão com extensão parecida à do original. Responda SOMENTE com JSON válido neste formato, sem comentários: {\"alternativas\":[\"versão 1\",\"versão 2\",\"versão 3\"]}"
+  );
+}
+
+/** Lê as alternativas da resposta da IA (JSON, ou lista numerada como plano B) e descarta as que não passam na validação de escopo. */
+export function parseAlternatives(raw: string, original: string, max = 3): string[] {
+  let list: string[] = [];
+  const json = /\{[\s\S]*\}/.exec(raw);
+  if (json) {
+    try {
+      const data = JSON.parse(json[0]) as { alternativas?: unknown };
+      if (Array.isArray(data.alternativas)) list = data.alternativas.filter((item): item is string => typeof item === "string");
+    } catch { /* tenta a lista numerada */ }
+  }
+  if (!list.length) list = raw.split(/\n\s*(?:\d+[.)]|[-•])\s+/).slice(1);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of list) {
+    const text = item.trim().replace(/^["“]|["”]$/g, "").trim();
+    if (!text || text === original.trim() || seen.has(text) || !rewriteIsSafe(original, text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 export function rewritePrompt(level: Level): string {
   return (
     "Reescreva o trecho em 'Texto atual' mantendo exatamente os fatos, os nomes, as falas e a voz do autor. " +

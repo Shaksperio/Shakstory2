@@ -3,7 +3,7 @@
 // propósito, então tudo é hipótese. Não há lista completa de palavras pt-BR (decisão de licença
 // em aberto): só erros formais, grafias inexistentes conhecidas e inconsistência de nomes.
 
-export type IssueKind = "spelling" | "grammar" | "consistency" | "style";
+export type IssueKind = "spelling" | "grammar" | "consistency" | "style" | "typography";
 export type IssueRisk = "low" | "medium";
 
 export type Issue = {
@@ -26,6 +26,8 @@ export type ProofreadOptions = {
   /** "preserve": só ortografia e acentuação, sem gramática nem estilo. */
   mode?: "preserve" | "full";
   style?: boolean;
+  /** Tipografia (aspas curvas, reticências). Desligada por padrão; é sempre uma sugestão com aceite. */
+  typography?: boolean;
   /** Palavras que o autor mandou ignorar (comparação sem caixa). */
   ignored?: string[];
   /** Nomes extras do livro (personagens, lugares). */
@@ -261,9 +263,34 @@ export function proofread(text: string, options: ProofreadOptions = {}): Issue[]
   }
 
   if (mode === "full" && options.style) issues.push(...styleMirror(text, rows));
+  if (options.typography) for (const item of typographyIssues(text, rows)) push(item);
 
   issues.sort((a, b) => a.start - b.start || a.end - b.end);
   return issues;
+}
+
+/** Tipografia: sugestões de aceite, nunca automáticas. O texto-fonte só muda se o autor clicar. */
+export function typographyIssues(text: string, rows = lines(text)): Array<Omit<Issue, "id">> {
+  const result: Array<Omit<Issue, "id">> = [];
+  for (const row of rows) {
+    const line = row.text;
+    const dots = /(?<!\.)\.\.\.(?!\.)/g;
+    let match: RegExpExecArray | null;
+    while ((match = dots.exec(line))) {
+      const start = row.start + match.index;
+      result.push({ kind: "typography", rule: "reticencias", start, end: start + 3, original: "...", suggestion: "…", reason: "Três pontos seguidos: use o caractere de reticências (…).", explain: "As reticências são um único sinal tipográfico; assim não quebram em duas linhas nem mudam de largura.", risk: "low" });
+    }
+    // aspas retas em pares na mesma linha (número par; senão há aspas abertas e não arriscamos)
+    const quotes = line.split('"').length - 1;
+    if (quotes >= 2 && quotes % 2 === 0) {
+      const pair = /"([^"]{1,400}?)"/g;
+      while ((match = pair.exec(line))) {
+        const start = row.start + match.index;
+        result.push({ kind: "typography", rule: "aspas-curvas", start, end: start + match[0].length, original: match[0], suggestion: "“" + match[1] + "”", reason: "Aspas retas: no texto impresso e no e-book usam-se aspas curvas (“ ”).", explain: "Aspas curvas distinguem abertura e fechamento e dão aparência de livro. Confira se o par está certo antes de aceitar.", risk: "medium" });
+      }
+    }
+  }
+  return result;
 }
 
 /** Espelho do texto: perguntas, nunca vereditos. */
