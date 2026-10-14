@@ -217,9 +217,9 @@ const json = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(target, { ...init, headers });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
-    const code = response.status === 409 ? "CONFLICT" : String(payload.code ?? "");
+    const code = response.status === 409 ? "CONFLICT" : response.status === 402 ? "PLAN_REQUIRED" : response.status === 429 ? "QUOTA" : String(payload.code ?? "");
     const fallback = response.status === 405 ? "O servidor não aceitou esta operação (HTTP 405)." : `HTTP ${response.status}`;
-    const message = String(payload.error ?? payload.message ?? fallback);
+    const message = String((response.status === 402 || response.status === 429 ? payload.message : undefined) ?? payload.error ?? payload.message ?? fallback);
     throw new CloudflareApiError(message, { code, status: response.status });
   }
   return payload as T;
