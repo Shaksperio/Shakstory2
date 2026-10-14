@@ -14,7 +14,7 @@ export function fakeDb() {
           docs.push({ sql, args }); return null;
         },
         async all() {
-          if (/FROM shak_users ORDER BY/.test(sql)) return { results: [...users.values()] };
+          if (/FROM shak_users ORDER BY/.test(sql)) return { results: Array.from(users.values()) };
           docs.push({ sql, args }); return { results: [] };
         },
         async run() {
