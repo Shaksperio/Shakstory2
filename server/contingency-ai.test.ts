@@ -84,4 +84,21 @@ describe("Worker de IA da contingência", () => {
     const noDb = await m.handle(new Request("https://x/api/assist", { method: "POST", headers: auth, body: "{}" }), { AI: env.AI }, opts);
     expect(noDb.status).toBe(503);
   });
+
+  it("credenciais antivírus: só o proprietário, com login do Google", async () => {
+    const m = await load();
+    const { token, opts } = setup();
+    const db = fakeDb();
+    const pages = "https://shaksperio.github.io";
+    const call = (method: string, path: string, auth?: string, body?: unknown) =>
+      m.handle(new Request("https://x" + path, { method, headers: { Origin: pages, ...(auth ? { Authorization: "Bearer " + auth } : {}) }, body: body ? JSON.stringify(body) : undefined }), { DB: db }, opts);
+    expect((await call("GET", "/api/security/antivirus")).status).toBe(401);
+    expect((await call("GET", "/api/security/antivirus", token({ email: "comum@x.com" }))).status).toBe(403);
+    const list = await call("GET", "/api/security/antivirus", token());
+    expect(list.status).toBe(200);
+    expect(await list.json()).toHaveLength(1);
+    expect(((await (await call("POST", "/api/security/antivirus/rotate", token())).json()) as { rotated: boolean }).rotated).toBe(true);
+    const after = (await (await call("GET", "/api/security/antivirus", token())).json()) as Array<{ status: string }>;
+    expect(after.map(item => item.status)).toEqual(["active", "revoked"]);
+  });
 });

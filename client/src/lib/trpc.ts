@@ -209,7 +209,7 @@ const json = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const headers: Record<string, string> = { "content-type": "application/json", ...((init?.headers as Record<string, string> | undefined) ?? {}) };
   if (CONTINGENCY) {
     // Sem o servidor principal (D1) a hospedagem estática responderia 405 a qualquer POST. IA vai ao Worker de contingência; o resto não tem servidor.
-    if (url.indexOf("/api/assist") !== 0) throw new CloudflareApiError(CONTINGENCY_UNAVAILABLE, { code: "CONTINGENCY", status: 0 });
+    if (url.indexOf("/api/assist") !== 0 && url.indexOf("/api/security/antivirus") !== 0) throw new CloudflareApiError(CONTINGENCY_UNAVAILABLE, { code: "CONTINGENCY", status: 0 });
     try { headers.authorization = "Bearer " + (await mirrorIdToken()); }
     catch { throw new CloudflareApiError("Entre com o Google para usar a IA no modo de contingência.", { code: "UNAUTHORIZED", status: 401 }); }
     target = CONTINGENCY_AI_URL + url;
@@ -693,15 +693,16 @@ export const trpc = {
         useQuery(_input?: undefined, options?: QueryOptions) {
           return useQuery<SecuritySession[]>({
             queryKey: ["security", "antivirus", "sessions"],
-            queryFn: async () => [],
+            queryFn: () => json<SecuritySession[]>("/api/security/antivirus"),
             enabled: options?.enabled ?? true,
+            retry: false,
           });
         },
       },
       rotate: {
         useMutation(options?: { onSuccess?: (data: { rotated: boolean }) => void }) {
           return useMutation<{ rotated: boolean }, CloudflareApiError, void>({
-            mutationFn: async () => ({ rotated: false }),
+            mutationFn: () => json<{ rotated: boolean }>("/api/security/antivirus/rotate", { method: "POST", body: "{}" }),
             onSuccess: options?.onSuccess,
           });
         },
@@ -709,7 +710,7 @@ export const trpc = {
       revoke: {
         useMutation(options?: { onSuccess?: (data: { revoked: boolean }) => void }) {
           return useMutation<{ revoked: boolean }, CloudflareApiError, { id: number }>({
-            mutationFn: async () => ({ revoked: false }),
+            mutationFn: input => json<{ revoked: boolean }>("/api/security/antivirus/revoke", { method: "POST", body: JSON.stringify(input) }),
             onSuccess: options?.onSuccess,
           });
         },
