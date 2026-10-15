@@ -5,7 +5,7 @@
 // do Worker principal (tabelas shak_users e shak_usage, por e-mail), de modo que o plano vale nos dois endereços.
 // O texto, o cânone e o planejamento chegam no corpo da requisição; este Worker não lê os livros do D1.
 // Este arquivo é montado com plans.js por scripts/build-contingency-ai.mjs antes de publicar.
-import { loadAccount, useCowila, withGemini } from "./plans.js";
+import { antivirusApi, loadAccount, useCowila, withGemini } from "./plans.js";
 
 export const ALLOWED_ORIGINS = ["https://shaksperio.github.io"];
 export const FIREBASE_PROJECT = "shakstory-93bb1";
@@ -135,6 +135,16 @@ export async function handle(req, env, options = {}) {
     if (!env.DB) return reply(origin, { error: "Planos indisponíveis no momento." }, 503);
     const account = await loadAccount(env.DB, who, options.now ?? Date.now());
     return reply(origin, { email: who, owner: false, ...account.info, cowilaUsedToday: account.used });
+  }
+  if (url.pathname.indexOf("/api/security/antivirus") === 0) {
+    const who = await verifyFirebaseToken(token, options);
+    if (!who) return reply(origin, { error: "Entre com o Google para continuar." }, 401);
+    if (!owner(who)) return reply(origin, { error: "O relatório antivírus é exclusivo do proprietário." }, 403);
+    if (!env.DB) return reply(origin, { error: "Credenciais indisponíveis no momento." }, 503);
+    let payload = null;
+    if (req.method === "POST") { try { payload = await req.json(); } catch { payload = null; } }
+    const result = await antivirusApi(env.DB, who, req.method, url.pathname, payload, origin || url.origin, options.now ?? Date.now());
+    return reply(origin, result.body, result.status);
   }
   if (url.pathname !== "/api/assist") return reply(origin, { error: "not found" }, 404);
   if (req.method !== "POST") return reply(origin, { error: "method not allowed" }, 405);

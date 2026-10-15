@@ -188,3 +188,42 @@ describe("withGemini (IA opcional)", () => {
     expect((await env.AI.run("m", { messages })).response).toBe("workers");
   });
 });
+
+describe("segurança antivírus (credenciais por sessão)", () => {
+  it("lista cria a primeira credencial, rotaciona, revoga e guarda só hash e prefixo", async () => {
+    const { antivirusApi } = await load();
+    const db = fakeDb();
+    const t = 1_700_000_000_000;
+    let r = await antivirusApi(db, "dono@x.com", "GET", "/api/security/antivirus", null, "https://app.example", t);
+    expect(r.status).toBe(200);
+    expect(r.body).toHaveLength(1);
+    expect(r.body[0].status).toBe("active");
+    expect(r.body[0].tokenPrefix).toHaveLength(10);
+    expect(JSON.stringify(db.av)).not.toContain("secret");
+    expect(db.av[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
+    // segunda leitura não cria outra
+    r = await antivirusApi(db, "dono@x.com", "GET", "/api/security/antivirus", null, "https://app.example", t + 1000);
+    expect(r.body).toHaveLength(1);
+    // rotação revoga a anterior e cria nova
+    const rot = await antivirusApi(db, "dono@x.com", "POST", "/api/security/antivirus/rotate", null, "https://app.example", t + 2000);
+    expect(rot.body).toEqual({ rotated: true });
+    r = await antivirusApi(db, "dono@x.com", "GET", "/api/security/antivirus", null, "https://app.example", t + 3000);
+    expect(r.body.map((x: any) => x.status)).toEqual(["active", "revoked"]);
+    // revogar a ativa; id inválido e de outro dono não revogam
+    const activeId = r.body[0].id;
+    expect((await antivirusApi(db, "outro@x.com", "POST", "/api/security/antivirus/revoke", { id: activeId }, "u", t)).body).toEqual({ revoked: false });
+    expect((await antivirusApi(db, "dono@x.com", "POST", "/api/security/antivirus/revoke", { id: "x" }, "u", t)).status).toBe(400);
+    expect((await antivirusApi(db, "dono@x.com", "POST", "/api/security/antivirus/revoke", { id: activeId }, "u", t)).body).toEqual({ revoked: true });
+  });
+
+  it("o portão só libera a rota ao dono", async () => {
+    const mod = await load();
+    const db = fakeDb();
+    const opts = { verify: async () => "comum@x.com", now: Date.now() };
+    const denied = await mod.shakGate(req("/api/security/antivirus"), { DB: db, MIRROR_EMAILS: "dono@x.com" }, new URL("https://x/api/security/antivirus"), opts);
+    expect(denied.response.status).toBe(403);
+    const ok = await mod.shakGate(req("/api/security/antivirus"), { DB: db, MIRROR_EMAILS: "comum@x.com" }, new URL("https://x/api/security/antivirus"), opts);
+    expect(ok.response.status).toBe(200);
+    expect(await ok.response.json()).toHaveLength(1);
+  });
+});

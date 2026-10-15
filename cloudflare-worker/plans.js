@@ -136,6 +136,13 @@ async function bodyBytes(req) {
  * Porta de entrada do Worker. Devolve {} para seguir como sempre, { response } para responder já,
  * ou { env } com o D1 isolado da conta.
  */
+async function avRoute(req, env, u, email, now) {
+  let body = null;
+  if (req.method === "POST") { try { body = await req.json(); } catch { body = null; } }
+  const result = await antivirusApi(env.DB, email, req.method, u.pathname, body, u.origin, now);
+  return planJson(result.body, result.status);
+}
+
 async function shakGateCore(req, env, u, options = {}) {
   const path = u.pathname;
   if (path === "/health" || path === "/self-test" || path === "/api/mirror-token" || path === "/api/share/login" || path.indexOf("/api/public/") === 0) return {};
@@ -150,12 +157,17 @@ async function shakGateCore(req, env, u, options = {}) {
   if (!jwt) {
     // Sem credencial do Access: mesmo comportamento de antes (o próprio Access impede que isso chegue de fora).
     if (path === "/api/me") return { response: planJson({ legacy: true, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true } }) };
+    if (path.indexOf("/api/security/antivirus") === 0) return { response: await avRoute(req, env, u, "legacy-owner", now) };
     return {};
   }
   const email = await (options.verify || verifyAccessJwt)(jwt, options.jwt);
   if (!email) return { response: planJson({ error: "unauthorized" }, 401) };
   const owner = owners.indexOf(email) !== -1;
 
+  if (path.indexOf("/api/security/antivirus") === 0) {
+    if (!owner) return { response: planJson({ error: "O relatório antivírus é exclusivo do proprietário." }, 403) };
+    return { response: await avRoute(req, env, u, email, now) };
+  }
   if (owner) {
     if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true } }) };
     if (path === "/api/admin/users" && req.method === "GET") {
@@ -202,6 +214,50 @@ async function shakGateCore(req, env, u, options = {}) {
     if (bytes + (await bodyBytes(req)) > (options.maxStorage ?? MAX_STORAGE_BYTES)) return { response: planJson({ error: "storage_full", message: "O espaço da sua conta está cheio. Exclua livros ou versões antigas, ou fale com o administrador." }, 413) };
   }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
+}
+
+// ===== Segurança antivírus: credenciais efêmeras por sessão (só hash e prefixo ficam guardados) =====
+const AV_TABLE = "CREATE TABLE IF NOT EXISTS shak_av_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, base_url TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER)";
+const avReport = row => ({ id: row.id, tokenPrefix: row.token_prefix, projectBaseUrl: row.base_url, status: row.status, createdAt: new Date(row.created_at).toISOString(), lastUsedAt: row.last_used_at ? new Date(row.last_used_at).toISOString() : null, revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null });
+async function avSha(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+function avSecret() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function avCreate(db, email, baseUrl, now) {
+  const secret = avSecret();
+  await db.prepare("INSERT INTO shak_av_sessions (email, token_hash, token_prefix, base_url, status, created_at, last_used_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").bind(email, await avSha(secret), secret.slice(0, 10), baseUrl, now, now).run();
+}
+/** Trata /api/security/antivirus (GET lista, POST rotate e POST revoke). Só chamar para o dono. Devolve {status, body}. */
+export async function antivirusApi(db, email, method, path, body, baseUrl, now = Date.now()) {
+  await db.prepare(AV_TABLE).run();
+  const active = async () => (await db.prepare("SELECT * FROM shak_av_sessions WHERE email = ? AND status = 'active' ORDER BY created_at DESC, id DESC LIMIT 1").bind(email).all()).results || [];
+  if (method === "GET" && path === "/api/security/antivirus") {
+    const current = await active();
+    if (current.length) await db.prepare("UPDATE shak_av_sessions SET last_used_at = ?, base_url = ? WHERE id = ?").bind(now, baseUrl, current[0].id).run();
+    else await avCreate(db, email, baseUrl, now);
+    const rows = (await db.prepare("SELECT * FROM shak_av_sessions WHERE email = ? ORDER BY created_at DESC, id DESC LIMIT 50").bind(email).all()).results || [];
+    return { status: 200, body: rows.map(avReport) };
+  }
+  if (method === "POST" && path === "/api/security/antivirus/rotate") {
+    await db.prepare("UPDATE shak_av_sessions SET status = 'revoked', revoked_at = ? WHERE email = ? AND status = 'active'").bind(now, email).run();
+    await avCreate(db, email, baseUrl, now);
+    return { status: 200, body: { rotated: true } };
+  }
+  if (method === "POST" && path === "/api/security/antivirus/revoke") {
+    const id = Number(body && body.id);
+    if (!Number.isInteger(id) || id <= 0) return { status: 400, body: { error: "Credencial inválida." } };
+    const found = (await db.prepare("SELECT id FROM shak_av_sessions WHERE id = ? AND email = ? AND status = 'active'").bind(id, email).all()).results || [];
+    if (!found.length) return { status: 200, body: { revoked: false } };
+    await db.prepare("UPDATE shak_av_sessions SET status = 'revoked', revoked_at = ? WHERE id = ? AND email = ?").bind(now, id, email).run();
+    return { status: 200, body: { revoked: true } };
+  }
+  return { status: 404, body: { error: "not found" } };
 }
 
 /** IA opcional: se o segredo GEMINI_API_KEY existir no Worker, usa o Gemini e cai no Workers AI se ele falhar. Sem o segredo, nada muda. */
