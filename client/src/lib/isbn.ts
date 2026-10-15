@@ -20,11 +20,11 @@ export function normalizeIsbn(value: string): string {
 export function isValidIsbn(value: string): boolean {
   const code = normalizeIsbn(value);
   if (/^\d{9}[\dX]$/.test(code)) {
-    const sum = [...code].reduce((acc, ch, i) => acc + (ch === "X" ? 10 : Number(ch)) * (10 - i), 0);
+    const sum = code.split("").reduce((acc, ch, i) => acc + (ch === "X" ? 10 : Number(ch)) * (10 - i), 0);
     return sum % 11 === 0;
   }
   if (/^\d{13}$/.test(code)) {
-    const sum = [...code].reduce((acc, ch, i) => acc + Number(ch) * (i % 2 === 0 ? 1 : 3), 0);
+    const sum = code.split("").reduce((acc, ch, i) => acc + Number(ch) * (i % 2 === 0 ? 1 : 3), 0);
     return sum % 10 === 0;
   }
   return false;
