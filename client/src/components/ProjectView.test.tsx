@@ -58,3 +58,20 @@ it("stops restoration if the current snapshot cannot be saved", async () => {
   expect(onUpdate).not.toHaveBeenCalled();
   expect(screen.getByText(/A restauração foi interrompida/)).toBeTruthy();
 });
+
+it("restaurar um snapshot não cria um snapshot igual ao botão Criar: guarda o estado anterior com nome próprio só se houver mudanças", () => {
+  render(<Harness />);
+  fireEvent.click(screen.getByRole("button", { name: "Criar snapshot" }));
+  expect(screen.getAllByRole("button", { name: "Restaurar" })).toHaveLength(1);
+  // projeto igual ao snapshot: nada é criado
+  fireEvent.click(screen.getByRole("button", { name: "Restaurar" }));
+  expect(screen.getAllByRole("button", { name: "Restaurar" })).toHaveLength(1);
+  expect(screen.getByText(/já está igual a este snapshot/)).toBeTruthy();
+  // com alterações: o estado atual vira "Antes de restaurar" (nome distinto) e não "Snapshot 2"
+  fireEvent.change(screen.getByPlaceholderText("Adicionar um próximo passo"), { target: { value: "Passo novo" } });
+  fireEvent.click(screen.getByRole("button", { name: "Adicionar próximo passo" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Restaurar" })[0]);
+  expect(screen.getByText("Antes de restaurar")).toBeTruthy();
+  expect(screen.queryByText("Snapshot 2")).toBeNull();
+  expect(screen.getAllByRole("button", { name: "Restaurar" })).toHaveLength(2);
+});
