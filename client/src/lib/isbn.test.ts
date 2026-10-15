@@ -3,8 +3,8 @@ import { isValidIsbn, lookupIsbn, normalizeIsbn, parseGoogleBooks, parseOpenLibr
 
 describe("isbn", () => {
   it("normaliza e valida ISBN-13 e ISBN-10", () => {
-    expect(normalizeIsbn("978-85-359-0277-5")).toBe("9788535902775");
-    expect(isValidIsbn("978-85-359-0277-5")).toBe(true);
+    expect(normalizeIsbn("978-85-359-0277-8")).toBe("9788535902778");
+    expect(isValidIsbn("978-85-359-0277-8")).toBe(true);
     expect(isValidIsbn("0-306-40615-2")).toBe(true);
     expect(isValidIsbn("9788535902776")).toBe(false);
     expect(isValidIsbn("abc")).toBe(false);
@@ -21,10 +21,10 @@ describe("isbn", () => {
     expect(publicationDates("2008-03-01")).toEqual({ year: "2008", date: "2008-03-01" });
   });
   it("usa Open Library quando o Google não acha e devolve null se nenhum achar", async () => {
-    const ol = { "ISBN:9788535902775": { title: "Só OL", authors: [{ name: "A" }] } };
+    const ol = { "ISBN:9788535902778": { title: "Só OL", authors: [{ name: "A" }] } };
     const fetchFn = (async (url: string) => ({ ok: true, json: async () => (String(url).includes("openlibrary") ? ol : { totalItems: 0 }) })) as unknown as typeof fetch;
-    expect((await lookupIsbn("978-85-359-0277-5", fetchFn))?.source).toBe("Open Library");
+    expect((await lookupIsbn("978-85-359-0277-8", fetchFn))?.source).toBe("Open Library");
     const none = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
-    expect(await lookupIsbn("9788535902775", none)).toBeNull();
+    expect(await lookupIsbn("9788535902778", none)).toBeNull();
   });
 });

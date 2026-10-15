@@ -15,10 +15,10 @@ describe("IsbnLookup", () => {
   it("busca e aplica os dados encontrados", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [{ volumeInfo: { title: "Dom Casmurro", authors: ["Machado de Assis"], publisher: "P", description: "D" } }] }) })));
     const onApply = vi.fn();
-    render(<IsbnLookup value="978-85-359-0277-5" onChange={() => {}} onApply={onApply} />);
+    render(<IsbnLookup value="978-85-359-0277-8" onChange={() => {}} onApply={onApply} />);
     fireEvent.click(screen.getByText("Buscar dados"));
     await waitFor(() => screen.getByTestId("isbn-result"));
     fireEvent.click(screen.getByText("Aplicar aos metadados"));
-    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ title: "Dom Casmurro", isbn: "9788535902775" }), false);
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ title: "Dom Casmurro", isbn: "9788535902778" }), false);
   });
 });
