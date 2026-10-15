@@ -15,19 +15,19 @@
   --secondary-foreground: oklch(0.34 0.015 265);
   --muted: oklch(0.94 0.005 260);
   --muted-foreground: oklch(0.5 0.015 265);
-  --accent: oklch(0.945 0.012 277);
-  --accent-foreground: oklch(0.28 0.04 277);
+  --accent: oklch(0.945 0.03 212);
+  --accent-foreground: oklch(0.3 0.06 215);
   --border: oklch(0.905 0.006 260);
   --input: oklch(0.88 0.007 260);
-  --primary: oklch(0.52 0.2 277);
-  --primary-foreground: oklch(0.99 0.004 277);
-  --ring: oklch(0.58 0.19 277);
+  --primary: oklch(0.5 0.095 215);
+  --primary-foreground: oklch(0.99 0.004 215);
+  --ring: oklch(0.58 0.1 215);
   --sidebar: oklch(0.97 0.004 260);
   --ink: oklch(0.205 0.014 265);
   --ink-2: oklch(0.265 0.02 268);
   --ink-fg: oklch(0.95 0.004 265);
   --ink-muted: oklch(0.72 0.012 265);
-  --ink-accent: oklch(0.78 0.13 285);
+  --ink-accent: oklch(0.78 0.09 205);
   --pro-shadow-sm: 0 1px 2px oklch(0.2 0.02 265 / 6%), 0 0 0 1px oklch(0.2 0.02 265 / 3%);
   --pro-shadow-md: 0 6px 20px oklch(0.2 0.02 265 / 8%), 0 1px 3px oklch(0.2 0.02 265 / 6%);
   --pro-desk: oklch(0.935 0.006 260);
@@ -42,11 +42,12 @@
   --secondary: oklch(0.245 0.009 265);
   --muted: oklch(0.27 0.009 265);
   --muted-foreground: oklch(0.7 0.012 265);
-  --accent: oklch(0.29 0.03 277);
+  --accent: oklch(0.3 0.04 215);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 13%);
-  --primary: oklch(0.7 0.17 281);
-  --ring: oklch(0.7 0.17 281);
+  --primary: oklch(0.74 0.1 210);
+  --primary-foreground: oklch(0.18 0.02 215);
+  --ring: oklch(0.74 0.1 210);
   --sidebar: oklch(0.2 0.009 265);
   --ink: oklch(0.13 0.01 265);
   --ink-2: oklch(0.21 0.014 268);
@@ -120,8 +121,8 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-radi
 .editorial-sidebar > div:first-child p, .editorial-sidebar > div:first-child button, .editorial-sidebar h2, .editorial-sidebar h3 { color: var(--foreground); }
 .matter-empty { color: var(--muted-foreground); }
 .manuscript-footer { background: var(--secondary) !important; color: var(--muted-foreground); border-top: 1px solid var(--border); }
-.manuscript-footer, .manuscript-footer * { color: var(--muted-foreground); }
-.manuscript-footer strong { color: var(--foreground); }
+.manuscript-footer, .manuscript-footer * { color: var(--muted-foreground) !important; }
+.manuscript-footer strong { color: var(--foreground) !important; }
 .editorial-sidebar [class*="text-white"], .editorial-sidebar [class*="text-ink"] { color: var(--foreground) !important; }
 .editorial-sidebar [class*="bg-white/"] { background: var(--secondary) !important; }
 .editorial-sidebar [class*="border-white/"] { border-color: var(--border) !important; }
@@ -142,3 +143,21 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-radi
 * { scrollbar-width: thin; scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent; }
 
 @media (prefers-reduced-motion: reduce) { .library-book-card, button, input, select, textarea { transition: none; } .library-book-card:hover { transform: none; } }
+
+
+/* ===== Camada Kindle Create: formas orgânicas pastel e prévia em "aparelho" ===== */
+.rounded-2xl.bg-primary\/5 {
+  background-color: oklch(0.97 0.012 200);
+  background-image:
+    radial-gradient(60% 45% at 85% 8%, oklch(0.9 0.045 195 / 70%), transparent 70%),
+    radial-gradient(50% 40% at 5% 95%, oklch(0.93 0.04 30 / 55%), transparent 70%);
+  border-color: oklch(0.88 0.02 205);
+}
+.dark .rounded-2xl.bg-primary\/5 { background-color: var(--card); background-image: radial-gradient(60% 45% at 85% 8%, oklch(0.4 0.05 205 / 35%), transparent 70%); }
+iframe[title^="Prévia"] { background: #fff; border-radius: 6px; border: 7px solid oklch(0.22 0.01 250); box-shadow: 0 14px 34px oklch(0.2 0.03 220 / 25%), 0 2px 4px #0002; }
+.bg-muted\/30.rounded-lg:has(iframe[title^="Prévia"]) { background: transparent; padding-block: 18px; }
+/* Título do capítulo no editor: centralizado, com kicker em azul-esverdeado como no Kindle Create */
+h1.font-serif.text-3xl { text-align: center; }
+.font-mono.uppercase.text-primary { color: var(--primary); }
+input[type="checkbox"], input[type="radio"], .matter-row input { accent-color: var(--primary); }
+.chapter-row.is-active { background: color-mix(in oklch, var(--primary) 9%, var(--card)); }
