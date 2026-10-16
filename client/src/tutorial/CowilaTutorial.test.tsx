@@ -107,4 +107,12 @@ describe("CowilaTutorial", () => {
     fireEvent.keyDown(document, { key: "Tab" });
     expect(document.querySelector("[data-cowila-tour-dialog]")?.contains(document.activeElement)).toBe(true);
   });
+  it("ao sair volta para a tela em que o usuário estava", () => {
+    const go = vi.fn(() => true);
+    const { rerender } = render(<CowilaTutorial {...props({ go, view: "editor", menuOpen: true })} />);
+    fireEvent.click(screen.getByText("Começar tutorial"));
+    rerender(<CowilaTutorial {...props({ go, view: "project", menuOpen: false })} />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(go).toHaveBeenLastCalledWith("editor");
+  });
 });
