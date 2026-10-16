@@ -67,8 +67,9 @@ describe("CowilaTutorial", () => {
   it("na última etapa troca “Próximo” por “Concluir tutorial” e marca como concluído", () => {
     const all = stepsFor({ hasBook: true, hasBooks: true });
     writeTutorial(USER, { status: "in_progress", stepId: all[all.length - 1].id, updatedAt: 0 });
-    render(<CowilaTutorial {...props({ menuOpen: true })} />);
+    const { rerender } = render(<CowilaTutorial {...props({ menuOpen: true })} />);
     fireEvent.click(screen.getByText("Continuar de onde parou"));
+    rerender(<CowilaTutorial {...props({ menuOpen: false })} />);
     expect(screen.queryByText("Próximo")).toBeNull();
     fireEvent.click(screen.getByText("Concluir tutorial"));
     expect(readTutorial(USER).status).toBe("completed");
