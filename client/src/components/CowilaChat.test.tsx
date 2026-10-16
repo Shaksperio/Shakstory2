@@ -8,7 +8,7 @@ afterEach(() => { cleanup(); localStorage.clear(); });
 const openChat = () => fireEvent.click(screen.getByLabelText("Abrir a Cowila"));
 const text = "A noite caiu sobre Gareth. Então Élia abriu a janela e viu Gareth. Depois chamou Élia baixinho, e Élia sorriu para Gareth.";
 const book = { id: "b1", title: "Livro", nodes: [{ id: "n1", title: "Cap 1", kind: "chapter", content: text }] };
-const base = (over: Partial<CowilaChatProps> = {}): CowilaChatProps => ({
+const base = (over: Partial<CowilaChatProps> = {}): CowilaChatProps => (localStorage.setItem("shakstory:cowila:leitura:b1", "1"), {
   books: [book], active: book, activeNodeId: "n1", draft: text, online: true,
   ask: vi.fn(async () => ""), onAddCharacters: vi.fn(() => ({ added: 2, updated: 0 })), onSetDescription: vi.fn(), onReplaceDraft: vi.fn(), ...over,
 });
@@ -121,5 +121,48 @@ describe("CowilaChat", () => {
     await waitFor(() => expect(screen.getByText(/Não vou te entregar uma resposta com conta errada/)).toBeTruthy());
     expect(ask).toHaveBeenCalledTimes(3);
     expect(((ask.mock.calls as unknown as Array<[{ prompt: string }]>)[1][0]).prompt).toContain("o valor exato é 391");
+  });
+  it("escreve um prólogo, mostra o texto e só grava depois de aprovar; dá para desfazer", async () => {
+    const proposal = "TÍTULO: Prólogo\n\n" + "A névoa descia sobre a casa de Gareth e Élia ouvia os passos no corredor, um a um, sem coragem de abrir a porta ou de chamar por ninguém naquela noite.";
+    const ask = vi.fn(async () => proposal);
+    const undo = vi.fn();
+    const onSaveSection = vi.fn(() => ({ replaced: false, undo }));
+    render(<CowilaChat {...base({ ask, onSaveSection })} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Escreva o prólogo do livro" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => screen.getByLabelText("Conteúdo proposto"));
+    expect(onSaveSection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Aprovar e gravar"));
+    expect(onSaveSection).toHaveBeenCalledWith(expect.objectContaining({ key: "prologue", position: "start" }), "Prólogo", expect.stringContaining("névoa"));
+    fireEvent.click(screen.getByText("Desfazer gravação"));
+    expect(undo).toHaveBeenCalled();
+  });
+  it("“Não aprovar” descarta sem gravar", async () => {
+    const ask = vi.fn(async () => "TÍTULO: Prefácio\n\n" + "Este livro nasceu de uma noite longa em que Gareth contou a Élia tudo o que sabia sobre a casa, a névoa e o que se escondia no fim do corredor.");
+    const onSaveSection = vi.fn(() => ({ replaced: false, undo: () => {} }));
+    render(<CowilaChat {...base({ ask, onSaveSection })} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Crie um prefácio" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => screen.getByText("Não aprovar"));
+    fireEvent.click(screen.getByText("Não aprovar"));
+    expect(onSaveSection).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Conteúdo proposto")).toBeNull();
+  });
+  it("sem autorização de leitura a Cowila não escreve nem consulta a IA", async () => {
+    const ask = vi.fn(async () => "x");
+    const onSaveSection = vi.fn(() => ({ replaced: false, undo: () => {} }));
+    const props = base({ ask, onSaveSection });
+    localStorage.removeItem("shakstory:cowila:leitura:b1");
+    render(<CowilaChat {...props} />);
+    openChat();
+    fireEvent.change(screen.getByLabelText("Mensagem para a Cowila"), { target: { value: "Escreva o epílogo" } });
+    fireEvent.click(screen.getByLabelText("Enviar"));
+    await waitFor(() => screen.getByText(/preciso da sua autorização/));
+    expect(ask).not.toHaveBeenCalled();
+    expect(onSaveSection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Autorizar leitura"));
+    expect(localStorage.getItem("shakstory:cowila:leitura:b1")).toBe("1");
   });
 });

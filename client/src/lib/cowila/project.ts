@@ -10,7 +10,7 @@ export type CBook = {
   status?: string;
   nodes: CNode[];
   planning?: { characters: CCharacter[]; locations?: Array<{ name: string }>; timeline?: unknown[] };
-  publication?: { genre?: string; category?: string; description?: string; author?: string };
+  publication?: { genre?: string; category?: string; description?: string; author?: string; includeToc?: boolean; frontMatter?: Array<{ id: string; title: string; content: string; enabled?: boolean }>; backMatter?: Array<{ id: string; title: string; content: string; enabled?: boolean }> };
 };
 export type Level = "iniciante" | "experiente";
 
