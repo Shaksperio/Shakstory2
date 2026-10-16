@@ -34,6 +34,7 @@ export function CowilaTutorial({ userKey, ready, hasBook, hasBooks, view, go, me
   const balloonRef = useRef<HTMLDivElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const openedDetails = useRef<HTMLDetailsElement | null>(null);
+  const startView = useRef<string>("library");
 
   useEffect(() => { setState(readTutorial(userKey)); setLoadedFor(userKey); setPhase("idle"); }, [userKey]);
 
@@ -57,6 +58,7 @@ export function CowilaTutorial({ userKey, ready, hasBook, hasBooks, view, go, me
 
   const begin = (fromId: string | null) => {
     returnFocus.current = (document.activeElement as HTMLElement | null) ?? null;
+    startView.current = view;
     const first = fromId && TUTORIAL_STEPS.some(item => item.id === fromId) ? fromId : stepsFor({ hasBook, hasBooks })[0]?.id ?? null;
     setStepId(first);
     setPhase("running");
@@ -66,9 +68,10 @@ export function CowilaTutorial({ userKey, ready, hasBook, hasBooks, view, go, me
   const leave = useCallback((next?: Partial<TutorialState>) => {
     setPhase("idle"); setTarget(null); setRect(null);
     if (openedDetails.current) { openedDetails.current.open = false; openedDetails.current = null; }
+    if (startView.current !== view) go(startView.current as TutorialView);
     save({ status: "in_progress", stepId, updatedAt: Date.now(), ...next });
     window.setTimeout(() => { try { returnFocus.current?.focus?.(); } catch { /* foco opcional */ } }, 0);
-  }, [save, stepId]);
+  }, [save, stepId, view, go]);
 
   const goTo = (nextIndex: number) => {
     const next = steps[nextIndex];
@@ -203,7 +206,7 @@ export function CowilaTutorial({ userKey, ready, hasBook, hasBooks, view, go, me
             <p><strong>Como usar:</strong> {step.how}</p>
             {step.example && <p><strong>Exemplo:</strong> {step.example}</p>}
             {!target && <p className="rounded-md bg-secondary/70 p-2 text-xs">{step.fallback ?? "Esta opção não aparece nesta tela agora, mas continua disponível no Shakstory."}</p>}
-            {last && skipped > 0 && <p className="rounded-md bg-secondary/70 p-2 text-xs">Algumas telas ficaram de fora porque não há um livro aberto. Abra um livro e escolha “Continuar” ou “Reiniciar” em Tutorial com Cowila.</p>}
+            {last && !hasBook && skipped > 0 && <p className="rounded-md bg-secondary/70 p-2 text-xs">Algumas telas ficaram de fora porque não há um livro aberto. Abra um livro e escolha “Continuar” ou “Reiniciar” em Tutorial com Cowila.</p>}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={index === 0} onClick={() => goTo(index - 1)}>Anterior</Button>
