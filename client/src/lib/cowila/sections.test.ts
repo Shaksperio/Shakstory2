@@ -35,7 +35,7 @@ describe("sections", () => {
   });
   it("lê texto completo do capítulo citado e avisa de conteúdo existente", () => {
     expect(focusedChapters(book, "resuma o capítulo 2")).toContain("A névoa subiu do rio.");
-    expect(focusedChapters(book, "fale da casa")).toBe("");
+    expect(focusedChapters(book, "fale da hospedaria")).toBe("");
     expect(existingSection(book, { area: "back", key: "afterword", title: "Posfácio" })).toBe("Texto antigo.");
     expect(existingSection(book, { area: "chapter", key: "prologue", title: "Prólogo" })).toBeUndefined();
   });
