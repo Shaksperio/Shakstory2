@@ -676,7 +676,27 @@ export default function WriterStudio() {
     {!accountOpen && <CowilaChat books={library.books as never} active={activeBook as never} activeNodeId={activeNode?.id} draft={draft} online={online} ask={askCowila}
       onAddCharacters={found => { const base = activeBook?.planning ?? { characters: [], locations: [], timeline: [] }; const merged = mergeCharacters(base.characters, found, () => stableId("character")); if (merged.added || merged.updated) updatePlanning({ ...base, characters: merged.characters as Character[] }); return { added: merged.added, updated: merged.updated }; }}
       onSetDescription={text => { if (activeBook) updateBook({ publication: { ...(activeBook.publication ?? { author: "", genre: "", language: "pt-BR", description: "" }), description: text } as PublicationData }); }}
-      onReplaceDraft={text => updateDraft(text)} />}
+      onReplaceDraft={text => updateDraft(text)}
+      onSaveSection={(target, title, content) => {
+        if (!activeBook) return { replaced: false, undo: () => {} };
+        const prevNodes = activeBook.nodes; const prevPublication = activeBook.publication; const now = Date.now(); let replaced = false;
+        const basePub: PublicationData = prevPublication ?? { author: "", genre: "", language: "Português", description: "", includeToc: true, typography: "classic" };
+        if (target.area === "chapter") {
+          const existing = target.key === "chapter" ? undefined : activeBook.nodes.find(node => node.kind !== "part" && node.title.trim().toLowerCase() === target.title.toLowerCase());
+          if (existing) { replaced = true; updateBook({ nodes: activeBook.nodes.map(node => node.id === existing.id ? { ...node, title, content, richContent: undefined, updatedAt: now } : node) }); }
+          else { const created: Node = { id: stableId("chapter"), title, kind: "chapter", content, updatedAt: now }; updateBook({ nodes: target.position === "start" ? [created, ...activeBook.nodes] : [...activeBook.nodes, created] }); }
+        } else if (target.area === "toc") {
+          replaced = Boolean(basePub.includeToc);
+          updateBook({ publication: { ...basePub, includeToc: true } });
+        } else {
+          const area = target.area === "front" ? "frontMatter" : "backMatter";
+          const list = basePub[area] ?? [];
+          replaced = list.some(section => section.id === target.key && section.content?.trim());
+          const next = list.some(section => section.id === target.key) ? list.map(section => section.id === target.key ? { ...section, title: target.title, content, enabled: true } : section) : [...list, { id: target.key, title: target.title, content, enabled: true }];
+          updateBook({ publication: { ...basePub, [area]: next } });
+        }
+        return { replaced, undo: () => updateBook({ nodes: prevNodes, publication: prevPublication ?? basePub }) };
+      }} />}
     {newBookOpen && <div className="fixed inset-0 z-30 grid place-items-center bg-black/30 p-5 backdrop-blur-sm"><div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="new-book-title"><div className="flex items-start justify-between"><div><p className="font-mono text-[10px] uppercase tracking-[0.15em] text-primary">Novo projeto</p><h2 id="new-book-title" className="mt-2 font-serif text-3xl">Comece a história.</h2></div><Button size="icon" variant="ghost" onClick={() => setNewBookOpen(false)} aria-label="Fechar"><X className="h-4 w-4" /></Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">O primeiro capítulo será criado automaticamente. Você pode completar os metadados quando quiser.</p><label className="mt-6 block text-xs font-medium text-muted-foreground">Título<Input className="mt-2" autoFocus value={newBookTitle} onChange={event => setNewBookTitle(event.target.value)} onKeyDown={event => event.key === "Enter" && createBook()} placeholder="O nome do seu livro" /></label><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-muted-foreground">Universo<Input className="mt-2" value={newBookUniverseName} onChange={event => setNewBookUniverseName(event.target.value)} placeholder="Opcional" /></label><label className="text-xs font-medium text-muted-foreground">Série<Input className="mt-2" value={newBookSeriesName} onChange={event => setNewBookSeriesName(event.target.value)} placeholder="Opcional" /></label></div><p className="mt-2 text-[11px] leading-4 text-muted-foreground">Livros com os mesmos nomes de Universo e Série compartilham a mesma identidade narrativa.</p><Button className="mt-5 w-full" onClick={createBook} disabled={!newBookTitle.trim()}><Plus className="mr-2 h-4 w-4" />Criar livro</Button></div></div>}
     {bookDialog && activeBook && <BookDialog mode={bookDialog} book={activeBook} onClose={() => setBookDialog(null)} onSave={patch => { updateBook(patch); setBookDialog(null); }} onReset={resetActiveBook} onDelete={deleteActiveBook} />}
   </div>;
