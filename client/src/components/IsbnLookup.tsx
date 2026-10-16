@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isValidIsbn, lookupIsbn, normalizeIsbn, type IsbnInfo } from "@/lib/isbn";
 
 export function IsbnLookup({ value, onChange, onApply }: { value: string; onChange: (value: string) => void; onApply: (info: IsbnInfo, overwrite: boolean) => void }) {
+  const id = useId();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [info, setInfo] = useState<IsbnInfo | null>(null);
@@ -22,12 +23,11 @@ export function IsbnLookup({ value, onChange, onApply }: { value: string; onChan
 
   return (
     <div className="text-xs font-medium text-muted-foreground">
-      <label className="block">ISBN
-        <span className="mt-2 flex gap-2">
-          <Input value={value} onChange={event => onChange(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void search(); } }} placeholder="978…" />
-          <Button type="button" variant="outline" disabled={busy || !value.trim()} onClick={() => void search()}>Buscar dados</Button>
-        </span>
-      </label>
+      <label htmlFor={id} className="block">ISBN</label>
+      <span className="mt-2 flex gap-2">
+        <Input id={id} value={value} onChange={event => onChange(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void search(); } }} placeholder="978…" />
+        <Button type="button" variant="outline" disabled={busy || !value.trim()} onClick={() => void search()}>Buscar dados</Button>
+      </span>
       {message && <p role="status" className="mt-2 text-[11px]">{message}</p>}
       {info && (
         <div className="mt-3 rounded-xl border border-border/70 bg-muted/40 p-3 text-foreground" data-testid="isbn-result">
