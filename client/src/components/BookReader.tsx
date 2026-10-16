@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AudioReader } from "./AudioReader";
 import { buildPrintHtml, TYPOGRAPHY_PRESETS, type ExportBook, type TypographyPreset } from "@shared/book-export";
 
 type Scope = "chapter" | "book";
@@ -51,6 +52,7 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
   const [scope, setScope] = useState<Scope>("chapter");
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [navOpen, setNavOpen] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const update = (patch: Partial<Prefs>) => setPrefs(current => { const next = { ...current, ...patch }; savePrefs(next); return next; });
 
@@ -120,6 +122,7 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
           {(Object.keys(TYPOGRAPHY_PRESETS) as TypographyPreset[]).map(key => <option key={key} value={key}>{TYPOGRAPHY_PRESETS[key].label}</option>)}
         </select>
         <button type="button" className={btn} aria-pressed={night} onClick={() => update({ theme: night ? "day" : "night" })}>{night ? "Modo dia" : "Modo noite"}</button>
+        <button type="button" className={`${btn} ${audioOpen ? active : ""}`} aria-pressed={audioOpen} onClick={() => setAudioOpen(open => !open)}>🔊 Ouvir</button>
         {extra}
         {onClose && <button type="button" className={btn} aria-label={closeLabel} onClick={onClose}>✕</button>}
       </div>
@@ -133,6 +136,7 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
             : <button key={chapter.id} type="button" aria-current={i === index ? "true" : undefined} className={`w-full rounded-md px-2 py-1.5 text-left text-sm ${i === index ? `${active} font-medium` : "opacity-80 hover:opacity-100"}`} onClick={() => choose(i)}>{chapter.title}</button>)}
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
+          {audioOpen && <AudioReader chapters={chapters} index={index} scope={scope} onChapterChange={choose} btnClass={btn} panelClass={panel} onClose={() => setAudioOpen(false)} />}
           <iframe ref={frame} key={scope + prefs.typography} title="Livro pré-visualizado" sandbox="allow-same-origin" srcDoc={html} onLoad={onLoad} className="min-h-0 w-full flex-1 border-0" />
           {scope === "chapter" && chapters.length > 1 && (
             <div className={`flex items-center justify-between border-t px-3 py-2 ${panel}`}>
