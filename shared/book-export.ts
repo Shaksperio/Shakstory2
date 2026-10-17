@@ -48,6 +48,10 @@ export type ExportBook = {
   subtitle?: string;
   author?: string;
   language?: string;
+  /** Código do idioma do texto exportado (ex.: "en"); ausente = português. Ajusta rótulos como "Capítulo" e "Sumário". */
+  languageCode?: string;
+  /** Texto de direitos autorais já traduzido (substitui o gerado em português). */
+  copyrightText?: string;
   description?: string;
   category?: string;
   isbn?: string;
@@ -65,6 +69,37 @@ export type ExportBook = {
   backMatter?: ExportSection[];
   chapters: ExportChapter[];
 };
+
+
+export type ExportLabels = { chapter: (n: number) => string; contents: string; contentsCont: string; cover: string; dir?: "rtl" };
+const same = (word: string) => (n: number) => `${word} ${n}`;
+const EXPORT_LABELS: Record<string, ExportLabels> = {
+  pt: { chapter: same("Capítulo"), contents: "Sumário", contentsCont: "Sumário — continuação", cover: "Capa" },
+  en: { chapter: same("Chapter"), contents: "Contents", contentsCont: "Contents — continued", cover: "Cover" },
+  es: { chapter: same("Capítulo"), contents: "Índice", contentsCont: "Índice — continuación", cover: "Portada" },
+  fr: { chapter: same("Chapitre"), contents: "Table des matières", contentsCont: "Table des matières — suite", cover: "Couverture" },
+  de: { chapter: same("Kapitel"), contents: "Inhaltsverzeichnis", contentsCont: "Inhaltsverzeichnis — Fortsetzung", cover: "Umschlag" },
+  it: { chapter: same("Capitolo"), contents: "Indice", contentsCont: "Indice — continua", cover: "Copertina" },
+  "pt-pt": { chapter: same("Capítulo"), contents: "Índice", contentsCont: "Índice — continuação", cover: "Capa" },
+  nl: { chapter: same("Hoofdstuk"), contents: "Inhoud", contentsCont: "Inhoud — vervolg", cover: "Omslag" },
+  pl: { chapter: same("Rozdział"), contents: "Spis treści", contentsCont: "Spis treści — ciąg dalszy", cover: "Okładka" },
+  ru: { chapter: same("Глава"), contents: "Содержание", contentsCont: "Содержание — продолжение", cover: "Обложка" },
+  tr: { chapter: same("Bölüm"), contents: "İçindekiler", contentsCont: "İçindekiler — devam", cover: "Kapak" },
+  ar: { chapter: same("الفصل"), contents: "المحتويات", contentsCont: "المحتويات — تابع", cover: "الغلاف", dir: "rtl" },
+  ja: { chapter: n => `第${n}章`, contents: "目次", contentsCont: "目次 — 続き", cover: "表紙" },
+  ko: { chapter: n => `${n}장`, contents: "목차", contentsCont: "목차 — 계속", cover: "표지" },
+  "zh-cn": { chapter: n => `第${n}章`, contents: "目录", contentsCont: "目录 — 续", cover: "封面" },
+};
+/** Rótulos do livro exportado no idioma pedido (português quando não há código). */
+export function exportLabels(code?: string): ExportLabels {
+  const key = (code ?? "pt").replace("_", "-").toLowerCase();
+  return EXPORT_LABELS[key] ?? EXPORT_LABELS[key.split("-")[0]] ?? EXPORT_LABELS.pt;
+}
+/** O PDF usa fontes padrão (só alfabeto latino ocidental): estes idiomas precisam de DOCX, EPUB ou HTML. */
+export const PDF_UNSUPPORTED_LANGUAGES = ["pl", "ru", "tr", "ar", "ja", "ko", "zh-cn"];
+export const pdfSupportsLanguage = (code?: string) => !PDF_UNSUPPORTED_LANGUAGES.includes((code ?? "pt").toLowerCase());
+const CHAPTER_WORDS = "cap[ií]tulo|chapter|chapitre|kapitel|capitolo|hoofdstuk|rozdzia[łl]|глава|bölüm|الفصل";
+const SPECIAL_TITLE = /^(pr[oó]logo|ep[ií]logo|introdu[cç][aã]o|posf[aá]cio|prologue|epilogue|[eé]pilogue|introduction|afterword|pr[oó]log|epilog|einleitung|nachwort|prefazione|introduzione|postfazione|prolog|epiloog)\b/i;
 
 type Preset = {
   label: string;
@@ -177,24 +212,24 @@ export function normalizeExportBook(book: ExportBook): ExportBook {
       chapter.kind === "part" ||
       chapter.kind === "front_matter" ||
       chapter.kind === "back_matter" ||
-      /^(pr[oó]logo|ep[ií]logo|introdu[cç][aã]o|posf[aá]cio)\b/i.test(
-        chapter.title
-      )
+      SPECIAL_TITLE.test(chapter.title)
     )
       return { ...chapter };
     number++;
     const title = chapter.title
-      .replace(/^cap[ií]tulo(?:\s+\d+)?\s*(?:[—–:.-]\s*)?/i, "")
+      .replace(new RegExp(`^(?:${CHAPTER_WORDS})(?:\\s+\\d+)?\\s*(?:[—–:.-]\\s*)?`, "i"), "")
       .trim();
     return {
       ...chapter,
-      title: `Capítulo ${number}${title ? ` — ${title}` : ""}`,
+      title: `${exportLabels(book.languageCode).chapter(number)}${title ? ` — ${title}` : ""}`,
     };
   });
   return {
     ...book,
     author: book.copyright?.penName || book.author,
-    frontMatter: publicationSections(book),
+    frontMatter: publicationSections(book).map(section =>
+      section.id === "copyright" && book.copyrightText ? { ...section, content: book.copyrightText } : section
+    ),
     chapters,
   };
 }
@@ -211,7 +246,7 @@ export function buildText(book: ExportBook): string {
     book.author,
     ...(book.includeToc === false
       ? []
-      : ["Sumário", ...sections.map(s => s.title)]),
+      : [exportLabels(book.languageCode).contents, ...sections.map(s => s.title)]),
     ...sections.map(s => `${s.title}\n\n${s.content}`),
   ]
     .filter(Boolean)
@@ -242,8 +277,8 @@ const coverMarkup = (book: ExportBook) =>
   book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa de ${escapeHtml(book.title)}" /></figure>`
     : "";
-const tocMarkup = (chapters: Array<{ title: string; href?: string }>) =>
-  `<nav class="toc" aria-label="Sumário"><h2>Sumário</h2><ol>${chapters.map((chapter, index) => `<li><a href="${chapter.href ?? `#chapter-${index + 1}`}">${escapeHtml(chapter.title)}</a></li>`).join("")}</ol></nav>`;
+const tocMarkup = (chapters: Array<{ title: string; href?: string }>, label = "Sumário") =>
+  `<nav class="toc" aria-label="${escapeHtml(label)}"><h2>${escapeHtml(label)}</h2><ol>${chapters.map((chapter, index) => `<li><a href="${chapter.href ?? `#chapter-${index + 1}`}">${escapeHtml(chapter.title)}</a></li>`).join("")}</ol></nav>`;
 const sectionMarkup = (sections: ExportSection[] = [], className: string) =>
   sections
     .filter(section => section.enabled !== false && section.content.trim())
@@ -382,7 +417,7 @@ export function buildPrintHtml(book: ExportBook): string {
         `<article id="chapter-${index + 1}" class="chapter"><h1>${escapeHtml(chapter.title)}</h1>${richMarkup(chapter)}</article>`
     )
     .join("");
-  return `<!doctype html><html lang="${escapeXml(book.language ?? "pt-BR")}"><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc li{margin:.75em 0;border-bottom:1px dotted #ccc;padding-bottom:.5em}.toc a{color:inherit;text-decoration:none}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}p{text-indent:${compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em;orphans:3;widows:3}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc{background:white;padding:48px;margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh}}@media print{body{margin:0;max-width:none}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup([...enabledSections(book.frontMatter).map(s => ({ title: s.title, href: `#${s.id}` })), ...book.chapters.map((s, i) => ({ title: s.title, href: `#chapter-${i + 1}` })), ...enabledSections(book.backMatter).map(s => ({ title: s.title, href: `#${s.id}` }))])}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
+  return `<!doctype html><html lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"${exportLabels(book.languageCode).dir ? ` dir="rtl"` : ""}><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc li{margin:.75em 0;border-bottom:1px dotted #ccc;padding-bottom:.5em}.toc a{color:inherit;text-decoration:none}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}p{text-indent:${compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em;orphans:3;widows:3}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc{background:white;padding:48px;margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh}}@media print{body{margin:0;max-width:none}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup([...enabledSections(book.frontMatter).map(s => ({ title: s.title, href: `#${s.id}` })), ...book.chapters.map((s, i) => ({ title: s.title, href: `#chapter-${i + 1}` })), ...enabledSections(book.backMatter).map(s => ({ title: s.title, href: `#${s.id}` }))], exportLabels(book.languageCode).contents)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
 }
 
 export async function buildEpub(book: ExportBook): Promise<Blob> {
@@ -422,7 +457,7 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
     const file = `chapter-${index + 1}.xhtml`;
     zip.file(
       `OEBPS/${file}`,
-      `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="${escapeXml(book.language ?? "pt-BR")}"><head><title>${escapeXml(chapter.title)}</title><style>${epubStyle}</style></head><body>${book.headerText ? `<header>${escapeXml(book.headerText)}</header>` : ""}<h1>${escapeXml(chapter.title)}</h1>${embedImages(richMarkup(chapter))}${book.footerText ? `<footer>${escapeXml(book.footerText)}</footer>` : ""}</body></html>`
+      `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"><head><title>${escapeXml(chapter.title)}</title><style>${epubStyle}</style></head><body>${book.headerText ? `<header>${escapeXml(book.headerText)}</header>` : ""}<h1>${escapeXml(chapter.title)}</h1>${embedImages(richMarkup(chapter))}${book.footerText ? `<footer>${escapeXml(book.footerText)}</footer>` : ""}</body></html>`
     );
     return { id: `chapter-${index + 1}`, file, title: chapter.title };
   });
@@ -448,7 +483,7 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
   );
   zip.file(
     "OEBPS/nav.xhtml",
-    `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Sumário</title></head><body><nav epub:type="toc"><h1>Sumário</h1><ol>${navItems.map(item => `<li><a href="${item.file}">${escapeXml(item.title)}</a></li>`).join("")}</ol></nav></body></html>`
+    `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${escapeXml(exportLabels(book.languageCode).contents)}</title></head><body><nav epub:type="toc"><h1>${escapeXml(exportLabels(book.languageCode).contents)}</h1><ol>${navItems.map(item => `<li><a href="${item.file}">${escapeXml(item.title)}</a></li>`).join("")}</ol></nav></body></html>`
   );
   zip.file(
     "OEBPS/content.opf",
@@ -715,7 +750,7 @@ export function buildPdf(book: ExportBook): Blob {
     pdf.setFont(pdfFont, "normal");
     pdf.setFontSize(22);
     pdf.text(
-      i ? "Sumário — continuação" : "Sumário",
+      i ? exportLabels(book.languageCode).contentsCont : exportLabels(book.languageCode).contents,
       margin + width / 2,
       margin,
       { align: "center" }
@@ -821,11 +856,11 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       ? []
       : [
           new Paragraph({
-            text: "Sumário",
+            text: exportLabels(book.languageCode).contents,
             heading: HeadingLevel.TITLE,
             pageBreakBefore: true,
           }),
-          new TableOfContents("Sumário", {
+          new TableOfContents(exportLabels(book.languageCode).contents, {
             hyperlink: true,
             headingStyleRange: "1-2",
             beginDirty: true,

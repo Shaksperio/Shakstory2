@@ -53,3 +53,45 @@ describe("tradução", () => {
     expect(part.content).toBe("");
   });
 });
+
+import { checkTranslation, glossaryFromPlanning, protectTerms, translateExportBook } from "./translate";
+
+describe("fidelidade", () => {
+  it("protege nomes e restaura exatamente, sem tocar em palavras parecidas", () => {
+    const { text, restore } = protectTerms("Élia viu Eliane. A Casa dos Ventos ficava longe; casa é casa.", ["Élia", "Casa dos Ventos"]);
+    expect(text).not.toContain("Élia");
+    expect(text).not.toContain("Casa dos Ventos");
+    expect(text).toContain("Eliane");
+    expect(restore(text)).toBe("Élia viu Eliane. A Casa dos Ventos ficava longe; casa é casa.");
+  });
+  it("não envia o termo protegido ao tradutor e o devolve no resultado", async () => {
+    clearTranslationCache();
+    const fetchFn = vi.fn(async (_u: string, init?: RequestInit) => reply(String(new URLSearchParams(String(init?.body)).get("q")).replace("Olhou", "Looked")));
+    const out = await translateText("Olhou Élia.", "en", { fetchFn, terms: ["Élia"] });
+    expect(out).toBe("Looked Élia.");
+    expect(String(fetchFn.mock.calls[0][1]?.body)).not.toContain("lia");
+  });
+  it("avisa sobre parágrafos, números e termos que sumiram", () => {
+    const source = "Um.\n\nDois em 1847.\n\nTrês.\n\nQuatro com Élia.";
+    expect(checkTranslation(source, "One.\n\nTwo in 1847.\n\nThree.\n\nFour with Élia.", ["Élia"])).toEqual([]);
+    const issues = checkTranslation(source, "One. Two in 1900. Three. Four with Ellie.", ["Élia"]).join(" ");
+    expect(issues).toContain("parágrafos");
+    expect(issues).toContain("1847");
+    expect(issues).toContain("Élia");
+    expect(checkTranslation("Algo", "")).toEqual(["A tradução veio vazia."]);
+  });
+  it("sugere o glossário a partir de personagens e lugares", () => {
+    expect(glossaryFromPlanning({ characters: [{ name: "Élia" }, { name: "Élia" }], locations: [{ name: "Gareth" }] })).toEqual(["Élia", "Gareth"]);
+    expect(glossaryFromPlanning(undefined)).toEqual([]);
+  });
+  it("traduz o livro de exportação inteiro e ajusta idioma e direitos autorais", async () => {
+    clearTranslationCache();
+    const fetchFn = vi.fn(async (_u: string, init?: RequestInit) => reply("EN:" + new URLSearchParams(String(init?.body)).get("q")));
+    const out = await translateExportBook({ title: "A casa", subtitle: "Sub", chapters: [{ id: "1", title: "Um", content: "Oi." }], frontMatter: [{ id: "copyright", title: "Copyright", content: "Todos os direitos reservados.", enabled: true }] }, "en", { fetchFn });
+    expect(out.title).toBe("EN:A casa");
+    expect(out.chapters[0].content).toBe("EN:Oi.");
+    expect(out.languageCode).toBe("en");
+    expect(out.copyrightText).toBe("EN:Todos os direitos reservados.");
+    await expect(translateExportBook({ title: "x", chapters: [] }, "xx", { fetchFn })).rejects.toThrow();
+  });
+});

@@ -18,12 +18,25 @@ describe("TranslateBookDialog", () => {
     render(<TranslateBookDialog book={book} onClose={vi.fn()} onDone={onDone} fetchFn={fetchFn} />);
     fireEvent.click(screen.getByLabelText("Dois"));
     fireEvent.click(screen.getByRole("button", { name: /Traduzir 1 item/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Criar livro traduzido" }));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     const result = onDone.mock.calls[0][0];
     expect(result.languageCode).toBe("en");
     expect(result.nodes).toEqual([{ title: "EN:Um", kind: "chapter", content: "EN:Primeiro." }]);
     expect(result.title).toBe("EN:A casa");
     expect(book.nodes[0].content).toBe("Primeiro.");
+  });
+  it("protege termos do glossário e permite corrigir a tradução na revisão", async () => {
+    const onDone = vi.fn();
+    const echo = vi.fn(async (_u: string, init?: RequestInit) => ({ ok: true, status: 200, json: async () => [[[new URLSearchParams(String(init?.body)).get("q"), ""]]] }));
+    render(<TranslateBookDialog book={{ ...book, nodes: [{ id: "a", title: "Um", kind: "chapter", content: "Élia entrou na casa." }] }} glossary={["Élia"]} onClose={vi.fn()} onDone={onDone} fetchFn={echo} />);
+    fireEvent.click(screen.getByRole("button", { name: /Traduzir livro completo/ }));
+    const box = await screen.findByLabelText("Tradução de Um");
+    expect(String(echo.mock.calls[0][1]?.body)).not.toContain("%C3%89lia");
+    expect((box as HTMLTextAreaElement).value).toBe("Élia entrou na casa.");
+    fireEvent.change(box, { target: { value: "Elia walked into the house." } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar livro traduzido" }));
+    expect(onDone.mock.calls[0][0].nodes[0].content).toBe("Elia walked into the house.");
   });
   it("mostra erro e não cria nada quando a tradução falha", async () => {
     const onDone = vi.fn();
