@@ -9,7 +9,8 @@ const loadPrefs = (): Prefs => {
   try { const raw = JSON.parse(localStorage.getItem(KEY) ?? "null"); return { rate: RATES.includes(raw?.rate) ? raw.rate : 1, gender: raw?.gender === "male" ? "male" : "female" }; } catch { return { rate: 1, gender: "female" }; }
 };
 
-export function AudioReader({ chapters, index, scope, onChapterChange, btnClass, panelClass, onClose }: {
+export function AudioReader({ chapters, index, scope, onChapterChange, btnClass, panelClass, onClose, lang = "pt-BR" }: {
+  lang?: string;
   chapters: SpeechChapter[];
   index: number;
   scope: "chapter" | "book";
@@ -29,9 +30,11 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
   const spoken = useRef<number | null>(null);
   const onChange = useRef(onChapterChange);
   onChange.current = onChapterChange;
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const settings = useRef(prefs);
   settings.current = prefs;
-  const chosen = useMemo(() => pickVoice(voices, prefs.gender), [voices, prefs.gender]);
+  const chosen = useMemo(() => pickVoice(voices, prefs.gender, lang), [voices, prefs.gender, lang]);
 
   useEffect(() => {
     if (!supported) return;
@@ -52,8 +55,8 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
     try { window.speechSynthesis.cancel(); } catch { /* sem voz */ }
     if (spoken.current !== chunk.chapter) { spoken.current = chunk.chapter; onChange.current(chunk.chapter); }
     const utterance = new SpeechSynthesisUtterance(chunk.text);
-    const { voice, exact } = pickVoice(window.speechSynthesis.getVoices(), settings.current.gender);
-    utterance.lang = voice?.lang || "pt-BR";
+    const { voice, exact } = pickVoice(window.speechSynthesis.getVoices(), settings.current.gender, langRef.current);
+    utterance.lang = voice?.lang || langRef.current;
     if (voice) utterance.voice = voice;
     utterance.rate = settings.current.rate;
     // Sem voz do gênero pedido, aproxima o timbre pela altura da voz.
@@ -82,6 +85,9 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
 
   // Mudar de escopo reinicia a fila a partir do capítulo atual.
   useEffect(() => { if (status !== "idle") start(index); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [scope]);
+
+  // Trocar o idioma da tradução reinicia a leitura com a voz do novo idioma.
+  useEffect(() => { if (status !== "idle") start(index); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [lang]);
 
   const toggle = () => {
     if (status === "idle") return start();
