@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AudioReader } from "./AudioReader";
 
 type Utt = { text: string; lang: string; rate: number; voice: unknown; onend: null | (() => void); onerror: null | ((e: { error: string }) => void) };
@@ -17,6 +17,7 @@ const chapters = [
   { id: "a", title: "Um", kind: "chapter", content: "Primeiro capítulo." },
   { id: "b", title: "Dois", kind: "chapter", content: "Segundo capítulo." },
 ];
+const finish = () => act(() => { spoken[spoken.length - 1].onend?.(); });
 const ui = (over: Partial<React.ComponentProps<typeof AudioReader>> = {}) => <AudioReader chapters={chapters} index={0} scope="chapter" onChapterChange={vi.fn()} btnClass="b" panelClass="p" onClose={vi.fn()} {...over} />;
 
 beforeEach(() => { spoken = []; localStorage.clear(); vi.clearAllMocks(); vi.stubGlobal("speechSynthesis", synth); vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance); });
@@ -41,9 +42,9 @@ describe("AudioReader", () => {
     render(ui({ scope: "book", onChapterChange }));
     fireEvent.click(screen.getByRole("button", { name: "Ouvir" }));
     const before = spoken.length;
-    spoken[before - 1].onend?.();
+    finish();
     let guard = 0;
-    while (!onChapterChange.mock.calls.some(call => call[0] === 1) && guard++ < 10) spoken[spoken.length - 1].onend?.();
+    while (!onChapterChange.mock.calls.some(call => call[0] === 1) && guard++ < 10) finish();
     expect(onChapterChange).toHaveBeenCalledWith(1);
     expect(spoken.some(u => u.text.includes("Segundo"))).toBe(true);
   });
@@ -51,7 +52,7 @@ describe("AudioReader", () => {
     render(ui());
     fireEvent.click(screen.getByRole("button", { name: "Ouvir" }));
     let guard = 0;
-    while (screen.queryByRole("button", { name: "Pausar leitura" }) && guard++ < 10) spoken[spoken.length - 1].onend?.();
+    while (screen.queryByRole("button", { name: "Pausar leitura" }) && guard++ < 10) finish();
     expect(screen.getByRole("button", { name: "Ouvir" })).toBeTruthy();
     expect(spoken.every(u => !u.text.includes("Segundo"))).toBe(true);
   });
