@@ -9,7 +9,7 @@ describe("tradução", () => {
     expect(() => parseTranslation({})).toThrow();
   });
   it("divide em blocos de parágrafos inteiros dentro do limite", () => {
-    const text = ["a".repeat(900), "b".repeat(900), "c".repeat(900)].join("\n\n");
+    const text = ["a".repeat(800), "b".repeat(800), "c".repeat(800)].join("\n\n");
     const chunks = splitForTranslation(text, 1800);
     expect(chunks.length).toBe(2);
     expect(chunks.every(chunk => chunk.length <= 1800)).toBe(true);
