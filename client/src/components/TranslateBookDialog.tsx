@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { checkTranslation, languageByCode, parseGlossary, saveGlossary, TRANSLATE_LANGUAGES, translateChapter, translateText, type TranslatableChapter, type TranslateOptions } from "@/lib/translate";
+import { checkTranslation, createCowilaRefiner, estimateRefineCalls, type RefineStats, languageByCode, parseGlossary, saveGlossary, TRANSLATE_LANGUAGES, translateChapter, translateText, type TranslatableChapter, type TranslateOptions } from "@/lib/translate";
 
 export type TranslatedBook = {
   title: string;
@@ -14,13 +14,15 @@ type Source = { id?: string; title: string; subtitle?: string; description?: str
 type Reviewed = { id: string; kind: string; original: string; title: string; content: string; warnings: string[] };
 
 /** Traduz capítulos escolhidos (ou o livro todo), deixa o autor revisar lado a lado e só então cria uma CÓPIA; o original nunca é alterado. */
-export function TranslateBookDialog({ book, glossary = [], onClose, onDone, fetchFn }: { book: Source; glossary?: string[]; onClose: () => void; onDone: (result: TranslatedBook) => void; fetchFn?: TranslateOptions["fetchFn"] }) {
+export function TranslateBookDialog({ book, glossary = [], ask, onClose, onDone, fetchFn }: { book: Source; glossary?: string[]; ask?: Parameters<typeof createCowilaRefiner>[0]; onClose: () => void; onDone: (result: TranslatedBook) => void; fetchFn?: TranslateOptions["fetchFn"] }) {
   const [code, setCode] = useState("en");
   const [picked, setPicked] = useState<Set<string>>(() => new Set(book.nodes.map(node => node.id)));
   const [terms, setTerms] = useState(glossary.join("\n"));
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0, title: "" });
   const [error, setError] = useState("");
+  const [useAi, setUseAi] = useState(false);
+  const [stats, setStats] = useState<RefineStats | null>(null);
   const [review, setReview] = useState<{ meta: Omit<TranslatedBook, "nodes">; items: Reviewed[] } | null>(null);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
@@ -41,9 +43,10 @@ export function TranslateBookDialog({ book, glossary = [], onClose, onDone, fetc
     abort.current = controller;
     const termList = parseGlossary(terms);
     if (book.id) saveGlossary(book.id, termList);
-    setRunning(true); setError(""); setProgress({ done: 0, total: chosen.length, title: chosen[0].title });
+    setRunning(true); setError(""); setStats(null); setProgress({ done: 0, total: chosen.length, title: chosen[0].title });
     try {
-      const options: TranslateOptions = { signal: controller.signal, fetchFn, terms: termList };
+      const refiner = useAi && ask ? createCowilaRefiner(ask, { targetLabel: language.label, terms: termList, bookTitle: book.title, signal: controller.signal, onStats: setStats }) : null;
+      const options: TranslateOptions = { signal: controller.signal, fetchFn, terms: termList, refine: refiner?.refine };
       const items: Reviewed[] = [];
       for (let i = 0; i < chosen.length; i++) {
         setProgress({ done: i, total: chosen.length, title: chosen[i].title });
@@ -79,7 +82,7 @@ export function TranslateBookDialog({ book, glossary = [], onClose, onDone, fetc
         </div>
         {review ? (
           <div>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">{flagged ? `${flagged} capítulo(s) com avisos: confira antes de criar.` : "Nenhum aviso automático."} Compare com o original e corrija o que precisar; só depois o livro traduzido é criado.</p>
+            {stats && <p className="mt-2 text-xs text-muted-foreground">Cowila: {stats.refined} trecho(s) refinado(s), {stats.kept} mantido(s) como o Google traduziu (a resposta não passou nas verificações){stats.failed ? `, ${stats.failed} sem resposta` : ""}{stats.stopped ? " — revisão interrompida (limite ou falha); o restante é só Google." : "."}</p>}<p className="mt-3 text-sm leading-6 text-muted-foreground">{flagged ? `${flagged} capítulo(s) com avisos: confira antes de criar.` : "Nenhum aviso automático."} Compare com o original e corrija o que precisar; só depois o livro traduzido é criado.</p>
             <div className="mt-3 max-h-[55vh] space-y-3 overflow-y-auto pr-1">
               {review.items.map(item => (
                 <details key={item.id} open={item.warnings.length > 0} className="rounded-lg border border-border p-3">
@@ -117,8 +120,9 @@ export function TranslateBookDialog({ book, glossary = [], onClose, onDone, fetc
                 {book.nodes.map(node => <label key={node.id} className="flex items-center gap-2 py-0.5 text-sm"><input type="checkbox" checked={picked.has(node.id)} onChange={() => toggle(node.id)} /><span className="truncate">{node.title || "Sem título"}</span></label>)}
               </div>
             </fieldset>
+            {ask && <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={useAi} disabled={running} onChange={event => setUseAi(event.target.checked)} /><span>Refinar com o Cowila (IA)<span className="block text-[11px] text-muted-foreground">O Cowila compara com o original e corrige a tradução do Google. Gasta ≈ {estimateRefineCalls(chosen.map(node => node.content || node.richContent?.replace(/<[^>]+>/g, " ") || ""))} uso(s) do Cowila do seu plano; se o limite acabar, o restante fica só com o Google.</span></span></label>}
             <p className="mt-3 text-[11px] leading-4 text-muted-foreground">Tradução automática pelo Google Tradutor: o texto selecionado é enviado ao Google. Ela não entende o contexto da história como uma pessoa; revise antes de publicar. A formatação (itálico, negrito) não é mantida.</p>
-            {running && <p role="status" aria-live="polite" className="mt-3 text-sm">Traduzindo {Math.min(progress.done + 1, progress.total)} de {progress.total}{progress.title ? ` · ${progress.title}` : ""}…</p>}
+            {running && <p role="status" aria-live="polite" className="mt-3 text-sm">Traduzindo {Math.min(progress.done + 1, progress.total)} de {progress.total}{progress.title ? ` · ${progress.title}` : ""}…{stats ? ` Cowila: ${stats.refined} trecho(s) refinado(s).` : ""}</p>}
             {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
             <div className="mt-5 flex gap-2">
               {running
