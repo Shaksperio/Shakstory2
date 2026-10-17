@@ -115,6 +115,12 @@ describe("WriterStudio integrated literary assistance", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Preparar" }));
     expect(await screen.findByText("Preparação editorial")).toBeTruthy();
+    // Book Builder: os campos das seções padrão aparecem mesmo num livro novo.
+    expect(screen.getByLabelText("Conteúdo Prefácio")).toBeTruthy();
+    expect(screen.getByLabelText("Conteúdo Posfácio")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Conteúdo Dedicatória"), { target: { value: "Para quem leu." } });
+    expect((screen.getByLabelText("Incluir dedicatória") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getAllByRole("button", { name: /Adicionar seção em/ }).length).toBe(2);
 
     fireEvent.click(screen.getByRole("button", { name: "Biblioteca" }));
     expect(await screen.findByText("Minha biblioteca")).toBeTruthy();
