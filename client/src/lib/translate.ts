@@ -75,6 +75,8 @@ export type TranslateOptions = {
   source?: string; fetchFn?: FetchLike; signal?: AbortSignal; retries?: number;
   /** Termos que NÃO devem ser traduzidos (nomes de personagens, lugares, palavras inventadas). */
   terms?: string[];
+  /** Revisão opcional (ex.: pelo Cowila) aplicada a cada trecho depois do Google: recebe o original e a tradução automática. */
+  refine?: (source: string, machine: string) => Promise<string>;
 };
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -144,7 +146,10 @@ async function translateChunk(text: string, target: string, options: TranslateOp
 export async function translateText(text: string, target: string, options: TranslateOptions = {}): Promise<string> {
   if (!text.trim()) return text;
   const out: string[] = [];
-  for (const chunk of splitForTranslation(text)) out.push((await translateChunk(chunk, target, options)).trim());
+  for (const chunk of splitForTranslation(text, options.refine ? REFINE_CHUNK : 1800)) {
+    const machine = (await translateChunk(chunk, target, options)).trim();
+    out.push(options.refine ? (await options.refine(chunk, machine)).trim() : machine);
+  }
   return out.join("\n\n");
 }
 
@@ -200,4 +205,55 @@ export async function translateExportBook(book: ExportBook, code: string, option
   for (const item of book.backMatter ?? []) backMatter.push(back.includes(item) ? await section(item) : item);
   const copyrightText = frontMatter.find(item => item.id === "copyright")?.content;
   return { ...book, title, subtitle, description, headerText, footerText, frontMatter, backMatter, chapters, copyrightText, language: language.label, languageCode: code };
+}
+
+/** Tamanho dos trechos quando o Cowila revisa (original + tradução precisam caber numa chamada). */
+export const REFINE_CHUNK = 4000;
+/** Quantas chamadas ao Cowila a revisão de um conjunto de textos deve gastar. */
+export const estimateRefineCalls = (texts: string[]) => texts.reduce((sum, text) => sum + splitForTranslation(text, REFINE_CHUNK).length, 0);
+
+export type RefineStats = { refined: number; kept: number; failed: number; stopped: boolean };
+const CHATTY = /^\s*(claro|aqui|segue|certo|ok\b|com certeza|tradu[cç][aã]o|here\b|here's|sure|of course|certainly)/i;
+const countParagraphs = (text: string) => text.split(/\n{2,}/).filter(part => part.trim()).length;
+
+/**
+ * Revisor com IA (Cowila): corrige a tradução automática à luz do original, protegendo nomes e termos.
+ * A resposta só é aceita se passar nas verificações (parágrafos, números, termos, tamanho); senão fica a tradução do Google.
+ * Duas falhas seguidas (ex.: limite do plano) param a revisão e o restante segue só com o Google.
+ */
+export function createCowilaRefiner(ask: (input: { prompt: string; long?: boolean; bookTitle?: string }) => Promise<string>, config: { targetLabel: string; terms?: string[]; bookTitle?: string; signal?: AbortSignal; onStats?: (stats: RefineStats) => void }) {
+  const stats: RefineStats = { refined: 0, kept: 0, failed: 0, stopped: false };
+  let streak = 0;
+  const report = () => config.onStats?.({ ...stats });
+  const refine = async (source: string, machine: string): Promise<string> => {
+    if (stats.stopped || !machine.trim() || !source.trim()) return machine;
+    if (config.signal?.aborted) throw new DOMException("Tradução cancelada", "AbortError");
+    const terms = (config.terms ?? []).filter(term => term.trim());
+    const prompt = [
+      `Você é tradutor literário. Abaixo há o TEXTO ORIGINAL em português e uma TRADUÇÃO AUTOMÁTICA para ${config.targetLabel}.`,
+      `Corrija a tradução automática para ficar fiel ao original e natural em ${config.targetLabel}, preservando tom, estilo, voz narrativa e o sentido de cada frase conforme o contexto da história.`,
+      "Regras: não resuma, não acrescente nem omita nada; mantenha a mesma divisão de parágrafos (uma linha em branco entre eles); mantenha números e a pontuação dos diálogos;",
+      terms.length ? `mantenha EXATAMENTE estes nomes/termos, sem traduzir: ${terms.join("; ")};` : "",
+      "responda SOMENTE com o texto final traduzido, sem comentários, sem aspas e sem títulos extras.",
+      "", "[TEXTO ORIGINAL]", source, "", "[TRADUÇÃO AUTOMÁTICA]", machine,
+    ].filter(line => line !== "").join("\n");
+    try {
+      const answer = (await ask({ prompt, long: true, bookTitle: config.bookTitle })).trim();
+      streak = 0;
+      const ratio = machine.length ? answer.length / machine.length : 1;
+      const ok = answer && !CHATTY.test(answer) && !/\[(TEXTO ORIGINAL|TRADUÇÃO AUTOMÁTICA)\]/i.test(answer)
+        && ratio > 0.7 && ratio < 1.4 && countParagraphs(answer) === countParagraphs(machine)
+        && checkTranslation(source, answer, terms).length === 0;
+      if (ok) stats.refined++; else stats.kept++;
+      report();
+      return ok ? answer : machine;
+    } catch (error) {
+      if ((error as { name?: string })?.name === "AbortError") throw error;
+      stats.failed++;
+      if (++streak >= 2) stats.stopped = true;
+      report();
+      return machine;
+    }
+  };
+  return { refine, stats };
 }

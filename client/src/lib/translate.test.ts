@@ -95,3 +95,38 @@ describe("fidelidade", () => {
     await expect(translateExportBook({ title: "x", chapters: [] }, "xx", { fetchFn })).rejects.toThrow();
   });
 });
+
+import { createCowilaRefiner, estimateRefineCalls } from "./translate";
+
+describe("revisão pelo Cowila", () => {
+  const src = "Élia abriu a porta em 1847.\n\nA casa dormia.";
+  const machine = "Élia opened the door in 1847.\n\nThe house slept.";
+  it("aceita a revisão que passa nas verificações", async () => {
+    const ask = vi.fn(async () => "Élia opened the door in 1847.\n\nThe house lay asleep.");
+    const { refine, stats } = createCowilaRefiner(ask, { targetLabel: "English", terms: ["Élia"] });
+    expect(await refine(src, machine)).toContain("lay asleep");
+    expect(stats.refined).toBe(1);
+    expect(String((ask.mock.calls[0] as unknown[])[0] && (ask.mock.calls[0] as unknown as [{ prompt: string }])[0].prompt)).toContain("Élia");
+  });
+  it("mantém o Google quando a resposta tem conversa, perde número ou muda parágrafos", async () => {
+    for (const bad of ["Claro! Aqui está: Élia opened the door in 1847.\n\nThe house slept.", "Élia opened the door.\n\nThe house slept.", "Élia opened the door in 1847. The house slept."]) {
+      const { refine, stats } = createCowilaRefiner(async () => bad, { targetLabel: "English", terms: ["Élia"] });
+      expect(await refine(src, machine)).toBe(machine);
+      expect(stats.kept).toBe(1);
+    }
+  });
+  it("para depois de duas falhas seguidas e segue só com o Google", async () => {
+    const ask = vi.fn(async () => { throw new Error("limite"); });
+    const { refine, stats } = createCowilaRefiner(ask, { targetLabel: "English" });
+    await refine(src, machine); await refine(src, machine);
+    expect(await refine(src, machine)).toBe(machine);
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(stats.stopped).toBe(true);
+  });
+  it("estima as chamadas e aplica a revisão dentro de translateText", async () => {
+    expect(estimateRefineCalls(["a".repeat(9000), ""])).toBe(3);
+    clearTranslationCache();
+    const fetchFn = vi.fn(async () => reply("Machine text."));
+    expect(await translateText("Texto.", "en", { fetchFn, refine: async (s, m) => m + " Refined." })).toBe("Machine text. Refined.");
+  });
+});
