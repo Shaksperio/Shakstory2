@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildQueue, speechSupported, voicesForPortuguese, type SpeechChapter, type SpeechChunk } from "@/lib/tts";
+import { buildQueue, pickVoice, speechSupported, type SpeechChapter, type SpeechChunk, type VoiceGender } from "@/lib/tts";
 
 type Status = "idle" | "playing" | "paused";
 const RATES = [0.75, 0.9, 1, 1.15, 1.3, 1.5, 2];
 const KEY = "shakstory:tts-prefs";
-const loadPrefs = (): { rate: number; voiceURI: string } => {
-  try { const raw = JSON.parse(localStorage.getItem(KEY) ?? "null"); return { rate: RATES.includes(raw?.rate) ? raw.rate : 1, voiceURI: typeof raw?.voiceURI === "string" ? raw.voiceURI : "" }; } catch { return { rate: 1, voiceURI: "" }; }
+type Prefs = { rate: number; gender: VoiceGender };
+const loadPrefs = (): Prefs => {
+  try { const raw = JSON.parse(localStorage.getItem(KEY) ?? "null"); return { rate: RATES.includes(raw?.rate) ? raw.rate : 1, gender: raw?.gender === "male" ? "male" : "female" }; } catch { return { rate: 1, gender: "female" }; }
 };
 
 export function AudioReader({ chapters, index, scope, onChapterChange, btnClass, panelClass, onClose }: {
@@ -30,7 +31,7 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
   onChange.current = onChapterChange;
   const settings = useRef(prefs);
   settings.current = prefs;
-  const voiceList = useMemo(() => voicesForPortuguese(voices), [voices]);
+  const chosen = useMemo(() => pickVoice(voices, prefs.gender), [voices, prefs.gender]);
 
   useEffect(() => {
     if (!supported) return;
@@ -51,10 +52,12 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
     try { window.speechSynthesis.cancel(); } catch { /* sem voz */ }
     if (spoken.current !== chunk.chapter) { spoken.current = chunk.chapter; onChange.current(chunk.chapter); }
     const utterance = new SpeechSynthesisUtterance(chunk.text);
-    const voice = window.speechSynthesis.getVoices().find(item => item.voiceURI === settings.current.voiceURI) ?? voicesForPortuguese(window.speechSynthesis.getVoices())[0];
+    const { voice, exact } = pickVoice(window.speechSynthesis.getVoices(), settings.current.gender);
     utterance.lang = voice?.lang || "pt-BR";
     if (voice) utterance.voice = voice;
     utterance.rate = settings.current.rate;
+    // Sem voz do gênero pedido, aproxima o timbre pela altura da voz.
+    if (!exact) utterance.pitch = settings.current.gender === "male" ? 0.8 : 1.1;
     utterance.onend = () => { if (run.current === mine) speakAt(i + 1); };
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => { if (run.current === mine && event.error !== "interrupted" && event.error !== "canceled") { halt(); setStatus("idle"); } };
     setPosition({ done: i + 1, total: queue.current.length });
@@ -92,7 +95,7 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
     onChapterChange(target);
     start(target);
   };
-  const update = (patch: Partial<typeof prefs>) => {
+  const update = (patch: Partial<Prefs>) => {
     const next = { ...prefs, ...patch };
     settings.current = next; setPrefs(next);
     try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* conveniência */ }
@@ -117,13 +120,14 @@ export function AudioReader({ chapters, index, scope, onChapterChange, btnClass,
       <label className="flex items-center gap-1 text-xs">Velocidade
         <select aria-label="Velocidade da leitura" className={`${btnClass} px-1`} value={prefs.rate} onChange={event => update({ rate: Number(event.target.value) })}>{RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select>
       </label>
-      {voiceList.length > 0 && (
-        <label className="flex items-center gap-1 text-xs">Voz
-          <select aria-label="Voz da leitura" className={`${btnClass} max-w-[10rem] px-1`} value={voiceList.some(voice => voice.voiceURI === prefs.voiceURI) ? prefs.voiceURI : voiceList[0].voiceURI} onChange={event => update({ voiceURI: event.target.value })}>{voiceList.map(voice => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</option>)}</select>
-        </label>
-      )}
+      <label className="flex items-center gap-1 text-xs">Voz
+        <select aria-label="Voz da leitura" className={`${btnClass} px-1`} value={prefs.gender} onChange={event => update({ gender: event.target.value as VoiceGender })}>
+          <option value="female">Feminina</option>
+          <option value="male">Masculina</option>
+        </select>
+      </label>
       <span role="status" aria-live="polite" className="min-w-0 flex-1 truncate text-xs opacity-80">
-        {status === "idle" ? (scope === "book" ? "Lê do capítulo atual até o fim do livro." : "Lê o capítulo atual.") : `${status === "paused" ? "Em pausa" : "Lendo"}: ${current?.title ?? ""} · trecho ${position.done} de ${position.total}`}
+        {status === "idle" ? (scope === "book" ? "Lê do capítulo atual até o fim do livro." : "Lê o capítulo atual.") + (chosen.voice ? ` Voz: ${chosen.voice.name}${chosen.exact ? "" : " (ajustada)"}.` : "") : `${status === "paused" ? "Em pausa" : "Lendo"}: ${current?.title ?? ""} · trecho ${position.done} de ${position.total}`}
       </span>
       <button type="button" className={btnClass} aria-label="Fechar leitor em áudio" onClick={() => { stop(); onClose(); }}>✕</button>
     </div>
