@@ -58,4 +58,42 @@ export function voicesForPortuguese<T extends { lang: string; name: string }>(vo
   return pt.length ? pt : voices;
 }
 
+export type VoiceGender = "female" | "male";
+type VoiceLike = { lang: string; name: string; localService?: boolean };
+
+const MALE = /\b(antonio|ant[oô]nio|daniel|felipe|jorge|ricardo|luciano|humberto|donato|fabio|f[aá]bio|cristiano|leonardo|valerio|thiago|male|masculin)/i;
+const FEMALE = /\b(francisca|thalita|luciana|maria|fernanda|camila|vit[oó]ria|raquel|joana|let[ií]cia|ana|giovanna|yara|female|feminin|google portugu[eê]s)/i;
+
+/** Gênero da voz pelo nome (o navegador não informa); null quando não dá para saber. */
+export function voiceGender(voice: VoiceLike): VoiceGender | null {
+  if (/\bfemale\b|feminin/i.test(voice.name)) return "female";
+  if (MALE.test(voice.name) && !/\bfemale\b/i.test(voice.name)) return "male";
+  if (FEMALE.test(voice.name)) return "female";
+  return null;
+}
+
+/** Quanto mais alto, mais natural: vozes neurais/Online (Edge), Premium/Enhanced (Apple) e Google vêm antes das locais simples. */
+export function voiceQuality(voice: VoiceLike): number {
+  let score = 0;
+  if (/natural|neural/i.test(voice.name)) score += 60;
+  if (/online/i.test(voice.name)) score += 30;
+  if (/premium|enhanced|aprimorad/i.test(voice.name)) score += 40;
+  if (/google/i.test(voice.name)) score += 25;
+  if (/siri/i.test(voice.name)) score += 20;
+  if (/espeak|compact/i.test(voice.name)) score -= 40;
+  if (/^pt[-_]br/i.test(voice.lang)) score += 10;
+  return score;
+}
+
+/** Melhor voz em português para o gênero escolhido; sem uma do gênero, usa a melhor disponível (e `exact` = false). */
+export function pickVoice<T extends VoiceLike>(voices: T[], gender: VoiceGender): { voice: T | undefined; exact: boolean } {
+  const list = voicesForPortuguese(voices);
+  const best = (items: T[]) => [...items].sort((a, b) => voiceQuality(b) - voiceQuality(a) || a.name.localeCompare(b.name))[0];
+  const same = list.filter(voice => voiceGender(voice) === gender);
+  if (same.length) return { voice: best(same), exact: true };
+  // Sem voz do gênero: prefere uma de gênero desconhecido à do gênero oposto.
+  const unknown = list.filter(voice => voiceGender(voice) === null);
+  return { voice: best(unknown.length ? unknown : list), exact: false };
+}
+
 export const speechSupported = () => typeof window !== "undefined" && "speechSynthesis" in window && typeof (window as unknown as { SpeechSynthesisUtterance?: unknown }).SpeechSynthesisUtterance !== "undefined";

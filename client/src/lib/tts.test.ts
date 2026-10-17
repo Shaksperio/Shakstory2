@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildQueue, chapterSpeech, cleanForSpeech, splitForSpeech, voicesForPortuguese } from "./tts";
+import { buildQueue, chapterSpeech, cleanForSpeech, pickVoice, splitForSpeech, voiceGender, voicesForPortuguese } from "./tts";
 
 describe("tts", () => {
   it("limpa marcações e transforma quebra de cena em pausa", () => {
@@ -26,5 +26,19 @@ describe("tts", () => {
     const voices = [{ lang: "en-US", name: "Sam" }, { lang: "pt-PT", name: "Joana" }, { lang: "pt-BR", name: "Luciana" }];
     expect(voicesForPortuguese(voices).map(v => v.name)).toEqual(["Luciana", "Joana"]);
     expect(voicesForPortuguese([{ lang: "en-US", name: "Sam" }]).length).toBe(1);
+  });
+});
+
+describe("vozes por gênero", () => {
+  it("reconhece o gênero pelo nome", () => {
+    expect(voiceGender({ lang: "pt-BR", name: "Microsoft Francisca Online (Natural)" })).toBe("female");
+    expect(voiceGender({ lang: "pt-BR", name: "Microsoft Antonio Online (Natural)" })).toBe("male");
+    expect(voiceGender({ lang: "pt-BR", name: "Voz X" })).toBeNull();
+  });
+  it("prefere a voz natural do gênero pedido", () => {
+    const voices = [{ lang: "pt-BR", name: "Luciana" }, { lang: "pt-BR", name: "Microsoft Francisca Online (Natural)" }, { lang: "pt-BR", name: "Daniel" }];
+    expect(pickVoice(voices, "female").voice?.name).toContain("Francisca");
+    expect(pickVoice(voices, "male")).toEqual({ voice: voices[2], exact: true });
+    expect(pickVoice([voices[0]], "male").exact).toBe(false);
   });
 });
