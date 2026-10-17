@@ -46,6 +46,7 @@ describe("AudioReader", () => {
     let guard = 0;
     while (!onChapterChange.mock.calls.some(call => call[0] === 1) && guard++ < 10) finish();
     expect(onChapterChange).toHaveBeenCalledWith(1);
+    finish();
     expect(spoken.some(u => u.text.includes("Segundo"))).toBe(true);
   });
   it("no capítulo atual termina ao fim do capítulo", () => {
