@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AudioReader } from "./AudioReader";
+import { browserLanguage, languageByCode, TRANSLATE_LANGUAGES, translateChapter } from "@/lib/translate";
 import { buildPrintHtml, TYPOGRAPHY_PRESETS, type ExportBook, type TypographyPreset } from "@shared/book-export";
 
 type Scope = "chapter" | "book";
@@ -45,7 +46,23 @@ const readerCss = (prefs: Prefs, scope: Scope, activeIndex: number) => {
     `.toc a,h1,h2,p{color:${ink}!important}header,footer{display:none!important}${only}`;
 };
 
-export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-visualização", extra }: { book: ExportBook; activeId: string | null; onClose?: () => void; closeLabel?: string; extra?: React.ReactNode }) {
+const LANG_KEY = "shakstory:reader-language";
+const loadLanguage = (): { mode: "auto" | "manual"; code: string } => {
+  try { const raw = JSON.parse(localStorage.getItem(LANG_KEY) ?? "null"); if (raw?.mode === "manual" && typeof raw.code === "string") return { mode: "manual", code: raw.code }; } catch { /* conveniência */ }
+  return { mode: "auto", code: "original" };
+};
+
+export function BookReader({ book: sourceBook, activeId, onClose, closeLabel = "Fechar pré-visualização", extra }: { book: ExportBook; activeId: string | null; onClose?: () => void; closeLabel?: string; extra?: React.ReactNode }) {
+  const [language, setLanguage] = useState(loadLanguage);
+  const [langOpen, setLangOpen] = useState(false);
+  const [translated, setTranslated] = useState<Record<string, ExportBook["chapters"][number]>>({});
+  const [translateError, setTranslateError] = useState("");
+  const [translating, setTranslating] = useState(false);
+  // "Automático" segue o idioma do navegador (português = texto original), como no painel do blog.
+  const target = language.mode === "auto" ? browserLanguage() : language.code;
+  const targetInfo = target === "original" ? undefined : languageByCode(target);
+  const activeTarget = targetInfo ? target : "original";
+  const book = useMemo<ExportBook>(() => activeTarget === "original" ? sourceBook : { ...sourceBook, language: targetInfo?.label ?? sourceBook.language, chapters: sourceBook.chapters.map(chapter => translated[`${activeTarget}|${chapter.id}`] ?? chapter) }, [sourceBook, translated, activeTarget, targetInfo]);
   const chapters = book.chapters;
   const startIndex = Math.max(0, chapters.findIndex(chapter => chapter.id === activeId));
   const [index, setIndex] = useState(startIndex);
@@ -54,6 +71,34 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
   const [navOpen, setNavOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
+  const chooseLanguage = (mode: "auto" | "manual", code: string) => {
+    const next = { mode, code };
+    setLanguage(next); setLangOpen(false); setTranslateError("");
+    try { localStorage.setItem(LANG_KEY, JSON.stringify(next)); } catch { /* conveniência */ }
+  };
+  useEffect(() => {
+    if (activeTarget === "original") { setTranslating(false); return; }
+    const wanted = (scope === "book" ? sourceBook.chapters.map((_, i) => i).sort((a, b) => Math.abs(a - index) - Math.abs(b - index)) : [index])
+      .map(i => sourceBook.chapters[i]).filter(chapter => chapter && !translated[`${activeTarget}|${chapter.id}`]);
+    if (!wanted.length) { setTranslating(false); return; }
+    const controller = new AbortController();
+    setTranslating(true); setTranslateError("");
+    (async () => {
+      try {
+        for (const chapter of wanted) {
+          const done = await translateChapter(chapter, activeTarget, { signal: controller.signal });
+          setTranslated(current => ({ ...current, [`${activeTarget}|${chapter.id}`]: done }));
+        }
+        setTranslating(false);
+      } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError") return;
+        setTranslating(false);
+        setTranslateError("Não foi possível traduzir agora. Mostrando o texto original; tente de novo em instantes.");
+      }
+    })();
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTarget, scope, index, sourceBook]);
   const update = (patch: Partial<Prefs>) => setPrefs(current => { const next = { ...current, ...patch }; savePrefs(next); return next; });
 
   useEffect(() => {
@@ -122,6 +167,19 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
           {(Object.keys(TYPOGRAPHY_PRESETS) as TypographyPreset[]).map(key => <option key={key} value={key}>{TYPOGRAPHY_PRESETS[key].label}</option>)}
         </select>
         <button type="button" className={btn} aria-pressed={night} onClick={() => update({ theme: night ? "day" : "night" })}>{night ? "Modo dia" : "Modo noite"}</button>
+        <div className="relative">
+          <button type="button" className={`${btn} ${activeTarget !== "original" ? active : ""}`} aria-haspopup="dialog" aria-expanded={langOpen} aria-label="Traduzir" onClick={() => setLangOpen(open => !open)}>🌐 {targetInfo ? targetInfo.label : "Traduzir"}</button>
+          {langOpen && (
+            <div role="dialog" aria-label="Tradutor" className={`absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-64 flex-col gap-0.5 overflow-y-auto rounded-lg border p-3 shadow-lg ${panel}`}>
+              <h3 className="mb-1 text-sm font-semibold">Traduzir</h3>
+              <p className="mb-1 text-xs opacity-70">Selecione o idioma</p>
+              <button type="button" aria-pressed={language.mode === "auto"} className={`${btn} justify-start ${language.mode === "auto" ? active : ""}`} onClick={() => chooseLanguage("auto", "original")}>🌐 Automático</button>
+              <button type="button" aria-pressed={language.mode === "manual" && language.code === "original"} className={`${btn} justify-start ${language.mode === "manual" && language.code === "original" ? active : ""}`} onClick={() => chooseLanguage("manual", "original")}>🇧🇷 Original</button>
+              {TRANSLATE_LANGUAGES.map(item => <button key={item.code} type="button" aria-pressed={language.mode === "manual" && language.code === item.code} className={`${btn} justify-start ${language.mode === "manual" && language.code === item.code ? active : ""}`} onClick={() => chooseLanguage("manual", item.code)}>{item.flag} {item.label}</button>)}
+              <p className="mt-2 text-[11px] leading-4 opacity-70">Tradução automática pelo Google Tradutor: o texto lido é enviado ao Google. Pode conter imprecisões e não mantém a formatação.</p>
+            </div>
+          )}
+        </div>
         <button type="button" className={`${btn} ${audioOpen ? active : ""}`} aria-pressed={audioOpen} onClick={() => setAudioOpen(open => !open)}>🔊 Ouvir</button>
         {extra}
         {onClose && <button type="button" className={btn} aria-label={closeLabel} onClick={onClose}>✕</button>}
@@ -136,7 +194,8 @@ export function BookReader({ book, activeId, onClose, closeLabel = "Fechar pré-
             : <button key={chapter.id} type="button" aria-current={i === index ? "true" : undefined} className={`w-full rounded-md px-2 py-1.5 text-left text-sm ${i === index ? `${active} font-medium` : "opacity-80 hover:opacity-100"}`} onClick={() => choose(i)}>{chapter.title}</button>)}
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
-          {audioOpen && <AudioReader chapters={chapters} index={index} scope={scope} onChapterChange={choose} btnClass={btn} panelClass={panel} onClose={() => setAudioOpen(false)} />}
+          {(translating || translateError) && <div role="status" aria-live="polite" className={`border-t px-3 py-1.5 text-xs ${panel}`}>{translateError || `Traduzindo para ${targetInfo?.label ?? ""}…`}</div>}
+          {audioOpen && <AudioReader lang={targetInfo?.speech ?? "pt-BR"} chapters={chapters} index={index} scope={scope} onChapterChange={choose} btnClass={btn} panelClass={panel} onClose={() => setAudioOpen(false)} />}
           <iframe ref={frame} key={scope + prefs.typography} title="Livro pré-visualizado" sandbox="allow-same-origin" srcDoc={html} onLoad={onLoad} className="min-h-0 w-full flex-1 border-0" />
           {scope === "chapter" && chapters.length > 1 && (
             <div className={`flex items-center justify-between border-t px-3 py-2 ${panel}`}>

@@ -42,3 +42,13 @@ describe("vozes por gênero", () => {
     expect(pickVoice([voices[0]], "male").exact).toBe(false);
   });
 });
+
+describe("vozes por idioma", () => {
+  it("escolhe vozes do idioma pedido", async () => {
+    const { pickVoice, voicesForLanguage } = await import("./tts");
+    const voices = [{ lang: "pt-BR", name: "Luciana" }, { lang: "en-US", name: "Microsoft Guy Online (Natural)" }, { lang: "en-GB", name: "Hazel" }];
+    expect(voicesForLanguage(voices, "en-US").map(v => v.name)).toEqual(["Microsoft Guy Online (Natural)", "Hazel"]);
+    expect(pickVoice(voices, "male", "en-US").voice?.name).toContain("Guy");
+    expect(pickVoice(voices, "female", "en-US").voice?.name).toBe("Hazel");
+  });
+});

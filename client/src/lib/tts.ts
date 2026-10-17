@@ -52,17 +52,21 @@ export function buildQueue(chapters: SpeechChapter[], from: number, scope: "chap
   return queue;
 }
 
-export function voicesForPortuguese<T extends { lang: string; name: string }>(voices: T[]): T[] {
-  const rank = (voice: T) => (/^pt[-_]br/i.test(voice.lang) ? 0 : /^pt/i.test(voice.lang) ? 1 : 2);
-  const pt = voices.filter(voice => rank(voice) < 2).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  return pt.length ? pt : voices;
+/** Vozes do idioma pedido (tag como "pt-BR" ou "en-US"): a região exata primeiro; sem nenhuma, devolve todas. */
+export function voicesForLanguage<T extends { lang: string; name: string }>(voices: T[], tag = "pt-BR"): T[] {
+  const norm = (value: string) => value.replace("_", "-").toLowerCase();
+  const full = norm(tag), base = full.split("-")[0];
+  const rank = (voice: T) => (norm(voice.lang) === full ? 0 : norm(voice.lang).split("-")[0] === base ? 1 : 2);
+  const found = voices.filter(voice => rank(voice) < 2).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return found.length ? found : voices;
 }
+export const voicesForPortuguese = <T extends { lang: string; name: string }>(voices: T[]): T[] => voicesForLanguage(voices, "pt-BR");
 
 export type VoiceGender = "female" | "male";
 type VoiceLike = { lang: string; name: string; localService?: boolean };
 
-const MALE = /\b(antonio|ant[oô]nio|daniel|felipe|jorge|ricardo|luciano|humberto|donato|fabio|f[aá]bio|cristiano|leonardo|valerio|thiago|male|masculin)/i;
-const FEMALE = /\b(francisca|thalita|luciana|maria|fernanda|camila|vit[oó]ria|raquel|joana|let[ií]cia|ana|giovanna|yara|female|feminin|google portugu[eê]s)/i;
+const MALE = /\b(david|mark|guy|james|george|alex|thomas|diego|juan|pablo|jorge|enrique|henri|claude|paul|hans|conrad|stefan|killian|ryan|antonio|ant[oô]nio|daniel|felipe|jorge|ricardo|luciano|humberto|donato|fabio|f[aá]bio|cristiano|leonardo|valerio|thiago|male|masculin)/i;
+const FEMALE = /\b(zira|jenny|aria|samantha|susan|hazel|helena|elvira|dalia|paulina|monica|sabela|denise|eloise|katja|amala|elsa|isabella|sonia|libby|francisca|thalita|luciana|maria|fernanda|camila|vit[oó]ria|raquel|joana|let[ií]cia|ana|giovanna|yara|female|feminin|google portugu[eê]s)/i;
 
 /** Gênero da voz pelo nome (o navegador não informa); null quando não dá para saber. */
 export function voiceGender(voice: VoiceLike): VoiceGender | null {
@@ -85,9 +89,9 @@ export function voiceQuality(voice: VoiceLike): number {
   return score;
 }
 
-/** Melhor voz em português para o gênero escolhido; sem uma do gênero, usa a melhor disponível (e `exact` = false). */
-export function pickVoice<T extends VoiceLike>(voices: T[], gender: VoiceGender): { voice: T | undefined; exact: boolean } {
-  const list = voicesForPortuguese(voices);
+/** Melhor voz no idioma (português por padrão) para o gênero escolhido; sem uma do gênero, usa a melhor disponível (e `exact` = false). */
+export function pickVoice<T extends VoiceLike>(voices: T[], gender: VoiceGender, lang = "pt-BR"): { voice: T | undefined; exact: boolean } {
+  const list = voicesForLanguage(voices, lang);
   const best = (items: T[]) => [...items].sort((a, b) => voiceQuality(b) - voiceQuality(a) || a.name.localeCompare(b.name))[0];
   const same = list.filter(voice => voiceGender(voice) === gender);
   if (same.length) return { voice: best(same), exact: true };
