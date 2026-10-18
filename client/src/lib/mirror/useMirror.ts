@@ -18,10 +18,10 @@ const explicitlyOff = () => { try { return localStorage.getItem(ENABLED_KEY) ===
 const explain = (error: unknown) => {
   const code = String((error as { code?: string } | undefined)?.code ?? "");
   if (code.indexOf("popup-closed") !== -1 || code.indexOf("cancelled") !== -1) return "Login cancelado.";
-  if (code.indexOf("unauthorized-domain") !== -1) return "Este endereço ainda não está autorizado no Firebase (Authentication → Settings → Authorized domains).";
-  if (code.indexOf("permission-denied") !== -1) return "O Firestore recusou a gravação. Publique as regras do arquivo firestore.rules.";
+  if (code.indexOf("unauthorized-domain") !== -1) return "Este endereço ainda não está autorizado para entrar com o Google. Avise o administrador.";
+  if (code.indexOf("permission-denied") !== -1) return "A cópia na nuvem recusou a gravação. Avise o administrador.";
   if (code.indexOf("popup-blocked") !== -1) return "O navegador bloqueou a janela de login. Libere pop-ups para este site.";
-  return "Não foi possível falar com o Firebase agora.";
+  return "Não foi possível falar com a cópia na nuvem agora.";
 };
 
 export type MirrorApi = ReturnType<typeof useMirror>;

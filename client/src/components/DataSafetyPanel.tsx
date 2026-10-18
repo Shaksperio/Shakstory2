@@ -12,7 +12,7 @@ export function DataSafetyPanel({ manualOffline, onToggleOffline, mirror, onConn
         <p className="min-w-0 flex-1 text-xs text-muted-foreground">{manualOffline ? "Suas alterações ficam neste aparelho e sincronizam quando você voltar." : "Se a internet cair, o Shakstory continua salvando neste aparelho e sincroniza depois."}</p>
       </div>
       <div className="mt-4 border-t border-border/60 pt-4">
-        <p className="text-sm font-medium">Cópia de segurança no Firebase</p>
+        <p className="text-sm font-medium">Cópia de segurança na nuvem</p>
         {mirror.user ? (
           <>
             <p className="mt-1 text-xs text-muted-foreground">Ativa para {mirror.user.email}. Última cópia: {when(mirror.lastAt)}.</p>
@@ -23,7 +23,7 @@ export function DataSafetyPanel({ manualOffline, onToggleOffline, mirror, onConn
           </>
         ) : (
           <>
-            <p className="mt-1 text-xs text-muted-foreground">Depois de cada salvamento no D1, uma cópia é enviada ao Firebase. Se o D1 sair do ar, você restaura daqui sem perder texto.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Depois de cada salvamento, uma cópia de segurança é enviada à nuvem. Se o endereço principal sair do ar, você restaura daqui sem perder texto.</p>
             <Button className="mt-3" size="sm" disabled={mirror.busy} onClick={onConnect}>Conectar com o Google</Button>
           </>
         )}
