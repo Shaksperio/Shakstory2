@@ -119,17 +119,99 @@ export function scopeDb(db, prefix) {
   };
 }
 
-/** Bytes já usados pela conta (dados + histórico). */
+/** Bytes UTF-8 de um texto (acentos, emojis e CJK ocupam mais de 1 byte; contar caracteres subestima). */
+export const shakUtf8Bytes = text => new TextEncoder().encode(String(text)).length;
+
+/** Bytes já usados pela conta (dados + histórico). CAST para BLOB faz o SQLite contar bytes, não caracteres. */
 async function storageUsed(db, prefix) {
-  const row = await db.prepare("SELECT COALESCE(SUM(LENGTH(data_json)), 0) AS n FROM editorial_documents WHERE document_path LIKE ?").bind(prefix + "%").first();
+  const row = await db.prepare("SELECT COALESCE(SUM(LENGTH(CAST(data_json AS BLOB))), 0) AS n FROM editorial_documents WHERE document_path LIKE ?").bind(prefix + "%").first();
   return Number(row?.n || 0);
 }
 
-/** Tamanho do corpo de uma gravação, medido de verdade quando o cabeçalho não informa. */
-async function bodyBytes(req) {
+/** Chave real (com prefixo da conta) de um caminho de documento, igual à regra de scopeDb. Vazio se não for um caminho da conta. */
+function shakOwnKey(prefix, path) {
+  if (typeof path !== "string" || path.indexOf("shares/") === 0 || !/^[A-Za-z0-9_.\/-]+\.json$/.test(path)) return "";
+  return path.indexOf(prefix) === 0 ? path : prefix + path;
+}
+
+/** Bytes do documento que esta gravação vai substituir (0 se for um documento novo). */
+async function shakReplacedBytes(db, prefix, path) {
+  const key = shakOwnKey(prefix, path);
+  if (!key) return 0;
+  const row = await db.prepare("SELECT COALESCE(LENGTH(CAST(data_json AS BLOB)), 0) AS n FROM editorial_documents WHERE document_path = ?").bind(key).first();
+  return Number(row?.n || 0);
+}
+
+const SHAK_MAX_READ_BYTES = 8000000;
+
+/** Lê o corpo de uma gravação uma vez: tamanho real em bytes (o maior entre o declarado e o medido) e o caminho do documento. */
+async function shakReadWrite(req) {
   const declared = Number(req.headers.get("content-length") || 0);
-  if (declared > 0) return declared;
-  try { return (await req.clone().text()).length; } catch { return 0; }
+  if (declared > SHAK_MAX_READ_BYTES) return { bytes: declared, path: "" };
+  let text = "";
+  try { text = await req.clone().text(); } catch { text = ""; }
+  let path = "";
+  try { const parsed = JSON.parse(text); if (parsed && typeof parsed.path === "string") path = parsed.path; } catch { path = ""; }
+  return { bytes: Math.max(declared, shakUtf8Bytes(text)), path };
+}
+
+// ===== Guardião de consumo: contadores diários e níveis de proteção =====
+// Os orçamentos são INTERNOS e conservadores (não são os limites do provedor, que não foram verificados). Ajuste por env:
+//   SHAK_BUDGETS='{"writes":30000,"write_bytes":300000000,"ai":3000}'  SHAK_LEVELS='[0.7,0.85,0.95]'
+// Regra de ouro: o guardião NUNCA bloqueia escrita nem leitura de manuscritos; só reduz ou recusa o que é acessório (Cowila).
+export const DEFAULT_BUDGETS = { writes: 30000, write_bytes: 300000000, ai: 3000 };
+export const DEFAULT_THRESHOLDS = [0.7, 0.85, 0.95];
+export const PROTECTION_LEVELS = ["normal", "atencao", "protecao", "preservacao"];
+
+function shakParseJson(text) { try { return JSON.parse(String(text)); } catch { return null; } }
+
+export function guardianConfig(env) {
+  const raw = env && env.SHAK_BUDGETS ? shakParseJson(env.SHAK_BUDGETS) : null;
+  const budgets = { ...DEFAULT_BUDGETS };
+  if (raw && typeof raw === "object") for (const key of Object.keys(DEFAULT_BUDGETS)) if (Number(raw[key]) > 0) budgets[key] = Number(raw[key]);
+  const t = env && env.SHAK_LEVELS ? shakParseJson(env.SHAK_LEVELS) : null;
+  const ok = Array.isArray(t) && t.length === 3 && t.every((v, i) => Number(v) > 0 && Number(v) <= 1 && (i === 0 || Number(v) > Number(t[i - 1])));
+  return { budgets, thresholds: ok ? t.map(Number) : DEFAULT_THRESHOLDS };
+}
+
+/** Nível pelo maior risco individual (nunca soma percentuais de métricas diferentes). */
+export function protectionLevel(counts, config) {
+  let top = { metric: "", ratio: 0 };
+  for (const key of Object.keys(config.budgets)) {
+    const ratio = Number(counts?.[key] || 0) / config.budgets[key];
+    if (ratio > top.ratio) top = { metric: key, ratio };
+  }
+  let index = 0;
+  config.thresholds.forEach((limit, i) => { if (top.ratio >= limit) index = i + 1; });
+  return { level: PROTECTION_LEVELS[index], metric: top.metric, percent: Math.round(top.ratio * 100) };
+}
+
+let shakMeterReady = false;
+async function shakEnsureMeter(db) {
+  if (shakMeterReady) return;
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_meter (day TEXT PRIMARY KEY, writes INTEGER NOT NULL DEFAULT 0, write_bytes INTEGER NOT NULL DEFAULT 0, ai INTEGER NOT NULL DEFAULT 0)").run();
+  shakMeterReady = true;
+}
+
+/** Soma ao contador do dia numa única instrução (atômica no D1: sem ler-e-gravar, então não perde contagem em paralelo). Falha em silêncio. */
+async function shakBumpMeter(db, now, add) {
+  try {
+    await shakEnsureMeter(db);
+    await db.prepare("INSERT INTO shak_meter (day, writes, write_bytes, ai) VALUES (?, ?, ?, ?) ON CONFLICT(day) DO UPDATE SET writes = writes + excluded.writes, write_bytes = write_bytes + excluded.write_bytes, ai = ai + excluded.ai")
+      .bind(brDay(now), add.writes || 0, add.bytes || 0, add.ai || 0).run();
+  } catch { /* o guardião nunca derruba uma gravação */ }
+}
+
+/** Nível atual de proteção. Se o contador não puder ser lido, segue como "normal" (falha aberta, nunca bloqueia). */
+async function shakReadProtection(db, env, now) {
+  const config = guardianConfig(env);
+  try {
+    await shakEnsureMeter(db);
+    const row = await db.prepare("SELECT writes, write_bytes, ai FROM shak_meter WHERE day = ?").bind(brDay(now)).first();
+    return protectionLevel(row, config);
+  } catch {
+    return { level: "normal", metric: "", percent: 0 };
+  }
 }
 
 /**
@@ -148,7 +230,8 @@ async function shakGateCore(req, env, u, options = {}) {
   if (path === "/health" || path === "/self-test" || path === "/api/mirror-token" || path === "/api/share/login" || path.indexOf("/api/public/") === 0) return {};
   if (path.indexOf("/api/share/") === 0 && req.method === "GET") return {};
   // Limite de uma linha do D1: avisa com clareza em vez de deixar o banco recusar sem explicação (vale para todos, inclusive donos).
-  if (path === "/api/book" && req.method === "POST" && (await bodyBytes(req)) > MAX_DOC_BYTES) {
+  const write = path === "/api/book" && req.method === "POST" ? await shakReadWrite(req) : null;
+  if (write && write.bytes > MAX_DOC_BYTES) {
     return { response: planJson({ error: "too_large", message: "Este documento passou do limite de 1,9 MB do banco. Exporte um backup e divida o conteúdo em outro livro." }, 413) };
   }
   const jwt = req.headers.get("Cf-Access-Jwt-Assertion");
@@ -169,7 +252,10 @@ async function shakGateCore(req, env, u, options = {}) {
     return { response: await avRoute(req, env, u, email, now) };
   }
   if (owner) {
-    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true } }) };
+    // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
+    if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
+    if (path === "/api/assist" && req.method === "POST") await shakBumpMeter(env.DB, now, { ai: 1 });
+    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, protection: await shakReadProtection(env.DB, env, now) }) };
     if (path === "/api/admin/users" && req.method === "GET") {
       await ensurePlanTables(env.DB);
       const rows = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users ORDER BY created_at DESC LIMIT 500").all();
@@ -200,18 +286,25 @@ async function shakGateCore(req, env, u, options = {}) {
   const account = await loadAccount(db, email, now);
   const info = account.info;
 
-  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: account.used }) };
+  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
 
   if (path === "/api/assist" && req.method === "POST") {
-    const stop = await useCowila(db, email, account);
+    // Cowila é o único recurso acessório recusado pelo guardião; escrever e ler manuscritos nunca é.
+    const protection = await shakReadProtection(db, env, now);
+    if (protection.level === "preservacao") return { response: planJson({ error: "guardian_paused", level: protection.level, message: "O Cowila está em pausa para preservar o serviço. Seus textos continuam sendo salvos normalmente; tente de novo mais tarde." }, 503) };
+    const view = protection.level === "protecao" ? { ...account, info: { ...info, cowilaDaily: Math.floor(info.cowilaDaily / 2) } } : account;
+    const stop = await useCowila(db, email, view);
     if (stop) return { response: stop };
+    await shakBumpMeter(db, now, { ai: 1 });
   }
   if (path === "/api/share/visibility" && req.method === "POST" && !info.features.share) return { response: planBlocked(info, "share") };
   const prefix = "u/" + (await userKey(email)) + "/";
-  if (path === "/api/book" && req.method === "POST") {
-    const bytes = await storageUsed(db, prefix);
-    if (bytes + (await bodyBytes(req)) > (options.maxStorage ?? MAX_STORAGE_BYTES)) return { response: planJson({ error: "storage_full", message: "O espaço da sua conta está cheio. Exclua livros ou versões antigas, ou fale com o administrador." }, 413) };
+  if (write) {
+    // Espaço líquido: o documento substituído sai da conta antes de somar o novo (regravar o mesmo livro não conta duas vezes).
+    const net = (await storageUsed(db, prefix)) - (await shakReplacedBytes(db, prefix, write.path)) + write.bytes;
+    if (net > (options.maxStorage ?? MAX_STORAGE_BYTES)) return { response: planJson({ error: "storage_full", message: "O espaço da sua conta está cheio. Exclua livros ou versões antigas, ou fale com o administrador." }, 413) };
+    await shakBumpMeter(db, now, { writes: 1, bytes: write.bytes });
   }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
 }
