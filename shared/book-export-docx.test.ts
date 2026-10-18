@@ -19,9 +19,9 @@ describe("exportação DOCX organizada", () => {
   it("cada capítulo começa numa nova página (seção própria) e o texto tem tamanho de livro", async () => {
     const zip = await JSZip.loadAsync(await (await buildDocx(book)).arrayBuffer());
     const xml = await zip.file("word/document.xml")!.async("string");
-    // capa/título + prefácio + sumário + 3 capítulos + posfácio = 7 seções
-    expect((xml.match(/<w:sectPr/g) ?? []).length).toBe(7);
-    expect((xml.match(/w:type w:val="nextPage"/g) ?? []).length).toBe(6);
+    // título + copyright + prefácio + sumário + 3 capítulos + posfácio = 8 seções
+    expect((xml.match(/<w:sectPr/g) ?? []).length).toBe(8);
+    expect((xml.match(/w:type w:val="nextPage"/g) ?? []).length).toBe(7);
     const order = ["A casa", "A noite", "O fim", "Posfácio"].map(title => xml.indexOf(title));
     expect(order).toEqual([...order].sort((a, b) => a - b));
     // parágrafos do corpo usam o estilo próprio e quebras simples viram parágrafos
