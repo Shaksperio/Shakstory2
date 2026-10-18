@@ -14,6 +14,7 @@ import {
   TableOfContents,
   Bookmark,
   AlignmentType,
+  SectionType,
 } from "docx";
 import { jsPDF } from "jspdf";
 
@@ -268,11 +269,16 @@ const escapeXml = (value: string) =>
 const escapeHtml = (value: string) => escapeXml(value).replace(/\n/g, "<br />");
 const presetFor = (book: ExportBook) =>
   TYPOGRAPHY_PRESETS[book.typography ?? "classic"];
-const paragraphs = (content: string) =>
-  content
+const paragraphs = (content: string) => {
+  const blocks = content
     .split(/\n{2,}/)
     .map(text => text.trim())
     .filter(Boolean);
+  // Texto com quebras simples (sem linha em branco): cada linha é um parágrafo.
+  return blocks.length === 1 && /\n/.test(blocks[0])
+    ? blocks[0].split(/\n/).map(text => text.trim()).filter(Boolean)
+    : blocks;
+};
 const coverMarkup = (book: ExportBook) =>
   book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa de ${escapeHtml(book.title)}" /></figure>`
@@ -331,7 +337,9 @@ const decodeText = (value: string) =>
     );
 function docxContent(chapter: ExportChapter): Paragraph[] {
   if (!chapter.richContent)
-    return paragraphs(chapter.content).map(text => new Paragraph({ text }));
+    return paragraphs(chapter.content).map(
+      text => new Paragraph({ text, style: "BookBody" })
+    );
   const blocks = sanitizeRichContent(chapter.richContent).match(
     /<(p|h[1-6]|li|blockquote|div)\b[^>]*>[\s\S]*?<\/\1>/gi
   ) ?? [chapter.richContent];
@@ -392,6 +400,7 @@ function docxContent(chapter: ExportChapter): Paragraph[] {
           }
         : {}),
       ...(/^<li/i.test(block) ? { bullet: { level: 0 } } : {}),
+      ...(!heading && !/^<li/i.test(block) ? { style: "BookBody" } : {}),
     });
   });
 }
@@ -805,10 +814,14 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       : book.marginPreset === "narrow"
         ? preset.margin * 12
         : preset.margin * 15;
+  // Tamanhos: a predefinição está em px da web; no Word 1px ≈ 0,75pt, e um livro impresso usa ~11–12pt.
+  const bodyHalfPoints = Math.max(20, Math.min(26, Math.round(preset.bodySize * 1.4)));
+  const classicBody = !(book.layout === "compact" || preset.webFont.includes("Arial"));
+  const lineSpacing = Math.round(Math.min(preset.lineHeight, 1.35) * 240);
   const sectionParagraphs = (sections: ExportSection[] = [], offset = 0) =>
     sections
       .filter(section => section.enabled !== false && section.content.trim())
-      .flatMap((section, index) => [
+      .map((section, index) => [
         new Paragraph({
           children: [
             new Bookmark({
@@ -817,82 +830,113 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
             }),
           ],
           heading: HeadingLevel.HEADING_1,
-          pageBreakBefore: true,
         }),
         ...paragraphs(section.content).map(
-          text =>
-            new Paragraph({
-              text,
-              style: "Normal",
-              spacing: {
-                after: book.layout === "compact" ? 120 : 240,
-                line: Math.round(preset.lineHeight * 240),
-              },
-            })
+          text => new Paragraph({ text, style: "BookBody" })
         ),
       ]);
-  const children = [
-    ...(book.coverImageUrl?.startsWith("data:image/")
-      ? docxContent({
-          id: "cover",
-          title: "",
-          content: "",
-          richContent: `<p><img src="${book.coverImageUrl}" alt="Capa" /></p>`,
-        })
-      : []),
-    new Paragraph({
-      text: book.title,
-      heading: HeadingLevel.TITLE,
-      pageBreakBefore: Boolean(book.coverImageUrl),
-    }),
-    ...(book.subtitle
-      ? [new Paragraph({ children: [new TextRun(book.subtitle)] })]
-      : []),
-    ...(book.author
-      ? [new Paragraph({ children: [new TextRun(book.author)] })]
-      : []),
+  const frontCount = enabledSections(book.frontMatter).length;
+  // Cada parte do livro vira uma seção do Word com quebra de página: nenhum capítulo começa no meio do anterior.
+  const parts: Paragraph[][] = [
+    [
+      ...(book.coverImageUrl?.startsWith("data:image/")
+        ? docxContent({
+            id: "cover",
+            title: "",
+            content: "",
+            richContent: `<p><img src="${book.coverImageUrl}" alt="Capa" /></p>`,
+          })
+        : []),
+      new Paragraph({
+        text: book.title,
+        heading: HeadingLevel.TITLE,
+        pageBreakBefore: Boolean(book.coverImageUrl),
+      }),
+      ...(book.subtitle
+        ? [new Paragraph({ children: [new TextRun({ text: book.subtitle, italics: true, size: bodyHalfPoints + 6 })], alignment: AlignmentType.CENTER, spacing: { after: 240 } })]
+        : []),
+      ...(book.author
+        ? [new Paragraph({ children: [new TextRun({ text: book.author, size: bodyHalfPoints + 4 })], alignment: AlignmentType.CENTER, spacing: { before: 480 } })]
+        : []),
+    ],
     ...sectionParagraphs(book.frontMatter),
     ...(book.includeToc === false
       ? []
       : [
-          new Paragraph({
-            text: exportLabels(book.languageCode).contents,
-            heading: HeadingLevel.TITLE,
-            pageBreakBefore: true,
-          }),
-          new TableOfContents(exportLabels(book.languageCode).contents, {
-            hyperlink: true,
-            headingStyleRange: "1-2",
-            beginDirty: true,
-            cachedEntries: [
-              ...enabledSections(book.frontMatter),
-              ...book.chapters,
-              ...enabledSections(book.backMatter),
-            ].map((item, index) => ({
-              title: item.title,
-              level: 1,
-              href: `section_${index}`,
-            })),
-          }),
+          [
+            new Paragraph({
+              text: exportLabels(book.languageCode).contents,
+              heading: HeadingLevel.HEADING_1,
+            }),
+            new TableOfContents(exportLabels(book.languageCode).contents, {
+              hyperlink: true,
+              headingStyleRange: "1-1",
+              beginDirty: true,
+              cachedEntries: [
+                ...enabledSections(book.frontMatter),
+                ...book.chapters,
+                ...enabledSections(book.backMatter),
+              ].map((item, index) => ({
+                title: item.title,
+                level: 1,
+                href: `section_${index}`,
+              })),
+            }) as unknown as Paragraph,
+          ],
         ]),
-    ...book.chapters.flatMap((chapter, index) => [
+    ...book.chapters.map((chapter, index) => [
       new Paragraph({
         children: [
           new Bookmark({
-            id: `section_${enabledSections(book.frontMatter).length + index}`,
+            id: `section_${frontCount + index}`,
             children: [new TextRun(chapter.title)],
           }),
         ],
         heading: HeadingLevel.HEADING_1,
-        pageBreakBefore: true,
       }),
       ...docxContent(chapter),
     ]),
-    ...sectionParagraphs(
-      book.backMatter,
-      enabledSections(book.frontMatter).length + book.chapters.length
-    ),
+    ...sectionParagraphs(book.backMatter, frontCount + book.chapters.length),
   ];
+  const pageProperties = (first: boolean) => ({
+    type: first ? undefined : SectionType.NEXT_PAGE,
+    page: {
+      size:
+        book.trimSize === "a5"
+          ? { width: 8391, height: 11906 }
+          : book.trimSize === "6x9"
+            ? { width: 8640, height: 12960 }
+            : { width: 11906, height: 16838 },
+      margin: {
+        top: docMargin,
+        right: docMargin,
+        bottom: docMargin,
+        left: docMargin,
+      },
+    },
+  });
+  const makeHeaders = () =>
+    book.headerText
+      ? {
+          default: new Header({
+            children: [new Paragraph({ children: [new TextRun(book.headerText)] })],
+          }),
+        }
+      : undefined;
+  const makeFooters = () => ({
+    default: new Footer({
+      children: [
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            ...(book.footerText ? [new TextRun(`${book.footerText} · `)] : []),
+            new TextRun({ children: [PageNumber.CURRENT] }),
+          ],
+        }),
+      ],
+    }),
+  });
+  const headingFont = { bold: Number(preset.titleWeight) >= 600 || preset.titleWeight === "bold" };
   return Packer.toBlob(
     new Document({
       title: book.title,
@@ -903,57 +947,44 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
         default: {
           document: {
             run: {
-              font: preset.webFont.split(",")[0],
-              size: preset.bodySize * 2,
+              font: preset.webFont.split(",")[0].replace(/["']/g, ""),
+              size: bodyHalfPoints,
             },
           },
+          title: {
+            run: { size: 56, ...headingFont },
+            paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 3600, after: 360 } },
+          },
+          heading1: {
+            run: { size: Math.round(bodyHalfPoints * 1.6), ...headingFont },
+            paragraph: { alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 1200, after: 600 } },
+          },
+          heading2: {
+            run: { size: Math.round(bodyHalfPoints * 1.25), ...headingFont },
+            paragraph: { alignment: AlignmentType.LEFT, keepNext: true, spacing: { before: 360, after: 200 } },
+          },
         },
+        paragraphStyles: [
+          {
+            id: "BookBody",
+            name: "Corpo do livro",
+            basedOn: "Normal",
+            quickFormat: true,
+            run: { size: bodyHalfPoints },
+            paragraph: {
+              alignment: AlignmentType.JUSTIFIED,
+              spacing: { line: lineSpacing, after: classicBody ? 0 : 160 },
+              indent: classicBody ? { firstLine: 567 } : undefined,
+            },
+          },
+        ],
       },
-      sections: [
-        {
-          properties: {
-            page: {
-              size:
-                book.trimSize === "a5"
-                  ? { width: 8391, height: 11906 }
-                  : book.trimSize === "6x9"
-                    ? { width: 8640, height: 12960 }
-                    : { width: 11906, height: 16838 },
-              margin: {
-                top: docMargin,
-                right: docMargin,
-                bottom: docMargin,
-                left: docMargin,
-              },
-            },
-          },
-          headers: book.headerText
-            ? {
-                default: new Header({
-                  children: [
-                    new Paragraph({ children: [new TextRun(book.headerText)] }),
-                  ],
-                }),
-              }
-            : undefined,
-          footers: {
-            default: new Footer({
-              children: [
-                new Paragraph({
-                  alignment: AlignmentType.CENTER,
-                  children: [
-                    ...(book.footerText
-                      ? [new TextRun(`${book.footerText} · `)]
-                      : []),
-                    new TextRun({ children: [PageNumber.CURRENT] }),
-                  ],
-                }),
-              ],
-            }),
-          },
-          children,
-        },
-      ],
+      sections: parts.map((children, index) => ({
+        properties: pageProperties(index === 0),
+        headers: makeHeaders(),
+        footers: makeFooters(),
+        children,
+      })),
     })
   );
 }
