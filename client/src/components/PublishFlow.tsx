@@ -22,7 +22,7 @@ export function PublishStepper({ steps }: { steps: FlowStep[] }) {
   );
 }
 
-const THEME_ORDER: TypographyPreset[] = ["classic", "modern", "minimal", "fantasy", "sci-fi", "romance", "thriller", "academic"];
+const THEME_ORDER: TypographyPreset[] = ["reedsy", "classic", "modern", "minimal", "fantasy", "sci-fi", "romance", "thriller", "academic"];
 
 /** Galeria de temas com miniatura de página. Escolher um tema só define o preset tipográfico que já existe no livro. */
 export function ThemeGallery({ value, onChange }: { value: TypographyPreset; onChange: (preset: TypographyPreset) => void }) {

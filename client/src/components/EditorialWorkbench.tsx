@@ -565,7 +565,7 @@ export function WritingPreferences({ hidden = false }: { hidden?: boolean }) {
       return {};
     }
   });
-  const update = (patch: Record<string, number>) => {
+  const update = (patch: Record<string, number | boolean>) => {
     const next = { ...prefs, ...patch };
     setPrefs(next);
     localStorage.setItem("shakstory:writing-preferences", JSON.stringify(next));
@@ -597,7 +597,7 @@ export function WritingPreferences({ hidden = false }: { hidden?: boolean }) {
           type="range"
           min="14"
           max="28"
-          value={prefs.fontSize ?? 18}
+          value={prefs.fontSize ?? 19}
           onChange={e => update({ fontSize: Number(e.target.value) })}
         />
       </label>
@@ -609,11 +609,20 @@ export function WritingPreferences({ hidden = false }: { hidden?: boolean }) {
           min="1.2"
           max="2.4"
           step="0.1"
-          value={prefs.lineHeight ?? 1.7}
+          value={prefs.lineHeight ?? 1.9}
           onChange={e => update({ lineHeight: Number(e.target.value) })}
         />
       </label>
-      <style>{`[contenteditable="true"],textarea[placeholder*="história"]{font-size:${Math.min(28, Math.max(14, Number(prefs.fontSize) || 18))}px!important;line-height:${Math.min(2.4, Math.max(1.2, Number(prefs.lineHeight) || 1.7))}!important}`}</style>
+      <label>
+        <input
+          aria-label="Justificar texto de escrita"
+          type="checkbox"
+          checked={prefs.justify !== false}
+          onChange={e => update({ justify: e.target.checked })}
+        />{" "}
+        Justificar texto
+      </label>
+      <style>{`[contenteditable="true"],textarea[placeholder*="história"]{font-family:Georgia,Gelasio,"Times New Roman",serif!important;font-size:${Math.min(28, Math.max(14, Number(prefs.fontSize) || 19))}px!important;line-height:${Math.min(2.4, Math.max(1.2, Number(prefs.lineHeight) || 1.9))}!important;text-align:${prefs.justify === false ? "left" : "justify"}!important}[data-editorial-page] p{margin:0 0 1em!important}[data-editorial-page] h1,[data-editorial-page] h2,[data-editorial-page] h3{font-family:Lato,"Helvetica Neue",Arial,sans-serif!important;font-weight:700!important;text-align:center!important}`}</style>
     </div>
   );
 }

@@ -234,6 +234,7 @@ const bookSchema = z
         includeToc: z.boolean().optional(),
         typography: z
           .enum([
+            "reedsy",
             "classic",
             "modern",
             "minimal",
