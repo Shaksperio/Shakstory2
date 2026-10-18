@@ -622,7 +622,7 @@ export function WritingPreferences({ hidden = false }: { hidden?: boolean }) {
         />{" "}
         Justificar texto
       </label>
-      <style>{`[contenteditable="true"],textarea[placeholder*="história"]{font-family:Georgia,Gelasio,"Times New Roman",serif!important;font-size:${Math.min(28, Math.max(14, Number(prefs.fontSize) || 19))}px!important;line-height:${Math.min(2.4, Math.max(1.2, Number(prefs.lineHeight) || 1.9))}!important;text-align:${prefs.justify === false ? "left" : "justify"}!important}[data-editorial-page] p{margin:0 0 1em!important}[data-editorial-page] h1,[data-editorial-page] h2,[data-editorial-page] h3{font-family:Lato,"Helvetica Neue",Arial,sans-serif!important;font-weight:700!important;text-align:center!important}`}</style>
+      <style>{`[contenteditable="true"],textarea[placeholder*="história"]{font-family:Gelasio,Georgia,"Times New Roman",serif!important;font-size:${Math.min(28, Math.max(14, Number(prefs.fontSize) || 19))}px!important;line-height:${Math.min(2.4, Math.max(1.2, Number(prefs.lineHeight) || 1.9))}!important;text-align:${prefs.justify === false ? "left" : "justify"}!important}[data-editorial-page] p{margin:0 0 1em!important}[data-editorial-page] h1,[data-editorial-page] h2,[data-editorial-page] h3{font-family:Lato,"Helvetica Neue",Arial,sans-serif!important;font-weight:700!important;text-align:center!important}`}</style>
     </div>
   );
 }
