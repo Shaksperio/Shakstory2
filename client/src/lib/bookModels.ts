@@ -1,12 +1,12 @@
 // Modelos de livro: atalhos que preenchem campos de publicação que já existem. Não definem margens de gráfica (KDP etc.).
 export type BookModelId = "bolso" | "a5" | "ebook";
-export type BookModelPatch = { trimSize: "a5" | "6x9" | "a4"; marginPreset: "narrow" | "normal" | "wide"; typography: "classic"; dropCap: boolean };
+export type BookModelPatch = { trimSize: "a5" | "6x9" | "a4"; marginPreset: "narrow" | "normal" | "wide"; typography: "reedsy"; dropCap: boolean };
 export type BookModel = { id: BookModelId; label: string; hint: string; patch: BookModelPatch };
 
 export const BOOK_MODELS: BookModel[] = [
-  { id: "bolso", label: "Livro de bolso", hint: "Formato A5 com margens estreitas, ideal para romances longos.", patch: { trimSize: "a5", marginPreset: "narrow", typography: "classic", dropCap: false } },
-  { id: "a5", label: "A5 clássico", hint: "Formato A5, margens normais e capitular na abertura dos capítulos.", patch: { trimSize: "a5", marginPreset: "normal", typography: "classic", dropCap: true } },
-  { id: "ebook", label: "E-book adaptável", hint: "Texto que se ajusta à tela do leitor. O tamanho de página vale só para PDF e impressão.", patch: { trimSize: "6x9", marginPreset: "normal", typography: "classic", dropCap: false } },
+  { id: "bolso", label: "Livro de bolso", hint: "Formato A5 com margens estreitas, ideal para romances longos.", patch: { trimSize: "a5", marginPreset: "narrow", typography: "reedsy", dropCap: false } },
+  { id: "a5", label: "A5 clássico", hint: "Formato A5, margens normais e capitular na abertura dos capítulos.", patch: { trimSize: "a5", marginPreset: "normal", typography: "reedsy", dropCap: true } },
+  { id: "ebook", label: "E-book adaptável", hint: "Texto que se ajusta à tela do leitor. O tamanho de página vale só para PDF e impressão.", patch: { trimSize: "6x9", marginPreset: "normal", typography: "reedsy", dropCap: false } },
 ];
 
 /** Estimativa simples: entre 250 e 300 palavras por página. Devolve null sem texto suficiente. */

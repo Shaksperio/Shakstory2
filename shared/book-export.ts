@@ -32,6 +32,7 @@ export type ExportSection = {
   enabled?: boolean;
 };
 export type TypographyPreset =
+  | "reedsy"
   | "classic"
   | "modern"
   | "minimal"
@@ -111,8 +112,32 @@ type Preset = {
   titleWeight: string;
   accent: string;
   margin: number;
+  /** Fonte dos títulos (padrão: a do corpo). */
+  headingFont?: string;
+  /** Texto justificado (padrão do estilo Reedsy). */
+  justify?: boolean;
+  /** Sem recuo de primeira linha; os parágrafos se separam por espaço (em). */
+  paragraphGap?: number;
+  /** Entrelinha própria no DOCX e no PDF (o web usa lineHeight). */
+  docLine?: number;
+  pdfLine?: number;
 };
 export const TYPOGRAPHY_PRESETS: Record<TypographyPreset, Preset> = {
+  reedsy: {
+    label: "Reedsy · leitura confortável",
+    webFont: 'Georgia, Gelasio, "Times New Roman", serif',
+    headingFont: 'Lato, "Helvetica Neue", Arial, sans-serif',
+    pdfFont: "times",
+    bodySize: 18,
+    lineHeight: 1.9,
+    titleWeight: "700",
+    accent: "#17a2d8",
+    margin: 72,
+    justify: true,
+    paragraphGap: 1,
+    docLine: 1.6,
+    pdfLine: 1.55,
+  },
   classic: {
     label: "Clássico editorial",
     webFont: "Georgia, serif",
@@ -268,7 +293,10 @@ const escapeXml = (value: string) =>
   );
 const escapeHtml = (value: string) => escapeXml(value).replace(/\n/g, "<br />");
 const presetFor = (book: ExportBook) =>
-  TYPOGRAPHY_PRESETS[book.typography ?? "classic"];
+  TYPOGRAPHY_PRESETS[book.typography ?? "reedsy"] ?? TYPOGRAPHY_PRESETS.reedsy;
+/** CSS dos parágrafos: recuo clássico ou, no estilo Reedsy, sem recuo e com espaço entre parágrafos; justificado quando o estilo pede. */
+const paragraphCss = (preset: Preset, compact: boolean, print: boolean) =>
+  `p{text-indent:${preset.paragraphGap || compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 ${preset.paragraphGap ?? 1}em;${preset.justify ? "text-align:justify;hyphens:auto;" : ""}${print ? "orphans:3;widows:3" : ""}}`;
 const paragraphs = (content: string) => {
   const blocks = content
     .split(/\n{2,}/)
@@ -426,7 +454,7 @@ export function buildPrintHtml(book: ExportBook): string {
         `<article id="chapter-${index + 1}" class="chapter"><h1>${escapeHtml(chapter.title)}</h1>${richMarkup(chapter)}</article>`
     )
     .join("");
-  return `<!doctype html><html lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"${exportLabels(book.languageCode).dir ? ` dir="rtl"` : ""}><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc li{margin:.75em 0;border-bottom:1px dotted #ccc;padding-bottom:.5em}.toc a{color:inherit;text-decoration:none}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}p{text-indent:${compact || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em;orphans:3;widows:3}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc{background:white;padding:48px;margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh}}@media print{body{margin:0;max-width:none}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup([...enabledSections(book.frontMatter).map(s => ({ title: s.title, href: `#${s.id}` })), ...book.chapters.map((s, i) => ({ title: s.title, href: `#chapter-${i + 1}` })), ...enabledSections(book.backMatter).map(s => ({ title: s.title, href: `#${s.id}` }))], exportLabels(book.languageCode).contents)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
+  return `<!doctype html><html lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"${exportLabels(book.languageCode).dir ? ` dir="rtl"` : ""}><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1,h2{font-family:${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc li{margin:.75em 0;border-bottom:1px dotted #ccc;padding-bottom:.5em}.toc a{color:inherit;text-decoration:none}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}${paragraphCss(preset, compact, true)}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc{background:white;padding:48px;margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh}}@media print{body{margin:0;max-width:none}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup([...enabledSections(book.frontMatter).map(s => ({ title: s.title, href: `#${s.id}` })), ...book.chapters.map((s, i) => ({ title: s.title, href: `#chapter-${i + 1}` })), ...enabledSections(book.backMatter).map(s => ({ title: s.title, href: `#${s.id}` }))], exportLabels(book.languageCode).contents)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}</body></html>`;
 }
 
 export async function buildEpub(book: ExportBook): Promise<Blob> {
@@ -446,7 +474,7 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
         : book.layout === "compact"
           ? Math.min(6, preset.margin / 12)
           : preset.margin / 6;
-  const epubStyle = `body{font-family:${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter,.front-matter,.back-matter{page-break-before:always}p{text-indent:${book.layout === "compact" || preset.webFont.includes("Arial") ? "0" : "1.5em"};margin:0 0 1em}`;
+  const epubStyle = `body{font-family:${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1,h2{font-family:${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter,.front-matter,.back-matter{page-break-before:always}${paragraphCss(preset, book.layout === "compact", false)}`;
   const coverXhtml = book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa" /></figure>`
     : "";
@@ -515,17 +543,22 @@ export function buildPdf(book: ExportBook): Blob {
     format: pdfFormat,
     putOnlyUsedFonts: true,
   });
-  const pdfFont = embeddedPdfFonts
-    ? preset.pdfFont === "times"
-      ? "ShakstorySerif"
-      : "ShakstorySans"
-    : preset.pdfFont;
+  const bodyFamily = preset.pdfFont === "times" ? "Serif" : "Sans";
+  const headFamily = preset.headingFont ? "Sans" : bodyFamily;
+  const pdfFont = embeddedPdfFonts ? `Shakstory${bodyFamily}` : preset.pdfFont;
+  // Títulos em fonte sem serifa quando o estilo pede (Reedsy); o corpo segue a fonte do estilo.
+  const headPdfFont = embeddedPdfFonts
+    ? `Shakstory${headFamily}`
+    : preset.headingFont
+      ? "helvetica"
+      : preset.pdfFont;
   if (embeddedPdfFonts) {
-    const family = preset.pdfFont === "times" ? "Serif" : "Sans";
-    for (const style of ["normal", "bold", "italic", "bolditalic"]) {
-      const file = `Shakstory-${family}-${style}.ttf`;
-      pdf.addFileToVFS(file, embeddedPdfFonts[`${family}-${style}`]);
-      pdf.addFont(file, pdfFont, style);
+    for (const family of Array.from(new Set([bodyFamily, headFamily]))) {
+      for (const style of ["normal", "bold", "italic", "bolditalic"]) {
+        const file = `Shakstory-${family}-${style}.ttf`;
+        pdf.addFileToVFS(file, embeddedPdfFonts[`${family}-${style}`]);
+        pdf.addFont(file, `Shakstory${family}`, style);
+      }
     }
   }
   const margin =
@@ -558,7 +591,7 @@ export function buildPdf(book: ExportBook): Blob {
     );
     pdf.addPage();
   }
-  pdf.setFont(pdfFont, "normal");
+  pdf.setFont(headPdfFont, preset.headingFont ? "bold" : "normal");
   y = height * 0.3;
   pdf.setFontSize(28);
   const titleLines = pdf.splitTextToSize(book.title, width) as string[];
@@ -634,7 +667,7 @@ export function buildPdf(book: ExportBook): Blob {
     pdf.addPage();
     y = margin + 24;
     pageEntries.push({ title: chapter.title, page: pdf.getNumberOfPages() });
-    pdf.setFont(pdfFont, "bold");
+    pdf.setFont(headPdfFont, "bold");
     pdf.setFontSize(22);
     const titleLines = pdf.splitTextToSize(chapter.title, width) as string[];
     for (const line of titleLines) {
@@ -648,7 +681,8 @@ export function buildPdf(book: ExportBook): Blob {
     y += 12;
     pdf.setFont(pdfFont, "normal");
     const contentFontSize = chapter.id === "copyright" ? 10.5 : bodyFontSize;
-    contentLineHeight = contentFontSize * 1.35;
+    contentLineHeight = contentFontSize * (preset.pdfLine ?? 1.35);
+    const paragraphGapPt = preset.paragraphGap ? contentFontSize * preset.paragraphGap * 0.9 : 8;
     pdf.setFontSize(contentFontSize);
     const rich =
       "richContent" in chapter && typeof chapter.richContent === "string"
@@ -674,36 +708,60 @@ export function buildPdf(book: ExportBook): Blob {
             pdf.addPage();
             y = margin;
           }
-          pdf.text(line, margin, y);
+          if (preset.justify && lineIndex < lines.length - 1 && line.includes(" "))
+            pdf.text(line, margin, y, { align: "justify", maxWidth: width });
+          else pdf.text(line, margin, y);
           y += contentLineHeight;
         }
-        y += 8;
+        y += paragraphGapPt;
       }
     } else {
-      let x = margin,
-        bold = false,
+      let bold = false,
         italic = false;
-      const newline = (gap = 0) => {
-        x = margin;
+      type Piece = { text: string; style: string; w: number };
+      let line: Piece[] = [];
+      let lineW = 0;
+      const drawLine = (justify: boolean) => {
+        while (line.length && !line[line.length - 1].text.trim()) lineW -= line.pop()!.w;
+        if (!line.length) return;
+        const gaps = line.filter(piece => !piece.text.trim()).length;
+        let extra = 0;
+        if (justify && gaps > 0 && lineW < width) {
+          extra = (width - lineW) / gaps;
+          if (extra > contentFontSize * 1.5) extra = 0; // não estica demais linhas curtas
+        }
+        let cursor = margin;
+        for (const piece of line) {
+          pdf.setFont(pdfFont, piece.style);
+          pdf.text(piece.text, cursor, y);
+          cursor += piece.w + (piece.text.trim() ? 0 : extra);
+        }
+        line = [];
+        lineW = 0;
+      };
+      const newline = (gap = 0, justify = false) => {
+        drawLine(justify);
         y += contentLineHeight + gap;
         if (y > height - margin) {
           pdf.addPage();
           y = margin;
         }
       };
+      const paragraphEnd = preset.paragraphGap ? paragraphGapPt : 4;
       for (const token of rich.match(/<[^>]*>|[^<]+/g) ?? []) {
         if (/^<\/?(strong|b)[ >]/i.test(token)) bold = !token.startsWith("</");
         else if (/^<\/?(em|i)[ >]/i.test(token))
           italic = !token.startsWith("</");
-        else if (/^<br|^<\/(p|div|li|h[1-6]|blockquote)>/i.test(token))
-          newline(4);
+        else if (/^<br/i.test(token)) newline(4);
+        else if (/^<\/(p|div|li|h[1-6]|blockquote)>/i.test(token))
+          newline(paragraphEnd);
         else if (/^<img/i.test(token)) {
           const src =
             /src=["'](data:image\/(png|jpeg|webp);base64,[^"']+)["']/i.exec(
               token
             );
           if (src) {
-            if (x !== margin) newline();
+            if (line.length) newline();
             const props = pdf.getImageProperties(src[1]);
             const imageWidth = Math.min(width, props.width);
             const imageHeight = Math.min(
@@ -726,16 +784,15 @@ export function buildPdf(book: ExportBook): Blob {
             newline();
           }
         } else if (!token.startsWith("<")) {
-          pdf.setFont(
-            pdfFont,
+          const style =
             bold && italic
               ? "bolditalic"
               : bold
                 ? "bold"
                 : italic
                   ? "italic"
-                  : "normal"
-          );
+                  : "normal";
+          pdf.setFont(pdfFont, style);
           for (const word of decodeText(token).split(/(\s+)/).filter(Boolean)) {
             const pieces =
               pdf.getTextWidth(word) > width
@@ -743,20 +800,21 @@ export function buildPdf(book: ExportBook): Blob {
                 : [word];
             for (const piece of pieces) {
               const length = pdf.getTextWidth(piece);
-              if (x + length > margin + width) newline();
-              if (x === margin && !piece.trim()) continue;
-              pdf.text(piece, x, y);
-              x += length;
+              if (lineW + length > width) newline(0, Boolean(preset.justify));
+              if (!line.length && !piece.trim()) continue;
+              line.push({ text: piece, style, w: length });
+              lineW += length;
             }
           }
         }
       }
+      drawLine(false);
     }
   }
   // Fill reserved TOC pages after composition, using actual page destinations.
   for (let i = 0; i < tocPages.length; i++) {
     pdf.setPage(tocPages[i]);
-    pdf.setFont(pdfFont, "normal");
+    pdf.setFont(headPdfFont, preset.headingFont ? "bold" : "normal");
     pdf.setFontSize(22);
     pdf.text(
       i ? exportLabels(book.languageCode).contentsCont : exportLabels(book.languageCode).contents,
@@ -764,6 +822,7 @@ export function buildPdf(book: ExportBook): Blob {
       margin,
       { align: "center" }
     );
+    pdf.setFont(pdfFont, "normal");
     pdf.setFontSize(12);
     const rows = tocLayout.filter(row => row.pageIndex === i);
     for (let index = 0; index < rows.length; index++) {
@@ -816,8 +875,9 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
         : preset.margin * 15;
   // Tamanhos: a predefinição está em px da web; no Word 1px ≈ 0,75pt, e um livro impresso usa ~11–12pt.
   const bodyHalfPoints = Math.max(20, Math.min(26, Math.round(preset.bodySize * 1.4)));
-  const classicBody = !(book.layout === "compact" || preset.webFont.includes("Arial"));
-  const lineSpacing = Math.round(Math.min(preset.lineHeight, 1.35) * 240);
+  const classicBody = !(book.layout === "compact" || preset.webFont.includes("Arial") || preset.paragraphGap);
+  const headingFamily = (preset.headingFont ?? preset.webFont).split(",")[0].replace(/["']/g, "").trim();
+  const lineSpacing = Math.round((preset.docLine ?? Math.min(preset.lineHeight, 1.35)) * 240);
   const sectionParagraphs = (sections: ExportSection[] = [], offset = 0) =>
     sections
       .filter(section => section.enabled !== false && section.content.trim())
@@ -952,15 +1012,15 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
             },
           },
           title: {
-            run: { size: 56, ...headingFont },
+            run: { size: 56, font: headingFamily, ...headingFont },
             paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 3600, after: 360 } },
           },
           heading1: {
-            run: { size: Math.round(bodyHalfPoints * 1.6), ...headingFont },
+            run: { size: Math.round(bodyHalfPoints * 1.6), font: headingFamily, ...headingFont },
             paragraph: { alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 1200, after: 600 } },
           },
           heading2: {
-            run: { size: Math.round(bodyHalfPoints * 1.25), ...headingFont },
+            run: { size: Math.round(bodyHalfPoints * 1.25), font: headingFamily, ...headingFont },
             paragraph: { alignment: AlignmentType.LEFT, keepNext: true, spacing: { before: 360, after: 200 } },
           },
         },
@@ -973,7 +1033,7 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
             run: { size: bodyHalfPoints },
             paragraph: {
               alignment: AlignmentType.JUSTIFIED,
-              spacing: { line: lineSpacing, after: classicBody ? 0 : 160 },
+              spacing: { line: lineSpacing, after: preset.paragraphGap ? Math.round(bodyHalfPoints * 10 * preset.paragraphGap) : classicBody ? 0 : 160 },
               indent: classicBody ? { firstLine: 567 } : undefined,
             },
           },

@@ -125,7 +125,7 @@ export function AvatarCard({ name, email, photo, online, onOpen }: { name: strin
   );
 }
 
-type PrefState = { fontSize?: number; lineHeight?: number; lang?: string };
+type PrefState = { fontSize?: number; lineHeight?: number; justify?: boolean; lang?: string };
 const readPrefs = (): PrefState => {
   try {
     return JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
@@ -244,12 +244,16 @@ export function EditorMenu({
                     </div>
                   </div>
                   <label className="sk-field">
-                    <span>Tamanho da fonte <em>{prefs.fontSize ?? 18}px</em></span>
-                    <input type="range" min="14" max="28" value={prefs.fontSize ?? 18} onChange={event => updatePrefs({ fontSize: Number(event.target.value) })} />
+                    <span>Tamanho da fonte <em>{prefs.fontSize ?? 19}px</em></span>
+                    <input type="range" min="14" max="28" value={prefs.fontSize ?? 19} onChange={event => updatePrefs({ fontSize: Number(event.target.value) })} />
                   </label>
                   <label className="sk-field">
-                    <span>Altura da linha <em>{(prefs.lineHeight ?? 1.7).toFixed(1)}</em></span>
-                    <input type="range" min="1.2" max="2.4" step="0.1" value={prefs.lineHeight ?? 1.7} onChange={event => updatePrefs({ lineHeight: Number(event.target.value) })} />
+                    <span>Altura da linha <em>{(prefs.lineHeight ?? 1.9).toFixed(1)}</em></span>
+                    <input type="range" min="1.2" max="2.4" step="0.1" value={prefs.lineHeight ?? 1.9} onChange={event => updatePrefs({ lineHeight: Number(event.target.value) })} />
+                  </label>
+                  <label className="sk-field">
+                    <span>Justificar texto</span>
+                    <input type="checkbox" aria-label="Justificar texto" checked={prefs.justify !== false} onChange={event => updatePrefs({ justify: event.target.checked })} />
                   </label>
                   <label className="sk-field">
                     <span>Idioma da correção ortográfica</span>
