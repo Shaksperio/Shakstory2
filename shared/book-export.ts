@@ -1007,7 +1007,7 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
         default: {
           document: {
             run: {
-              font: preset.webFont.split(",")[0].replace(/["']/g, ""),
+              font: preset.webFont.split(",")[0].replace(/["']/g, "").replace(/^Gelasio$/, "Georgia"),
               size: bodyHalfPoints,
             },
           },
