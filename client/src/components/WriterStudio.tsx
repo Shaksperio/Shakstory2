@@ -8,6 +8,7 @@ import { selectionTextOffset } from "@shared/rich-structure";
 import { EditorialWorkbench, ManuscriptImport, WritingPreferences } from "./EditorialWorkbench";
 import { mergeTrackedRevision, publicationSections, type CopyrightData, type ReviewData } from "@shared/editorial-workflow";
 import { safeLocalSet, saveLibraryBackup, readLibraryBackup } from "@/lib/library-backup";
+import { resolveLocalOutcome, resolveSaveState } from "@/lib/save-state";
 import { cloudflareTransport } from "@/lib/trpc";
 import { guard, guardFresh, refreshPlan } from "@/lib/plans";
 import { PlanBanner, PlansDialog } from "./PlanBanner";
@@ -180,6 +181,13 @@ export default function WriterStudio() {
   const [draft, setDraft] = useState("");
   const [draftHtml, setDraftHtml] = useState("");
   const [localOnly, setLocalOnly] = useState(false);
+  // Estados de salvamento: numeração de cada edição e da última confirmada pela sincronização (o aviso "concluída" nunca cobre edição mais nova).
+  const [localLost, setLocalLost] = useState(false);
+  const [editSeq, setEditSeq] = useState(0);
+  const [syncedSeq, setSyncedSeq] = useState(0);
+  const editSeqRef = useRef(0);
+  const localWrite = useRef(0);
+  const lostNotified = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [manualOffline, setManualOffline] = useState(() => { try { return localStorage.getItem("shakstory:manual-offline") === "1"; } catch { return false; } });
   const manualOfflineRef = useRef(manualOffline);
@@ -274,22 +282,25 @@ export default function WriterStudio() {
     return () => window.clearTimeout(timer);
   }, [draft, draftHtml, activeNode?.id, library]);
 
-  const saveQueue = useRef<{busy:boolean;pending?:LibraryDocument;inflight?:LibraryDocument;sha?:string;blocked?:boolean}>({busy:false});
+  const saveQueue = useRef<{busy:boolean;pending?:LibraryDocument;inflight?:LibraryDocument;pendingSeq?:number;inflightSeq?:number;sha?:string;blocked?:boolean}>({busy:false});
   const saveMutation = trpc.data.put.useMutation({
     onSuccess: result => {
       const savedDoc = saveQueue.current.inflight;
       if (savedDoc && !manualOfflineRef.current) mirror.requestPush(savedDoc as unknown as LibraryLike);
       setSha(result.sha);
-      saveQueue.current.busy=false;saveQueue.current.inflight=undefined;saveQueue.current.sha=result.sha;
+      const doneSeq = saveQueue.current.inflightSeq;
+      const hasMore = Boolean(saveQueue.current.pending);
+      saveQueue.current.busy=false;saveQueue.current.inflight=undefined;saveQueue.current.inflightSeq=undefined;saveQueue.current.sha=result.sha;
+      if (doneSeq !== undefined) setSyncedSeq(current => Math.max(current, doneSeq));
       if(saveQueue.current.pending) flushSave();
       setLocalOnly(false);
       setConflict(false);
-      setNotice("Salvo na nuvem");
+      if (!hasMore) setNotice("Salvo na nuvem");
       void utils.data.status.invalidate();
       window.setTimeout(() => setNotice(null), 2200);
     },
     onError: error => {
-      saveQueue.current.busy=false;saveQueue.current.pending??=saveQueue.current.inflight;saveQueue.current.inflight=undefined;
+      saveQueue.current.busy=false;saveQueue.current.pending??=saveQueue.current.inflight;saveQueue.current.pendingSeq??=saveQueue.current.inflightSeq;saveQueue.current.inflight=undefined;saveQueue.current.inflightSeq=undefined;
       if (error.data?.code === "CONFLICT") { void resolveConflict(); }
       else setLocalOnly(true);
     },
@@ -298,52 +309,73 @@ export default function WriterStudio() {
   const resolveConflict = async () => {
     const queue = saveQueue.current;
     const local = queue.pending ?? queue.inflight ?? library;
-    queue.busy = true; queue.pending = undefined;
+    const coveredSeq = queue.pendingSeq ?? queue.inflightSeq;
+    queue.busy = true; queue.pending = undefined; queue.pendingSeq = undefined;
     try {
       const result = await syncLibrary({ kv: kv(), transport: cloudflareTransport, local: local as unknown as LibraryLike });
       const merged = result.doc as unknown as LibraryDocument;
       queue.sha = result.sha; setSha(result.sha); queue.blocked = false;
-      safeLocalSet("shakstory:library", JSON.stringify(merged));
-      void saveLibraryBackup(merged).catch(() => {});
+      persistLocal(merged);
+      if (coveredSeq !== undefined) setSyncedSeq(current => Math.max(current, coveredSeq));
       setLibrary(merged); setConflict(false); setLocalOnly(false);
       setNotice(result.report.conflictCopies ? "Alterações de outro aparelho foram mescladas. Trechos em conflito ficaram como “cópia local”." : "Alterações de outro aparelho foram mescladas");
       window.setTimeout(() => setNotice(null), 4000);
       void utils.data.status.invalidate();
     } catch {
-      queue.pending = local; setLocalOnly(true);
+      queue.pending = local; queue.pendingSeq = coveredSeq; setLocalOnly(true);
     } finally { queue.busy = false; }
   };
   const flushSave = () => {
     const queue=saveQueue.current;if(queue.busy||queue.blocked||!queue.pending||!navigator.onLine||manualOfflineRef.current)return;
-    const next=queue.pending;queue.pending=undefined;queue.inflight=next;queue.busy=true;
+    const next=queue.pending;queue.pending=undefined;queue.inflight=next;queue.inflightSeq=queue.pendingSeq;queue.pendingSeq=undefined;queue.busy=true;
     saveMutation.mutate({path:"library.json",data:next as unknown as Record<string,unknown>,expectedSha:queue.sha??sha});
   };
   const explicitSave = useRef(false);
   const flashNotice = (text: string, ms = 4000) => { setNotice(text); window.setTimeout(() => setNotice(null), ms); };
   // Contingência: o botão Salvar envia ao Firebase na hora (sem a espera de 15 s) e confirma, como o "Salvo na nuvem".
-  const contingencySave = async (doc: LibraryDocument) => {
+  const contingencySave = async (doc: LibraryDocument, seq: number) => {
     if (!mirror.user) { setLocalOnly(true); flashNotice("Salvo neste aparelho. Entre com o Google (Segurança dos dados) para enviar à nuvem.", 6000); return; }
     setNotice("Enviando à nuvem…");
-    const ok = await mirror.sync(doc as unknown as LibraryLike);
+    const ok = await mirror.sync(doc as unknown as LibraryLike, seq);
     if (ok) { setLocalOnly(false); flashNotice("Salvo na nuvem. A cópia principal é atualizada quando o endereço principal abrir.", 3500); }
     else { setLocalOnly(true); flashNotice("Salvo neste aparelho. Não consegui enviar à nuvem agora; tento de novo na próxima alteração.", 6000); }
   };
+  /** Guarda a biblioteca neste aparelho (localStorage + cópia offline). Só confirma se alguma das duas aceitou; senão avisa, nunca finge que salvou. */
+  const persistLocal = (doc: LibraryDocument) => {
+    const id = ++localWrite.current;
+    const stored = safeLocalSet("shakstory:library", JSON.stringify(doc));
+    void saveLibraryBackup(doc).then(() => true, () => false).then(backupOk => {
+      if (id !== localWrite.current) return; // uma gravação mais nova já substituiu esta
+      const outcome = resolveLocalOutcome(stored, backupOk);
+      // se só a cópia offline aceitou, a cópia antiga do localStorage ficou defasada: remove para não voltar a um texto velho
+      if (outcome === "backup-only") { try { localStorage.removeItem("shakstory:library"); } catch { /* armazenamento indisponível */ } }
+      if (outcome === "lost") {
+        setLocalLost(true);
+        if (!lostNotified.current) { lostNotified.current = true; flashNotice("Não foi possível salvar neste aparelho (sem espaço). Baixe um backup JSON agora, em Segurança dos dados.", 10000); }
+      } else {
+        lostNotified.current = false; setLocalLost(false);
+        if (!backupOk && !navigator.onLine) flashNotice("Não foi possível guardar a cópia offline. Mantenha esta página aberta até sincronizar.");
+      }
+    });
+    if (stored) setLocalLost(false);
+    return stored;
+  };
   const saveLibrary = (nextLibrary: LibraryDocument) => {
     const persistedLibrary = { ...nextLibrary, versionId: nextLibrary.versionId ?? stableId("version"), books: nextLibrary.books.map(hydrateSemanticBook) };
-    safeLocalSet("shakstory:library", JSON.stringify(persistedLibrary));
-    void saveLibraryBackup(persistedLibrary).catch(()=>{if(!navigator.onLine)setNotice("Não foi possível guardar a cópia offline. Mantenha esta página aberta até sincronizar.");});
+    const seq = ++editSeqRef.current; setEditSeq(seq);
+    persistLocal(persistedLibrary);
     setLibrary(persistedLibrary);
     if (CONTINGENCY) {
-      if (explicitSave.current) { explicitSave.current = false; void contingencySave(persistedLibrary); return; }
-      setLocalOnly(true); mirror.requestPush(persistedLibrary as unknown as LibraryLike); return;
+      if (explicitSave.current) { explicitSave.current = false; void contingencySave(persistedLibrary, seq); return; }
+      setLocalOnly(true); mirror.requestPush(persistedLibrary as unknown as LibraryLike, seq); return;
     }
-    saveQueue.current.pending=persistedLibrary;
+    saveQueue.current.pending=persistedLibrary;saveQueue.current.pendingSeq=seq;
     if (!navigator.onLine || manualOfflineRef.current) { setLocalOnly(true); return; }
     flushSave();
   };
 
   useEffect(() => { if (CONTINGENCY && mirror.lastAt && !mirror.error) setLocalOnly(false); }, [mirror.lastAt, mirror.error]);
-  const connectMirror = () => { void mirror.connect(library as unknown as LibraryLike); };
+  const connectMirror = () => { void mirror.connect(library as unknown as LibraryLike, editSeqRef.current); };
   const restoreFromMirror = async () => {
     if (!window.confirm("Restaurar da cópia na nuvem? Seu texto atual é mantido e mesclado com a cópia; nada é apagado.")) return;
     const mirrored = await mirror.restore();
@@ -677,7 +709,16 @@ export default function WriterStudio() {
     setView(next);
     return true;
   };
-  const syncLabel = statusQuery.data?.status === "syncing" || saveMutation.isPending ? "Sincronizando" : manualOffline ? "Offline (escolhido)" : localOnly ? "Somente local" : statusQuery.data?.status === "conflict" || conflict ? "Conflito" : statusQuery.data?.status === "synced" ? "Sincronizado" : "Pronto para salvar";
+  const doneSeq = CONTINGENCY ? mirror.syncedSeq : syncedSeq;
+  const saveView = resolveSaveState({
+    localLost,
+    conflict: conflict || statusQuery.data?.status === "conflict",
+    pending: editSeq > doneSeq,
+    syncing: saveMutation.isPending || (CONTINGENCY ? mirror.busy : statusQuery.data?.status === "syncing"),
+    stalled: manualOffline || !online || (CONTINGENCY ? !mirror.user || Boolean(mirror.error) : localOnly),
+    everSynced: doneSeq > 0 || statusQuery.data?.status === "synced",
+  });
+  const syncLabel = saveView.label;
 
   const runEditorAction = (action: EditorAction) => {
     if (action === "review") {
@@ -699,7 +740,7 @@ export default function WriterStudio() {
 
   return <div className="sk-app min-h-screen bg-background text-foreground">
     <aside className="sk-sidebar"><div className="sk-brand"><div className="sk-brand-mark"><BookOpen className="h-4 w-4" aria-hidden="true" /></div><div><p className="font-serif text-xl leading-none">Shakstory</p><p className="mt-1 text-[10px] uppercase tracking-[0.18em] opacity-60">Estúdio do autor</p></div></div>{activeBook && view !== "library" && <div className="sk-bookcard"><BookCover book={activeBook} className="sk-cover-mini" /><div className="min-w-0 flex-1"><p className="truncate font-serif text-sm">{activeBook.title}</p><p className="mt-0.5 text-[11px] opacity-60">{formatNumber(wordsOf(activeBook))} palavras · {statusLabel(activeBook.status)}</p><div className="sk-bookcard-bar"><span style={{ width: `${Math.min(100, Math.round(wordsOf(activeBook) / Math.max(1, activeBook.targetWordCount) * 100))}%` }} /></div></div></div>}<nav aria-label="Navegação principal" className="sk-nav"><RailButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => setView("library")} /><span className="sk-nav-label">Seu livro</span><RailButton active={view === "project"} icon={Target} label="Projeto" onClick={() => navigate("project")} /><RailButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => navigate("editor")} /><RailButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => navigate("planning")} /><RailButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => navigate("prepare")} /><span className="sk-nav-label">Proteção</span><RailButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => navigate("security")} /><button type="button" data-tutorial-entry className="sk-nav-item" onClick={() => setTutorialMenu(true)}><HelpCircle className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span>Tutorial com Cowila</span></button></nav></aside>
-    <div className="sk-main"><header className="sk-topbar sticky top-0 z-10 border-b border-border/70 bg-background/85 backdrop-blur"><div className="flex items-center gap-3 px-4 py-3 sm:px-6"><Button className="lg:hidden" variant="ghost" size="icon" aria-label="Abrir menu de navegação" onClick={() => setMenuOpen(current => !current)}><Menu className="h-4 w-4" /></Button><div className="flex items-center gap-2 lg:hidden"><div className="sk-brand-mark sk-brand-mark-sm"><BookOpen className="h-3.5 w-3.5" aria-hidden="true" /></div><span className="hidden font-serif text-lg leading-none min-[430px]:inline">Shakstory</span></div><div aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex"><span>Biblioteca</span>{view !== "library" && <><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /><span className="truncate font-medium text-foreground">{viewLabels[view]}</span></>}</div><div className="ml-auto flex items-center gap-2"><span className={`hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-xs sm:inline-flex ${localOnly || conflict ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary"}`}><SyncIcon localOnly={localOnly} conflict={conflict} />{syncLabel}</span><Button variant="ghost" size="sm" className="hidden sm:inline-flex" onClick={toggleManualOffline} aria-pressed={manualOffline}>{manualOffline ? "Voltar online" : "Trabalhar offline"}</Button><Button className="hidden md:inline-flex" variant="ghost" size="sm" onClick={() => toggleTheme?.()} aria-label="Alternar tema">{theme === "dark" ? "Tema clássico" : "Tema escuro"}</Button><Button variant="ghost" size="icon" aria-label="Buscar" onClick={() => { if (view !== "library") setView("library"); window.setTimeout(() => document.getElementById("library-search")?.focus(), 80); }}><Search className="h-4 w-4" /></Button>{accountControls}</div></div></header>
+    <div className="sk-main"><header className="sk-topbar sticky top-0 z-10 border-b border-border/70 bg-background/85 backdrop-blur"><div className="flex items-center gap-3 px-4 py-3 sm:px-6"><Button className="lg:hidden" variant="ghost" size="icon" aria-label="Abrir menu de navegação" onClick={() => setMenuOpen(current => !current)}><Menu className="h-4 w-4" /></Button><div className="flex items-center gap-2 lg:hidden"><div className="sk-brand-mark sk-brand-mark-sm"><BookOpen className="h-3.5 w-3.5" aria-hidden="true" /></div><span className="hidden font-serif text-lg leading-none min-[430px]:inline">Shakstory</span></div><div aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-sm text-muted-foreground sm:flex"><span>Biblioteca</span>{view !== "library" && <><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /><span className="truncate font-medium text-foreground">{viewLabels[view]}</span></>}</div><div className="ml-auto flex items-center gap-2"><span role="status" aria-live="polite" title={saveView.detail} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs sm:px-3 ${saveView.state === "unsaved" ? "bg-destructive text-white" : saveView.state === "conflict" || saveView.state === "local" ? "bg-amber-500/10 text-amber-900 dark:text-amber-300" : "bg-primary/10 text-primary"}`}><SyncIcon state={saveView.state} /><span className="sm:hidden">{saveView.short}</span><span className="hidden sm:inline">{saveView.label}</span></span><Button variant="ghost" size="sm" className="hidden sm:inline-flex" onClick={toggleManualOffline} aria-pressed={manualOffline}>{manualOffline ? "Voltar online" : "Trabalhar offline"}</Button><Button className="hidden md:inline-flex" variant="ghost" size="sm" onClick={() => toggleTheme?.()} aria-label="Alternar tema">{theme === "dark" ? "Tema clássico" : "Tema escuro"}</Button><Button variant="ghost" size="icon" aria-label="Buscar" onClick={() => { if (view !== "library") setView("library"); window.setTimeout(() => document.getElementById("library-search")?.focus(), 80); }}><Search className="h-4 w-4" /></Button>{accountControls}</div></div></header>
     {menuOpen && <div className="fixed inset-0 z-20 bg-black/10" onClick={() => setMenuOpen(false)}><aside className="absolute left-3 top-16 w-64 rounded-2xl border border-border bg-card p-3 shadow-xl" role="dialog" aria-label="Menu de navegação" onClick={event => event.stopPropagation()}><div className="mb-2 flex items-center justify-between px-2"><p className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary">Navegação</p><Button variant="ghost" size="icon" aria-label="Fechar menu" onClick={() => setMenuOpen(false)}><X className="h-4 w-4" /></Button></div><div className="grid gap-1"><NavButton active={view === "library"} icon={BookOpen} label="Biblioteca" onClick={() => { setView("library"); setMenuOpen(false); }} /><NavButton active={view === "project"} icon={Target} label="Projeto" onClick={() => { navigate("project"); setMenuOpen(false); }} /><NavButton active={view === "editor"} icon={FileText} label="Manuscrito" onClick={() => { navigate("editor"); setMenuOpen(false); }} /><NavButton active={view === "planning"} icon={UsersRound} label="Planejar" onClick={() => { navigate("planning"); setMenuOpen(false); }} /><NavButton active={view === "prepare"} icon={Sparkles} label="Preparar" onClick={() => { navigate("prepare"); setMenuOpen(false); }} /><NavButton active={view === "security"} icon={ShieldCheck} label="Segurança" onClick={() => { setView("security"); setMenuOpen(false); }} /><NavButton active={false} icon={HelpCircle} label="Tutorial com Cowila" onClick={() => { setMenuOpen(false); setTutorialMenu(true); }} /></div></aside></div>}
     {!CONTINGENCY && mirror.ready && !!libraryQuery.data && (!mirror.user || mirror.error) && <div className="border-b border-amber-500/25 bg-amber-500/10"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-2.5 text-sm text-amber-900 dark:text-amber-100"><span>{mirror.user ? mirror.error : "A cópia de segurança na nuvem está desligada, então o endereço de contingência fica vazio. Conecte o Google uma vez para enviar a biblioteca."}</span>{!mirror.user && <Button size="sm" disabled={mirror.busy} onClick={connectMirror}>Conectar e enviar agora</Button>}</div>{!mirror.user && mirror.error && <p role="alert" className="mx-auto max-w-7xl px-5 pb-2 text-sm text-destructive">{mirror.error}</p>}</div>}
     <PlanBanner /><PlansDialog />
@@ -740,7 +781,7 @@ export default function WriterStudio() {
 function RailButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof BookOpen; label: string; onClick: () => void }) { return <button type="button" onClick={onClick} aria-current={active ? "page" : undefined} className={`sk-nav-item${active ? " is-active" : ""}`}><Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span>{label}</span></button>; }
 function BookCover({ book, className = "" }: { book: Book; className?: string }) { const hue = coverHue(book.title); return <div className={`sk-cover ${className}`} style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 42%), hsl(${(hue + 40) % 360} 45% 24%))` }}>{book.publication?.coverImageUrl ? <img src={book.publication.coverImageUrl} alt="" className="h-full w-full object-cover" /> : <span className="font-serif italic">{book.title.charAt(0).toUpperCase()}</span>}</div>; }
 function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof BookOpen; label: string; onClick: () => void }) { return <button onClick={onClick} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition ${active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}><Icon className="h-3.5 w-3.5" />{label}</button>; }
-function SyncIcon({ localOnly, conflict }: { localOnly: boolean; conflict: boolean }) { return conflict || localOnly ? <CloudOff className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />; }
+function SyncIcon({ state }: { state: string }) { return state === "unsaved" ? <AlertCircle className="h-3.5 w-3.5" /> : state === "conflict" || state === "local" ? <CloudOff className="h-3.5 w-3.5" /> : state === "pending" ? <RefreshCw className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />; }
 
 function LibraryView({ books, totalWords, query, onQuery, onOpen, onNew, onEdit, onReset, onDelete, onExport }: { books: Book[]; totalWords: number; query: string; onQuery: (value: string) => void; onOpen: (book: Book) => void; onNew: () => void; onEdit: (book: Book) => void; onReset: (book: Book) => void; onDelete: (book: Book) => void; onExport: (book: Book, format: "pdf" | "epub" | "docx" | "txt" | "html") => void }) {
   const [archive, setArchive] = useState(false);
