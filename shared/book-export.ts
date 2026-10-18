@@ -124,7 +124,7 @@ type Preset = {
 };
 export const TYPOGRAPHY_PRESETS: Record<TypographyPreset, Preset> = {
   reedsy: {
-    label: "Reedsy · leitura confortável",
+    label: "Shakstory · leitura confortável",
     webFont: 'Gelasio, Georgia, "Times New Roman", serif',
     headingFont: 'Lato, "Helvetica Neue", Arial, sans-serif',
     pdfFont: "times",
