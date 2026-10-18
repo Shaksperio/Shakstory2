@@ -155,7 +155,7 @@ export const SHAKSTORY_GUIDE =
   "• Planejamento: Personagens, Locais, Timeline, Story Boards e Story Engine (objetivos, conflitos e cenas).\n" +
   "• Manuscrito: onde você escreve, por capítulos. As abas “Revisão e histórico”, “Corretor” e “Preferências” ficam logo acima.\n" +
   "• Preparação: capa, créditos, copyright e a exportação (PDF, EPUB, DOCX…).\n" +
-  "• Segurança dos dados: cópia automática no seu aparelho e no Firebase.\n" +
+  "• Segurança dos dados: cópia automática no seu aparelho e na nuvem.\n" +
   "Comece assim: crie o livro, escreva o primeiro capítulo, e peça aqui “preencher personagens”. Eu leio o que você escreveu e monto a ficha, sem apagar nada que já esteja preenchido.";
 
 export type Intent = "guide" | "characters" | "synopsis" | "rewrite" | "summary" | "chat";

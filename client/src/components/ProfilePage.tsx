@@ -288,7 +288,7 @@ export function ProfilePage({ books, profile, email, online, displayName, syncLa
             <h2 id="confirm-title" className="font-serif text-2xl">{pending.mode === "delete" ? "Excluir projeto?" : "Zerar manuscrito?"}</h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
               {pending.mode === "delete"
-                ? `“${pending.book.title}” será removido da biblioteca e dos endereços sincronizados (principal, Firebase e contingência). Uma cópia de segurança fica guardada neste aparelho.`
+                ? `“${pending.book.title}” será removido da biblioteca e dos endereços sincronizados (principal, cópia na nuvem e contingência). Uma cópia de segurança fica guardada neste aparelho.`
                 : `Todo o texto, os capítulos, o planejamento e as notas de “${pending.book.title}” serão substituídos por um manuscrito vazio. O livro, a capa e os dados de publicação continuam. Uma cópia de segurança fica guardada neste aparelho.`}
             </p>
             <div className="mt-6 flex justify-end gap-2">

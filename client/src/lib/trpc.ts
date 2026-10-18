@@ -222,7 +222,7 @@ type User = {
 
 /** Servidor de IA do modo de contingência (Cloudflare Worker público, protegido por login do Firebase). */
 export const CONTINGENCY_AI_URL = "https://shakstory-ai.antonyopintor.workers.dev";
-export const CONTINGENCY_UNAVAILABLE = "No modo de contingência este recurso usa só os dados deste aparelho e do Firebase; ele fica disponível no endereço principal.";
+export const CONTINGENCY_UNAVAILABLE = "No modo de contingência este recurso usa só os dados deste aparelho e da cópia na nuvem; ele fica disponível no endereço principal.";
 
 const json = async <T>(url: string, init?: RequestInit): Promise<T> => {
   let target = url;

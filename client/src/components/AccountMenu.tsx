@@ -391,7 +391,7 @@ function AccountView({
       {!CONTINGENCY && (
         <section className="mt-6 rounded-xl border border-border/70 bg-card p-4" aria-label="Sessão">
           <h2 className="font-serif text-xl">Sessão</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Encerra o acesso do Cloudflare Access neste navegador. Na próxima abertura será pedido o e-mail e o código. Seus textos salvos neste aparelho não são apagados.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Encerra o acesso protegido neste navegador. Na próxima abertura será pedido o e-mail e o código. Seus textos salvos neste aparelho não são apagados.</p>
           <Button className="mt-3" size="sm" variant="outline" onClick={() => { window.location.href = "/cdn-cgi/access/logout"; }}>Sair da conta</Button>
         </section>
       )}
