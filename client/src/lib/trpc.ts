@@ -177,6 +177,26 @@ type ContinuityResult = {
   };
 };
 
+/** Reduz a capa no navegador (máx. 1400 px, JPEG) e devolve um data URL salvo junto ao livro; dispensa o R2. */
+async function compressCover(contentType: string, base64: string): Promise<string> {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("imagem inválida"));
+    img.src = `data:${contentType};base64,${base64}`;
+  });
+  const scale = Math.min(1, 1400 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas indisponível");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 type CoverInput = {
   filename: string;
   contentType: "image/jpeg" | "image/png" | "image/webp";
@@ -675,11 +695,15 @@ export const trpc = {
         onError?: (error: CloudflareApiError) => void;
       }) {
         return useMutation<{ url: string }, CloudflareApiError, CoverInput>({
-          mutationFn: async () => {
-            throw new CloudflareApiError(
-              "Upload direto de capa aguarda a ativação do R2. Use uma URL HTTPS própria por enquanto.",
-              { code: "R2_NOT_CONFIGURED", status: 503 },
-            );
+          mutationFn: async input => {
+            try {
+              return { url: await compressCover(input.contentType, input.base64) };
+            } catch {
+              throw new CloudflareApiError(
+                "Não foi possível ler essa imagem. Tente outro arquivo JPG, PNG ou WebP.",
+                { code: "COVER_INVALID", status: 400 },
+              );
+            }
           },
           onSuccess: options?.onSuccess,
           onError: options?.onError,
