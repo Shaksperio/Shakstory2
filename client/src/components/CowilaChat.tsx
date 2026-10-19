@@ -49,10 +49,11 @@ export function CowilaChat(props: CowilaChatProps) {
   const [verify, setVerify] = useState(() => store("shakstory:cowila:verificar") !== "0");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [editorialControls, setEditorialControls] = useState<EditorialControls>(normalizeEditorialControls(null));
+  const [protectedDraft, setProtectedDraft] = useState("");
   const editorialKey = `shakstory:cowila:editorial:${active?.id ?? "geral"}`;
   useEffect(() => {
-    try { setEditorialControls(normalizeEditorialControls(JSON.parse(store(editorialKey) || "{}"))); }
-    catch { setEditorialControls(normalizeEditorialControls(null)); }
+    try { const next = normalizeEditorialControls(JSON.parse(store(editorialKey) || "{}")); setEditorialControls(next); setProtectedDraft(next.protectedTerms.join(", ")); }
+    catch { setEditorialControls(normalizeEditorialControls(null)); setProtectedDraft(""); }
   }, [editorialKey]);
   const saveEditorial = (next: EditorialControls) => {
     setEditorialControls(next);
@@ -288,7 +289,7 @@ export function CowilaChat(props: CowilaChatProps) {
           </label>
           <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={editorialControls.protectCanon} onChange={event => saveEditorial({ ...editorialControls, protectCanon: event.target.checked })} />Proteger cânone, voz, tempo verbal e continuidade</label>
           <label className="mt-2 block">Nomes e expressões protegidos (separe por vírgulas)
-            <textarea aria-label="Termos protegidos" rows={2} className="mt-1 w-full rounded-md border border-border bg-background p-2" value={editorialControls.protectedTerms.join(", ")} onChange={event => saveEditorial({ ...editorialControls, protectedTerms: normalizeProtectedTerms(event.target.value) })} placeholder="Helena, Vale do Norte, Arven" />
+            <textarea aria-label="Termos protegidos" rows={2} className="mt-1 w-full rounded-md border border-border bg-background p-2" value={protectedDraft} onChange={event => setProtectedDraft(event.target.value)} onBlur={() => { const terms = normalizeProtectedTerms(protectedDraft); saveEditorial({ ...editorialControls, protectedTerms: terms }); setProtectedDraft(terms.join(", ")); }} placeholder="Helena, Vale do Norte, Arven" />
           </label>
           <p className="mt-1 text-muted-foreground">Configuração local por livro. As sugestões exigem sua aprovação antes de entrar no texto.</p>
         </details>
