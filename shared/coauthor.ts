@@ -1,3 +1,4 @@
+import { COWILA_EDITORIAL_CRAFT, COWILA_CONTINUITY_CHECK } from "./cowila-editorial-craft";
 export type CoauthorApproach = {
   id: string;
   label: string;
@@ -112,6 +113,7 @@ export function buildContinuationPrompt(input: {
     `Tamanho de amostra: aproximadamente ${targetWords} palavras, suficiente para mostrar evento, tom e consequência.`,
     `Caminho desta amostra: ${input.approach.label}. ${input.approach.instruction}`,
     input.literaryContext ? `Contexto editorial: ${input.literaryContext}` : "",
+    COWILA_EDITORIAL_CRAFT,
     "Regras da amostra:",
     "- escreva cena de verdade, não resumo, sinopse ou explicação do que aconteceria;",
     "- mostre um caminho dramático claro que possa ser expandido depois;",
@@ -188,6 +190,8 @@ export function buildExpansionPrompt(input: {
     "- parágrafos e frases variados;",
     "- pelo menos uma mudança dramática real;",
     "- fecho que sustenta a próxima entrada.",
+    COWILA_EDITORIAL_CRAFT,
+    COWILA_CONTINUITY_CHECK,
     "FORMATO: responda somente com a continuação expandida, sem OPÇÃO, sem prefácio, sem lista, sem explicar o que fez.",
   ].filter(Boolean).join("\n");
 }
