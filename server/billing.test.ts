@@ -1,0 +1,229 @@
+import { describe, expect, it } from "vitest";
+import { fakeBillingDb } from "./fake-billing-d1";
+
+const load = async () => (await import(/* @vite-ignore */ new URL("../cloudflare-worker/plans.js", import.meta.url).href)) as any;
+const OWNER = "antonyopintor@gmail.com";
+const DAY = 86400000;
+const URLS = { economico: "https://payment-link-v3.ton.com.br/pl_ECO", premium: "https://payment-link-v3.ton.com.br/pl_PRE", vip: "https://payment-link-v3.ton.com.br/pl_VIP" };
+const PRICE = { economico: 34949, premium: 65340, vip: 100795 };
+
+async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now()) {
+  const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const out = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => email, now });
+  return { out, status: out.response?.status ?? 200, json: out.response ? await out.response.json() : null };
+}
+const setOffers = async (mod: any, db: any, now = Date.now()) => { for (const plan of ["economico", "premium", "vip"] as const) expect((await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan, priceCents: PRICE[plan], currency: "BRL", checkoutUrl: URLS[plan] }, now)).status).toBe(200); };
+const buy = async (mod: any, db: any, email: string, plan: string, now = Date.now()) => (await send(mod, db, email, "/api/billing/purchase", "POST", { plan }, now)).json;
+const confirm = (mod: any, db: any, id: string, txId: string, extra: any = {}, now = Date.now()) => send(mod, db, OWNER, "/api/admin/purchase/confirm", "POST", { id, txId, amountCents: extra.amountCents, currency: extra.currency ?? "BRL", ...(extra.mode ? { mode: extra.mode } : {}) }, now);
+const me = async (mod: any, db: any, email: string, now = Date.now()) => (await send(mod, db, email, "/api/me", "GET", undefined, now)).json;
+
+describe("ofertas", () => {
+  it("sem oferta configurada não há compra; só o dono configura; link precisa ser https da Ton", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const offers = (await send(mod, db, "ana@example.com", "/api/billing/offers")).json;
+    expect(offers.offers.every((o: any) => o.available === false)).toBe(true);
+    expect((await send(mod, db, "ana@example.com", "/api/billing/purchase", "POST", { plan: "premium" })).status).toBe(409);
+    const asUser = await send(mod, db, "ana@example.com", "/api/admin/offer", "POST", { plan: "premium", priceCents: 100, currency: "BRL", checkoutUrl: URLS.premium });
+    expect(asUser.status).toBe(403);
+    const bad = (checkoutUrl: string, extra: any = {}) => send(mod, db, OWNER, "/api/admin/offer", "POST", { plan: "premium", priceCents: 100, currency: "BRL", checkoutUrl, ...extra });
+    expect((await bad("http://payment-link-v3.ton.com.br/x")).status).toBe(400);
+    expect((await bad("https://evil.example.com/ton.com.br")).status).toBe(400);
+    expect((await bad("https://faketon.com.br/x")).status).toBe(400);
+    expect((await bad(URLS.premium, { currency: "USD" })).status).toBe(400);
+    expect((await bad(URLS.premium, { priceCents: 0 })).status).toBe(400);
+    expect((await bad(URLS.premium, { priceCents: 10.5 })).status).toBe(400);
+    expect((await bad(URLS.premium, { plan: "owner" })).status).toBe(400);
+    expect((await bad(URLS.premium)).status).toBe(200);
+  });
+
+  it("a lista do assinante não revela o link; ele só vem ao criar o pedido, escolhido pelo servidor", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const list = (await send(mod, db, "ana@example.com", "/api/billing/offers")).json;
+    expect(JSON.stringify(list)).not.toContain("payment-link");
+    expect(list.offers.find((o: any) => o.plan === "premium")).toMatchObject({ priceCents: 65340, currency: "BRL", available: true });
+    expect(list.notice).toContain("mesmo endereço de e-mail cadastrado no Shakstory");
+    const bought = await buy(mod, db, "ana@example.com", "premium");
+    expect(bought.checkoutUrl).toBe(URLS.premium);
+    expect(bought.checkoutUrl).not.toContain("ana@example.com"); // nada da conta na URL
+    expect(bought.email).toBe("ana@example.com");
+    expect((await send(mod, db, "ana@example.com", "/api/billing/purchase", "POST", { plan: "premium", checkoutUrl: "https://evil.example.com" })).json.checkoutUrl).toBe(URLS.premium);
+    expect((await send(mod, db, "ana@example.com", "/api/billing/purchase", "POST", { plan: "owner" })).status).toBe(400);
+  });
+});
+
+describe("pedido, 'já paguei' e isolamento", () => {
+  it("pedido pendente é reaproveitado, tem limite diário e preço novo gera pedido novo", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const now = Date.now();
+    await setOffers(mod, db, now);
+    const first = await buy(mod, db, "ana@example.com", "premium", now);
+    expect((await buy(mod, db, "ana@example.com", "premium", now)).purchase.id).toBe(first.purchase.id);
+    await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan: "premium", priceCents: 70000, currency: "BRL", checkoutUrl: URLS.premium }, now);
+    const repriced = await buy(mod, db, "ana@example.com", "premium", now);
+    expect(repriced.purchase.id).not.toBe(first.purchase.id);
+    expect(repriced.purchase.priceCents).toBe(70000);
+    for (let i = 0; i < 3; i++) { const p = await buy(mod, db, "ana@example.com", "premium", now); await send(mod, db, "ana@example.com", "/api/billing/cancel", "POST", { id: p.purchase.id }, now); }
+    const blocked = await send(mod, db, "ana@example.com", "/api/billing/purchase", "POST", { plan: "vip" }, now);
+    expect(blocked.status).toBe(429);
+    expect((await send(mod, db, "ana@example.com", "/api/billing/purchase", "POST", { plan: "vip" }, now + 2 * DAY)).status).toBe(200);
+  });
+
+  it("'Já paguei' só pede conferência: não ativa nada e o texto continua acessível", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const t0 = Date.now(); const later = t0 + 10 * DAY;
+    await setOffers(mod, db, t0);
+    await me(mod, db, "ana@example.com", t0);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium", later);
+    const claimed = await send(mod, db, "ana@example.com", "/api/billing/claim", "POST", { id: purchase.id }, later);
+    expect(claimed.json.purchase.status).toBe("awaiting_review");
+    expect((await send(mod, db, "ana@example.com", "/api/billing/claim", "POST", { id: purchase.id }, later)).status).toBe(200); // repetir é inofensivo
+    expect((await me(mod, db, "ana@example.com", later)).plan).toBe("expirado");
+    expect((await send(mod, db, "ana@example.com", "/api/assist", "POST", {}, later)).status).toBe(402);
+    expect((await send(mod, db, "ana@example.com", "/api/book", "POST", { path: "books/a.json", data: "x" }, later)).out.env).toBeTruthy();
+    expect((await send(mod, db, "ana@example.com", "/api/billing/offers", "GET", undefined, later)).json.purchases[0].status).toBe("awaiting_review");
+  });
+
+  it("outra conta não vê, reivindica nem cancela pedido alheio; e ninguém além do dono confirma", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium");
+    expect((await send(mod, db, "bia@example.com", "/api/billing/claim", "POST", { id: purchase.id })).status).toBe(404);
+    expect((await send(mod, db, "bia@example.com", "/api/billing/cancel", "POST", { id: purchase.id })).status).toBe(404);
+    expect((await send(mod, db, "bia@example.com", "/api/billing/offers")).json.purchases).toHaveLength(0);
+    for (const path of ["/api/admin/purchase/confirm", "/api/admin/purchase/status", "/api/admin/offer"]) expect((await send(mod, db, "bia@example.com", path, "POST", { id: purchase.id, txId: "TX-12345", amountCents: 65340, currency: "BRL" })).status).toBe(403);
+    expect((await send(mod, db, "bia@example.com", "/api/admin/billing")).status).toBe(403);
+    expect((await send(mod, db, OWNER, "/api/billing/offers")).status).toBe(400);
+    expect((await me(mod, db, "ana@example.com")).plan).not.toBe("premium");
+  });
+});
+
+describe("confirmação pelo administrador", () => {
+  it("pagamento conferido ativa 12 meses de calendário e libera os direitos do plano", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const t0 = Date.parse("2026-10-19T12:00:00Z"); const later = t0 + 10 * DAY;
+    await setOffers(mod, db, t0);
+    await me(mod, db, "ana@example.com", t0);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium", later);
+    const done = await confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 }, later);
+    expect(done.status).toBe(200);
+    expect(done.json.endsAt).toBe(new Date(mod.shakAddMonths(later, 12)).toISOString());
+    const info = await me(mod, db, "ana@example.com", later);
+    expect(info).toMatchObject({ plan: "premium", paidUntil: done.json.endsAt });
+    expect(info.entitlements["cowila.chat"]).toBe(true);
+    expect((await send(mod, db, "ana@example.com", "/api/assist", "POST", {}, later)).out.env).toBeTruthy();
+    const actions = db.audit.map((a: any) => a.action);
+    for (const action of ["offer.set", "purchase.create", "purchase.confirm"]) expect(actions.includes(action)).toBe(true);
+  });
+
+  it("repetir a mesma confirmação é idempotente; a mesma transação em outro pedido não libera outro usuário", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const a = (await buy(mod, db, "ana@example.com", "premium")).purchase;
+    const b = (await buy(mod, db, "bia@example.com", "premium")).purchase;
+    expect((await confirm(mod, db, a.id, "TON-0001", { amountCents: 65340 })).status).toBe(200);
+    const again = await confirm(mod, db, a.id, "TON-0001", { amountCents: 65340 });
+    expect(again.status).toBe(200); expect(again.json.idempotent).toBe(true);
+    expect(db.periods).toHaveLength(1);
+    const reuse = await confirm(mod, db, b.id, "TON-0001", { amountCents: 65340 });
+    expect(reuse.status).toBe(409); expect(reuse.json.error).toBe("duplicate_transaction");
+    expect((await me(mod, db, "bia@example.com")).plan).not.toBe("premium");
+    expect(db.periods).toHaveLength(1);
+    expect((await confirm(mod, db, a.id, "TON-0002", { amountCents: 65340 })).json.error).toBe("already_confirmed");
+  });
+
+  it("valor ou moeda diferentes vão para revisão e não ativam nada", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium");
+    const wrong = await confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65000 });
+    expect(wrong.status).toBe(409); expect(wrong.json.error).toBe("amount_mismatch");
+    expect((await confirm(mod, db, purchase.id, "TON-0002", { amountCents: 65340, currency: "USD" })).json.error).toBe("amount_mismatch");
+    expect(db.purchases[0].status).toBe("needs_review");
+    expect(db.payments).toHaveLength(0); expect(db.periods).toHaveLength(0);
+    expect((await me(mod, db, "ana@example.com")).plan).not.toBe("premium");
+    expect((await confirm(mod, db, purchase.id, "TON-0003", { amountCents: 65340 })).status).toBe(200); // depois de conferido, o administrador pode confirmar
+    expect((await confirm(mod, db, purchase.id, "x", { amountCents: 65340 })).status).toBe(400);
+  });
+
+  it("renovar o mesmo plano antes do vencimento acumula; nunca reduz dias já pagos", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const t0 = Date.parse("2026-01-31T12:00:00Z");
+    await setOffers(mod, db, t0);
+    const first = (await buy(mod, db, "ana@example.com", "premium", t0)).purchase;
+    const one = await confirm(mod, db, first.id, "TON-0001", { amountCents: 65340 }, t0);
+    const t1 = t0 + 100 * DAY;
+    const second = (await buy(mod, db, "ana@example.com", "premium", t1)).purchase;
+    const two = await confirm(mod, db, second.id, "TON-0002", { amountCents: 65340 }, t1);
+    expect(two.json.startsAt).toBe(one.json.endsAt);
+    expect(two.json.endsAt).toBe(new Date(mod.shakAddMonths(Date.parse(one.json.endsAt), 12)).toISOString());
+    expect((await me(mod, db, "ana@example.com", t1)).paidUntil).toBe(two.json.endsAt);
+    // depois do vencimento, recomeça do dia do pagamento
+    const t2 = Date.parse(two.json.endsAt) + 5 * DAY;
+    const third = (await buy(mod, db, "ana@example.com", "premium", t2)).purchase;
+    expect((await confirm(mod, db, third.id, "TON-0003", { amountCents: 65340 }, t2)).json.startsAt).toBe(new Date(t2).toISOString());
+  });
+
+  it("troca de plano com outro plano pago vigente exige revisão ou 'replace' explícito", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const eco = (await buy(mod, db, "ana@example.com", "economico")).purchase;
+    await confirm(mod, db, eco.id, "TON-0001", { amountCents: 34949 });
+    const vip = (await buy(mod, db, "ana@example.com", "vip")).purchase;
+    const held = await confirm(mod, db, vip.id, "TON-0002", { amountCents: 100795 });
+    expect(held.json.error).toBe("plan_change");
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("economico");
+    expect((await confirm(mod, db, vip.id, "TON-0002", { amountCents: 100795, mode: "replace" })).status).toBe(200);
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("vip");
+  });
+
+  it("confirmações simultâneas do mesmo pedido geram um único período", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium");
+    const results = await Promise.all([confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 }), confirm(mod, db, purchase.id, "TON-0002", { amountCents: 65340 }), confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 })]);
+    expect(db.periods).toHaveLength(1);
+    expect(db.payments).toHaveLength(1);
+    expect(results.filter(r => r.status === 200).length).toBeGreaterThanOrEqual(1);
+    expect(results.filter(r => r.status === 409).every(r => ["already_confirmed", "duplicate_transaction"].includes(r.json.error))).toBe(true);
+  });
+
+  it("pedido rejeitado ou cancelado não pode ser confirmado; revisão manual não ativa", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium");
+    expect((await send(mod, db, OWNER, "/api/admin/purchase/status", "POST", { id: purchase.id, status: "needs_review", note: "e-mail diferente" })).status).toBe(200);
+    expect((await me(mod, db, "ana@example.com")).plan).not.toBe("premium");
+    expect((await send(mod, db, OWNER, "/api/admin/purchase/status", "POST", { id: purchase.id, status: "rejected" })).status).toBe(200);
+    expect((await confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 })).json.error).toBe("invalid_state");
+    expect((await send(mod, db, OWNER, "/api/admin/purchase/status", "POST", { id: purchase.id, status: "confirmed" })).status).toBe(400);
+  });
+
+  it("painel do administrador lista pendências e ofertas com o link", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium");
+    await send(mod, db, "ana@example.com", "/api/billing/claim", "POST", { id: purchase.id });
+    const panel = (await send(mod, db, OWNER, "/api/admin/billing")).json;
+    expect(panel.open[0]).toMatchObject({ id: purchase.id, email: "ana@example.com", status: "awaiting_review" });
+    expect(panel.offers.find((o: any) => o.plan === "premium").checkoutUrl).toBe(URLS.premium);
+  });
+});
+
+describe("meses de calendário e cortesias", () => {
+  it("soma meses sem estourar o fim do mês", async () => {
+    const mod = await load();
+    const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    expect(iso(mod.shakAddMonths(Date.parse("2026-01-31T00:00:00Z"), 1))).toBe("2026-02-28");
+    expect(iso(mod.shakAddMonths(Date.parse("2028-02-29T00:00:00Z"), 12))).toBe("2029-02-28");
+    expect(iso(mod.shakAddMonths(Date.parse("2026-10-19T00:00:00Z"), 12))).toBe("2027-10-19");
+    expect(iso(mod.shakAddMonths(Date.parse("2026-11-30T00:00:00Z"), 3))).toBe("2027-02-28");
+  });
+
+  it("cortesia do administrador no mesmo plano soma ao vencimento e não encurta o que foi pago", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const t0 = Date.now();
+    await setOffers(mod, db, t0);
+    const { purchase } = await buy(mod, db, "ana@example.com", "premium", t0);
+    const paid = await confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 }, t0);
+    const courtesy = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "ana@example.com", plan: "premium", days: 30 }, t0);
+    expect(courtesy.status).toBe(200);
+    expect(Date.parse(courtesy.json.user.paidUntil)).toBe(Date.parse(paid.json.endsAt) + 30 * DAY);
+    expect(db.audit.some((a: any) => a.action === "plan.courtesy")).toBe(true);
+  });
+});
