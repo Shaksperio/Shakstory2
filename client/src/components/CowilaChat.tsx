@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import type { CowilaAsk } from "@/lib/trpc";
 import { openPlans, usePlan } from "@/lib/plans";
 import { feedbackFor, localArithmetic, verifyAnswer } from "@/lib/cowila/mcr";
+import { buildEditorialControlsPrompt, missingProtectedTerms, normalizeEditorialControls, normalizeProtectedTerms, type EditorialControls } from "../../../shared/editorial-controls";
 import {
   SHAKSTORY_GUIDE, assessLevel, buildProjectDigest, candidateCharacters, characterPrompt, chunkParagraphs, cowilaSystemNote, parseVerification, verifyPrompt,
   alternativesPrompt, parseAlternatives, cleanSynopsis, countBookWords, detectIntent, knownBookNames, localCharacters, synopsisPrompt, parseCharacters, rewriteIsSafe, rewritePrompt, type CBook, type Level,
@@ -47,6 +48,17 @@ export function CowilaChat(props: CowilaChatProps) {
   const [busy, setBusy] = useState(false);
   const [verify, setVerify] = useState(() => store("shakstory:cowila:verificar") !== "0");
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [editorialControls, setEditorialControls] = useState<EditorialControls>(normalizeEditorialControls(null));
+  const editorialKey = `shakstory:cowila:editorial:${active?.id ?? "geral"}`;
+  useEffect(() => {
+    try { setEditorialControls(normalizeEditorialControls(JSON.parse(store(editorialKey) || "{}"))); }
+    catch { setEditorialControls(normalizeEditorialControls(null)); }
+  }, [editorialKey]);
+  const saveEditorial = (next: EditorialControls) => {
+    setEditorialControls(next);
+    put(editorialKey, JSON.stringify(next));
+  };
+  const editorialPrompt = () => buildEditorialControlsPrompt(editorialControls);
   const selection = useRef("");
   const asideRef = useRef<HTMLElement | null>(null);
   const [undoDesc, setUndoDesc] = useState<{ previous: string } | null>(null);
@@ -139,8 +151,8 @@ export function CowilaChat(props: CowilaChatProps) {
     const chosen = selection.current;
     if (!chosen) return say("Selecione no editor o trecho que quer reescrever (de uma frase a alguns parágrafos) e clique de novo em “Alternativas do trecho”.");
     if (!online) return say("As alternativas precisam de internet. Seu texto continua intacto.");
-    const raw = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + alternativesPrompt(level), text: chosen, long: true, bookTitle: active?.title });
-    const options = parseAlternatives(raw, chosen);
+    const raw = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + editorialPrompt() + "\n\n" + alternativesPrompt(level), text: chosen, long: true, bookTitle: active?.title });
+    const options = parseAlternatives(raw, chosen).filter(option => missingProtectedTerms(chosen, option, editorialControls).length === 0);
     if (!options.length) return say("A IA não devolveu alternativas que preservem nomes e tamanho do trecho. Nada foi alterado. Tente de novo ou selecione um trecho menor.");
     setProposal({ kind: "alternatives", before: chosen, options });
     say(`Preparei ${options.length} alternativa(s) para o trecho selecionado. Nenhuma é aplicada sozinha: escolha uma abaixo.`);
@@ -156,8 +168,8 @@ export function CowilaChat(props: CowilaChatProps) {
     let kept = 0;
     for (const chunk of chunks) {
       try {
-        const result = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + rewritePrompt(level), text: chunk, long: true, bookTitle: active.title });
-        if (rewriteIsSafe(chunk, result)) out.push(result.trim()); else { out.push(chunk); kept++; }
+        const result = await ask({ prompt: cowilaSystemNote(level, "projeto") + "\n\n" + editorialPrompt() + "\n\n" + rewritePrompt(level), text: chunk, long: true, bookTitle: active.title });
+        if (rewriteIsSafe(chunk, result) && missingProtectedTerms(chunk, result, editorialControls).length === 0) out.push(result.trim()); else { out.push(chunk); kept++; }
       } catch (error) { out.push(chunk); kept++; if (kept === chunks.length) throw error; }
     }
     const after = out.join("\n");
@@ -265,6 +277,21 @@ export function CowilaChat(props: CowilaChatProps) {
           <input type="checkbox" className="mt-0.5" checked={verify} onChange={event => { setVerify(event.target.checked); put("shakstory:cowila:verificar", event.target.checked ? "1" : "0"); }} />
           <span>Modo livre com verificação: responde qualquer assunto e confere a própria resposta (Consciente → Subconsciente → Cortex) antes de mostrar. Mais lento.</span>
         </label>
+        <details className="mt-2 rounded-md border border-border bg-secondary/30 p-2 text-[11px]">
+          <summary className="cursor-pointer font-semibold">Oficina editorial · controles de revisão</summary>
+          <label className="mt-2 block">Intensidade editorial
+            <select aria-label="Intensidade editorial" className="mt-1 h-8 w-full rounded-md border border-border bg-background px-2" value={editorialControls.intensity} onChange={event => saveEditorial({ ...editorialControls, intensity: event.target.value as EditorialControls["intensity"] })}>
+              <option value="leve">Leve · preservar estilo ao máximo</option>
+              <option value="equilibrada">Equilibrada · fluidez com fidelidade</option>
+              <option value="profunda">Profunda · explorar novas construções</option>
+            </select>
+          </label>
+          <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={editorialControls.protectCanon} onChange={event => saveEditorial({ ...editorialControls, protectCanon: event.target.checked })} />Proteger cânone, voz, tempo verbal e continuidade</label>
+          <label className="mt-2 block">Nomes e expressões protegidos (separe por vírgulas)
+            <textarea aria-label="Termos protegidos" rows={2} className="mt-1 w-full rounded-md border border-border bg-background p-2" value={editorialControls.protectedTerms.join(", ")} onChange={event => saveEditorial({ ...editorialControls, protectedTerms: normalizeProtectedTerms(event.target.value) })} placeholder="Helena, Vale do Norte, Arven" />
+          </label>
+          <p className="mt-1 text-muted-foreground">Configuração local por livro. As sugestões exigem sua aprovação antes de entrar no texto.</p>
+        </details>
         <select aria-label="Seu nível" value={levelPref} onChange={event => { const v = event.target.value as "auto" | Level; setLevelPref(v); put("shakstory:cowila:level", v); }} className="mt-2 h-8 w-full min-w-0 rounded-md border border-border bg-background px-2 text-[11px]">
           <option value="auto">Nível: automático ({level})</option>
           <option value="iniciante">Sou iniciante</option>
