@@ -54,6 +54,7 @@ import { ProfilePage } from "./ProfilePage";
 import { signOutMirror } from "@/lib/mirror/firebase";
 import { PlanningBoards, type PlanningBoard } from "./PlanningBoards";
 import { appendContinuationHtml, appendContinuationText, continuationToHtml, type CoauthorAlternative } from "@shared/coauthor";
+import { assessCoauthorQuality } from "@shared/coauthor-quality";
 import { analyzeStyleDna } from "@shared/style-dna";
 
 type View = "library" | "project" | "planning" | "editor" | "prepare" | "security";
@@ -538,6 +539,8 @@ export default function WriterStudio() {
 
   const applyCoauthorExpansion = (expandedText: string) => {
     if (!activeNode || !expandedText.trim()) return;
+    const quality = assessCoauthorQuality(expandedText);
+    if (!quality.accepted) { setNotice("Cowila: continuação rejeitada por repetição. Volte às amostras e gere outra proposta."); return; }
     setCoauthorUndo({ nodeId: activeNode.id, text: draft, html: draftHtml });
     const baseHtml = draftHtml || continuationToHtml(draft);
     updateDraft(
@@ -1107,15 +1110,16 @@ export function LiteraryAssistant({
         <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
           <div className="flex items-center justify-between gap-2">
             <div><p className="text-xs font-medium">Continuação expandida</p><p className="mt-0.5 text-[9px] text-muted-foreground">{countWords(coauthorExpansion.text)} palavras · fase 2</p></div>
-            <Badge className="text-[9px]">Pronta para decisão</Badge>
+            <Badge className="text-[9px]">{assessCoauthorQuality(coauthorExpansion.text).accepted ? "Pronta para decisão" : "Repetição detectada"}</Badge>
           </div>
           <p className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{coauthorExpansion.text}</p>
         </div>
+        {!assessCoauthorQuality(coauthorExpansion.text).accepted && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">A Cowila repetiu blocos ou construções em excesso. Esta continuação não pode ser aplicada. Volte às amostras para gerar uma nova versão.</div>}
         {coauthorExpansion.canonWarnings.length > 0 && <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
           <p className="text-[10px] font-medium">Alertas antes de aplicar</p>
           {coauthorExpansion.canonWarnings.map((warning, index) => <p key={index} className="mt-1 text-[10px] leading-4 text-muted-foreground">• {warning}</p>)}
         </div>}
-        <Button className="w-full" size="sm" onClick={() => onApplyExpansion(coauthorExpansion.text)}>
+        <Button className="w-full" size="sm" disabled={!assessCoauthorQuality(coauthorExpansion.text).accepted} onClick={() => onApplyExpansion(coauthorExpansion.text)}>
           <Check className="mr-2 h-3.5 w-3.5" />Aplicar ao manuscrito
         </Button>
         <Button variant="outline" className="w-full" size="sm" onClick={() => { setSelectedSampleId(null); onBackToSamples(); }}>
