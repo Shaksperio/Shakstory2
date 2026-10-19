@@ -120,6 +120,8 @@ export function buildContinuationPrompt(input: {
     "- a diferença entre as três amostras deve estar no ACONTECIMENTO CENTRAL, não em adjetivos, tom, intensidade ou paráfrase;",
     "- esta amostra precisa representar a classe de evento definida em 'Caminho desta amostra'; não copie o mesmo evento provável das outras duas direções;",
     "- preserve pessoa, tempo verbal, foco narrativo, voz, nomes, fatos, relações e conhecimento do personagem focal;",
+    "- evite encadear frases como Eu me senti um pouco mais, comecei a e parecia que; substitua emoções declaradas por gesto, decisão, percepção específica e consequência quando couber;",
+    "- cada parágrafo deve acrescentar um acontecimento ou revelação; não recomece a mesma ação nem repita perguntas com respostas equivalentes;",
     "- não repita literalmente o final já escrito;",
     "- não resolva conflitos maiores nem feche o capítulo;",
     "- termine com impulso narrativo suficiente para o autor entender a direção proposta;",
