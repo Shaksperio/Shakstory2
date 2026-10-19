@@ -402,9 +402,9 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   const approaches = pickApproaches(alternativeCount);
   // Give each candidate a distinct narrative function before drafting.
   const narrativePlans = [
-    "Suspense: introduce a concrete anomaly, escalate a decision and end with a consequence.",
-    "Conflito humano: use consequential dialogue, opposing goals and a changed relationship.",
-    "Revelação: introduce evidence or an object that changes the interpretation of the scene.",
+    "Fiel à cena: desenvolva a consequência causal imediata, sem introduzir fatos arbitrários.",
+    "Mais tensão: introduza um obstáculo externo concreto, uma decisão e sua consequência.",
+    "Mais subtexto: use gesto, decisão ou diálogo consequente para mudar a relação entre personagens.",
   ];
 
   const alternatives = await Promise.all(approaches.map(async (approach, index) => {
