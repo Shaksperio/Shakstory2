@@ -595,7 +595,7 @@ export function withGemini(env, fetchFn) {
         const res = await doFetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent", {
           method: "POST",
           headers: { "content-type": "application/json", "x-goog-api-key": String(env.GEMINI_API_KEY) },
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: (input && input.max_tokens) || 900 } }),
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: (input && input.max_tokens) || 900, ...(input && typeof input.temperature === "number" ? { temperature: input.temperature, topP: input.top_p } : {}) } }),
         });
         if (!res.ok) throw new Error("gemini_" + res.status);
         const data = await res.json();

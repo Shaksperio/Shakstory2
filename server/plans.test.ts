@@ -180,6 +180,16 @@ describe("withGemini (IA opcional)", () => {
     expect(init.headers["x-goog-api-key"]).toBe("chave");
     expect(base.run).not.toHaveBeenCalled();
   });
+  it("repassa temperatura e top_p ao Gemini só quando pedidos", async () => {
+    const { withGemini } = await load();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "g" }] } }] })));
+    const env = withGemini({ AI: { run: vi.fn() }, GEMINI_API_KEY: "chave" }, fetchFn as unknown as typeof fetch) as { AI: { run: (n: string, i: unknown) => Promise<unknown> } };
+    await env.AI.run("m", { messages, temperature: 0.9, top_p: 0.92 });
+    await env.AI.run("m", { messages });
+    const cfg = (i: number) => JSON.parse(((fetchFn.mock.calls[i] as unknown as [string, { body: string }])[1]).body).generationConfig;
+    expect(cfg(0)).toMatchObject({ temperature: 0.9, topP: 0.92 });
+    expect(cfg(1).temperature).toBeUndefined();
+  });
   it("se o Gemini falhar, cai no Workers AI", async () => {
     const { withGemini } = await load();
     const base = { run: vi.fn(async () => ({ response: "workers" })) };
