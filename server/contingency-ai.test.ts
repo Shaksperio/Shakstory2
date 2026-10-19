@@ -20,6 +20,27 @@ function setup() {
 }
 
 describe("Worker de IA da contingência", () => {
+  it("preserva instruções longas da coautora sem tratá-las como comando de memória", async () => {
+    const m = await load();
+    let request: { messages: Array<{ content: string }>; max_tokens: number } | undefined;
+    const env = { AI: { run: async (_model: string, value: typeof request) => {
+      request = value;
+      return { response: "Uma decisão mudou a cena." };
+    } } };
+    const longPrompt = "CENA. " + "Conserve a voz narrativa e a memória do enredo. ".repeat(160);
+    const result = await m.assist({
+      action: "continue_scene",
+      literaryProfile: { role: "coauthor", task: "continue_scene" },
+      prompt: longPrompt,
+      scene: { id: "cena", text: "A personagem encontrou uma chave." },
+      book: { title: "Livro sintético" },
+    }, env);
+    expect(result.proposal).toBe("Uma decisão mudou a cena.");
+    expect(request?.messages.at(-1)?.content).toContain(longPrompt.slice(-80));
+    expect(request?.messages.at(-1)?.content).toContain("Acao: continue_scene");
+    expect(request?.max_tokens).toBe(1000);
+  });
+
   it("só aceita ID token do Firebase válido (e-mail verificado)", async () => {
     const m = await load();
     const { token, opts } = setup();
