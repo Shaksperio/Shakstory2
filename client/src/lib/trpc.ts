@@ -437,13 +437,14 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
     const result = retried ?? initial;
     const finalText = String(result.proposal ?? "").trim();
     const quality = assessCoauthorQuality(finalText);
-    if (finalText && !quality.accepted) throw new CloudflareApiError("A Cowila não conseguiu criar a amostra " + approach.label + " sem repetições excessivas. Nenhum texto foi aplicado; tente novamente com uma indicação mais específica do próximo acontecimento.", { code: "COAUTHOR_QUALITY_REJECTED", status: 502 });
+    // Never discard the entire three-sample batch over one weak alternative.
+    // Severe duplication stays visible for diagnosis but cannot be selected in the editor.
     return {
       id: `${approach.id}-${index + 1}`,
       label: approach.label,
       approach: approach.instruction,
       text: finalText,
-      warnings: Array.isArray(result.canonWarnings) ? result.canonWarnings : [],
+      warnings: [...(Array.isArray(result.canonWarnings) ? result.canonWarnings : []), ...quality.warnings, ...quality.reasons],
     } satisfies CoauthorAlternative;
   }));
 
