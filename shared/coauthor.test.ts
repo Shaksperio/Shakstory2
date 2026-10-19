@@ -12,6 +12,21 @@ import {
 } from "./coauthor";
 
 describe("Cowila coauthor two-stage flow", () => {
+  it("includes editorial craft and causal continuity in both coauthor phases", () => {
+    const sample = buildContinuationPrompt({ approach: pickApproaches()[0], targetWords: 180 });
+    const expanded = buildExpansionPrompt({ selectedSample: "A chave não se encaixou na fechadura." });
+    for (const prompt of [sample, expanded]) {
+      expect(prompt).toContain("três atos");
+      expect(prompt).toContain("PONTO DE VISTA");
+      expect(prompt).toContain("EDIÇÃO EM CAMADAS");
+      expect(prompt).toContain("DIÁLOGO");
+      expect(prompt).toContain("não copie trechos");
+    }
+    expect(expanded).toContain("AUDITORIA SILENCIOSA");
+    expect(expanded).toContain("alguma porta foi reaberta");
+    expect(expanded).toContain("continuação curta e coerente");
+  });
+
   it("always creates three short samples for comparison", () => {
     expect(clampContinuationWords(10)).toBe(120);
     expect(clampContinuationWords(999)).toBe(260);
