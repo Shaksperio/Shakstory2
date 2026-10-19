@@ -48,6 +48,8 @@ describe("Cowila coauthor two-stage flow", () => {
     expect(prompt).toContain("ACONTECIMENTO CENTRAL");
     expect(prompt).toContain("não em adjetivos");
     expect(prompt).toContain("classe de evento");
+    expect(prompt).toContain("Eu me senti um pouco mais");
+    expect(prompt).toContain("cada parágrafo deve acrescentar");
   });
 
   it("builds a Phase 1 sample prompt instead of a final continuation", () => {
