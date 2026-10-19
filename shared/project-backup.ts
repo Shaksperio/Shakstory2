@@ -250,6 +250,9 @@ const bookSchema = z
         customTrim: z.object({ widthMm: z.number().min(90).max(300), heightMm: z.number().min(120).max(400) }).optional(),
         marginPreset: z.enum(["narrow", "normal", "wide"]).optional(),
         dropCap: z.boolean().optional(),
+        runningHeader: z.boolean().optional(),
+        bleedMm: z.number().min(0).max(10).optional(),
+        gutterMm: z.number().min(0).max(25).optional(),
         headerText: z.string().optional(),
         footerText: z.string().optional(),
         copyright: z

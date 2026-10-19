@@ -68,6 +68,12 @@ export type ExportBook = {
   coverImageUrl?: string;
   headerText?: string;
   footerText?: string;
+  /** Cabeçalho corrente (PDF e DOCX): páginas pares mostram o autor; ímpares, o título do capítulo. Não aparece na capa, no sumário nem na página de abertura de cada capítulo. */
+  runningHeader?: boolean;
+  /** Produção gráfica (PDF): sangria em mm nos quatro lados; a página passa a medir o formato + 2 × sangria e o PDF traz TrimBox e BleedBox. */
+  bleedMm?: number;
+  /** Produção gráfica (PDF): margem de lombada em mm, espelhada (lado interno: esquerda nas páginas ímpares, direita nas pares). */
+  gutterMm?: number;
   includeToc?: boolean;
   frontMatter?: ExportSection[];
   backMatter?: ExportSection[];
@@ -148,6 +154,13 @@ export function clampCustomTrim(value?: Partial<CustomTrim> | null): CustomTrim 
 
 const IN = 72;
 const MM = 72 / 25.4;
+export const PRINT_LIMITS = { maxBleedMm: 10, maxGutterMm: 25 } as const;
+/** Valor em mm entre 0 e o máximo, arredondado a 0,5 mm; qualquer coisa inválida vira 0. */
+export function clampPrintMm(value: unknown, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(Math.min(max, n) * 2) / 2;
+}
 export type TrimDimensions = { id: TrimSize; widthPt: number; heightPt: number; widthTwips: number; heightTwips: number; css: string; pdfFormat: "a4" | "a5" | [number, number] };
 
 /** Única fonte das medidas da página, usada por PDF, DOCX e HTML/impressão (A4, A5 e 6×9 mantêm os valores de sempre). */
@@ -536,7 +549,21 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
         : book.layout === "compact"
           ? Math.min(6, preset.margin / 12)
           : preset.margin / 6;
-  const epubStyle = `body{font-family:${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1,h2{font-family:${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter,.front-matter,.back-matter{page-break-before:always}${paragraphCss(preset, book.layout === "compact", false)}`;
+  // Mesmas fontes do PDF (DejaVu, subconjunto latino) embutidas no EPUB: o texto fica igual em qualquer leitor. Idiomas fora do alfabeto latino caem na pilha de fontes do estilo.
+  const embedded = (await import("./pdf-fonts")).PDF_FONTS;
+  const epubBodyFamily = preset.pdfFont === "times" ? "Serif" : "Sans";
+  const epubHeadFamily = preset.headingFont ? "Sans" : epubBodyFamily;
+  const fontItems: Array<{ id: string; file: string }> = [];
+  let fontFaces = "";
+  for (const family of Array.from(new Set([epubBodyFamily, epubHeadFamily]))) {
+    for (const style of ["normal", "bold", "italic", "bolditalic"]) {
+      const file = `fonts/Shakstory-${family}-${style}.ttf`;
+      zip.file(`OEBPS/${file}`, embedded[`${family}-${style}`], { base64: true });
+      fontItems.push({ id: `font-${fontItems.length + 1}`, file });
+      fontFaces += `@font-face{font-family:"Shakstory ${family}";src:url(${file});font-weight:${style.startsWith("bold") ? 700 : 400};font-style:${style.endsWith("italic") ? "italic" : "normal"}}`;
+    }
+  }
+  const epubStyle = `${fontFaces}body{font-family:"Shakstory ${epubBodyFamily}",${preset.webFont};line-height:${preset.lineHeight};font-size:${preset.bodySize}px;margin:${epubMargin}% ${Math.min(12, epubMargin + 1)}%;color:#222}h1,h2{font-family:"Shakstory ${epubHeadFamily}",${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:3em 0 1.5em}.cover{text-align:center;page-break-after:always}.cover img{max-width:100%;max-height:80vh}.cover-placeholder{height:80vh;background:${preset.accent};color:white;display:flex;align-items:center;justify-content:center}.frontmatter{text-align:center;page-break-after:always}.toc{page-break-after:always}.chapter,.front-matter,.back-matter{page-break-before:always}${paragraphCss(preset, book.layout === "compact", false)}`;
   const coverXhtml = book.coverImageUrl
     ? `<figure class="cover"><img src="${escapeXml(book.coverImageUrl)}" alt="Capa" /></figure>`
     : "";
@@ -586,7 +613,7 @@ export async function buildEpub(book: ExportBook): Promise<Blob> {
   );
   zip.file(
     "OEBPS/content.opf",
-    `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:shakstory:${escapeXml(book.bookId || book.title)}</dc:identifier><dc:title>${escapeXml(book.title)}</dc:title><dc:creator>${escapeXml(book.author ?? "")}</dc:creator><dc:language>${escapeXml(book.language ?? "pt-BR")}</dc:language>${book.category ? `<dc:subject>${escapeXml(book.category)}</dc:subject>` : ""}${book.isbn ? `<dc:identifier id="isbn">${escapeXml(book.isbn)}</dc:identifier>` : ""}${book.publicationDate || book.publicationYear || book.copyright?.year ? `<dc:date>${escapeXml(book.publicationDate || book.publicationYear || book.copyright?.year || "")}</dc:date>` : ""}<meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"${book.coverImageUrl?.startsWith("http") ? ' properties="remote-resources"' : ""}/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${imageItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="${item.mime}"/>`).join("")}${readingItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="application/xhtml+xml"${book.chapters.some(c => /src=["']https?:/i.test(c.richContent ?? "")) ? ' properties="remote-resources"' : ""}/>`).join("")}</manifest><spine><itemref idref="cover"/>${book.includeToc === false ? "" : '<itemref idref="nav"/>'}${readingItems.map(item => `<itemref idref="${item.id}"/>`).join("")}</spine></package>`
+    `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:shakstory:${escapeXml(book.bookId || book.title)}</dc:identifier><dc:title>${escapeXml(book.title)}</dc:title><dc:creator>${escapeXml(book.author ?? "")}</dc:creator><dc:language>${escapeXml(book.language ?? "pt-BR")}</dc:language>${book.category ? `<dc:subject>${escapeXml(book.category)}</dc:subject>` : ""}${book.isbn ? `<dc:identifier id="isbn">${escapeXml(book.isbn)}</dc:identifier>` : ""}${book.publicationDate || book.publicationYear || book.copyright?.year ? `<dc:date>${escapeXml(book.publicationDate || book.publicationYear || book.copyright?.year || "")}</dc:date>` : ""}<meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta></metadata><manifest><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"${book.coverImageUrl?.startsWith("http") ? ' properties="remote-resources"' : ""}/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${imageItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="${item.mime}"/>`).join("")}${fontItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="font/ttf"/>`).join("")}${readingItems.map(item => `<item id="${item.id}" href="${item.file}" media-type="application/xhtml+xml"${book.chapters.some(c => /src=["']https?:/i.test(c.richContent ?? "")) ? ' properties="remote-resources"' : ""}/>`).join("")}</manifest><spine><itemref idref="cover"/>${book.includeToc === false ? "" : '<itemref idref="nav"/>'}${readingItems.map(item => `<itemref idref="${item.id}"/>`).join("")}</spine></package>`
   );
   return zip.generateAsync({ type: "blob", mimeType: "application/epub+zip" });
 }
@@ -598,12 +625,21 @@ export async function loadPdfFonts(): Promise<void> {
 export function buildPdf(book: ExportBook): Blob {
   book = normalizeExportBook(book);
   const preset = presetFor(book);
-  const pdfFormat = trimDimensions(book).pdfFormat;
+  const dims = trimDimensions(book);
+  const bleed = clampPrintMm(book.bleedMm, PRINT_LIMITS.maxBleedMm) * MM;
+  const gutter = clampPrintMm(book.gutterMm, PRINT_LIMITS.maxGutterMm) * MM;
   const pdf = new jsPDF({
     unit: "pt",
-    format: pdfFormat,
+    format: bleed > 0 ? [dims.widthPt + 2 * bleed, dims.heightPt + 2 * bleed] : dims.pdfFormat,
     putOnlyUsedFonts: true,
   });
+  if (bleed > 0) {
+    // TrimBox/BleedBox dizem à gráfica onde é o corte; o MediaBox já inclui a sangria.
+    const fmt = (n: number) => n.toFixed(2);
+    const pageW = dims.widthPt + 2 * bleed, pageH = dims.heightPt + 2 * bleed;
+    const boxes = `/TrimBox [${fmt(bleed)} ${fmt(bleed)} ${fmt(pageW - bleed)} ${fmt(pageH - bleed)}] /BleedBox [0 0 ${fmt(pageW)} ${fmt(pageH)}]`;
+    (pdf.internal as any).events.subscribe("putPage", () => { (pdf.internal as any).write(boxes); });
+  }
   const bodyFamily = preset.pdfFont === "times" ? "Serif" : "Sans";
   const headFamily = preset.headingFont ? "Sans" : bodyFamily;
   const pdfFont = embeddedPdfFonts ? `Shakstory${bodyFamily}` : preset.pdfFont;
@@ -622,7 +658,7 @@ export function buildPdf(book: ExportBook): Blob {
       }
     }
   }
-  const margin =
+  const baseMargin =
     book.marginPreset === "wide"
       ? preset.margin + 18
       : book.marginPreset === "narrow"
@@ -630,7 +666,11 @@ export function buildPdf(book: ExportBook): Blob {
         : book.layout === "compact"
           ? Math.min(48, preset.margin)
           : preset.margin;
-  const width = pdf.internal.pageSize.getWidth() - margin * 2;
+  // A margem é medida a partir da borda da página: a sangria entra nela; a lombada reduz a largura do texto.
+  const margin = baseMargin + bleed;
+  const width = pdf.internal.pageSize.getWidth() - margin * 2 - gutter;
+  // Origem do texto na página atual: com lombada, o lado interno alterna (página ímpar = lombada à esquerda). A contagem é a do arquivo, como no Word; para gráfica, exporte o miolo sem capa.
+  const left = () => margin + (gutter && pdf.getCurrentPageInfo().pageNumber % 2 === 1 ? gutter : 0);
   const height = pdf.internal.pageSize.getHeight();
   let y = margin;
   const bodyFontSize = preset.bodySize * 0.75;
@@ -656,17 +696,17 @@ export function buildPdf(book: ExportBook): Blob {
   y = height * 0.3;
   pdf.setFontSize(28);
   const titleLines = pdf.splitTextToSize(book.title, width) as string[];
-  pdf.text(titleLines, margin + width / 2, y, { align: "center" });
+  pdf.text(titleLines, left() + width / 2, y, { align: "center" });
   y += titleLines.length * 32;
   if (book.subtitle) {
     pdf.setFontSize(14);
     const lines = pdf.splitTextToSize(book.subtitle, width) as string[];
-    pdf.text(lines, margin + width / 2, y, { align: "center" });
+    pdf.text(lines, left() + width / 2, y, { align: "center" });
     y += lines.length * 20;
   }
   if (book.author) {
     pdf.setFontSize(12);
-    pdf.text(pdf.splitTextToSize(book.author, width), margin + width / 2, y, {
+    pdf.text(pdf.splitTextToSize(book.author, width), left() + width / 2, y, {
       align: "center",
     });
     y += 32;
@@ -736,7 +776,7 @@ export function buildPdf(book: ExportBook): Blob {
         pdf.addPage();
         y = margin;
       }
-      pdf.text(line, margin + width / 2, y, { align: "center" });
+      pdf.text(line, left() + width / 2, y, { align: "center" });
       y += 28;
     }
     y += 12;
@@ -770,8 +810,8 @@ export function buildPdf(book: ExportBook): Blob {
             y = margin;
           }
           if (preset.justify && lineIndex < lines.length - 1 && line.includes(" "))
-            pdf.text(line, margin, y, { align: "justify", maxWidth: width });
-          else pdf.text(line, margin, y);
+            pdf.text(line, left(), y, { align: "justify", maxWidth: width });
+          else pdf.text(line, left(), y);
           y += contentLineHeight;
         }
         y += paragraphGapPt;
@@ -791,7 +831,7 @@ export function buildPdf(book: ExportBook): Blob {
           extra = (width - lineW) / gaps;
           if (extra > contentFontSize * 1.5) extra = 0; // não estica demais linhas curtas
         }
-        let cursor = margin;
+        let cursor = left();
         for (const piece of line) {
           pdf.setFont(pdfFont, piece.style);
           pdf.text(piece.text, cursor, y);
@@ -836,7 +876,7 @@ export function buildPdf(book: ExportBook): Blob {
             pdf.addImage(
               src[1],
               src[2].toUpperCase(),
-              margin,
+              left(),
               y,
               (imageHeight * props.width) / props.height,
               imageHeight
@@ -875,11 +915,12 @@ export function buildPdf(book: ExportBook): Blob {
   // Fill reserved TOC pages after composition, using actual page destinations.
   for (let i = 0; i < tocPages.length; i++) {
     pdf.setPage(tocPages[i]);
+    const L = left();
     pdf.setFont(headPdfFont, preset.headingFont ? "bold" : "normal");
     pdf.setFontSize(22);
     pdf.text(
       i ? exportLabels(book.languageCode).contentsCont : exportLabels(book.languageCode).contents,
-      margin + width / 2,
+      L + width / 2,
       margin,
       { align: "center" }
     );
@@ -889,38 +930,49 @@ export function buildPdf(book: ExportBook): Blob {
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index],
         entry = pageEntries[row.entryIndex];
-      pdf.text(row.lines[0], margin, row.y);
-      pdf.link(margin, row.y - 12, width, 18, { pageNumber: entry?.page ?? 1 });
+      pdf.text(row.lines[0], L, row.y);
+      pdf.link(L, row.y - 12, width, 18, { pageNumber: entry?.page ?? 1 });
       if (
         index === rows.length - 1 ||
         rows[index + 1].entryIndex !== row.entryIndex
       ) {
-        const leaderStart = margin + pdf.getTextWidth(row.lines[0]) + 12;
-        if (leaderStart < margin + width - 30) {
+        const leaderStart = L + pdf.getTextWidth(row.lines[0]) + 12;
+        if (leaderStart < L + width - 30) {
           pdf.setDrawColor(170);
           pdf.setLineWidth(0.4);
           pdf.setLineDashPattern([1, 2], 0);
-          pdf.line(leaderStart, row.y - 3, margin + width - 25, row.y - 3);
+          pdf.line(leaderStart, row.y - 3, L + width - 25, row.y - 3);
           pdf.setLineDashPattern([], 0);
         }
-        pdf.text(String(entry?.page ?? ""), margin + width, row.y, {
+        pdf.text(String(entry?.page ?? ""), L + width, row.y, {
           align: "right",
         });
       }
     }
   }
+  const chapterSet = new Set<unknown>(book.chapters);
+  const ownerAt = (page: number) => {
+    let owner = -1;
+    for (let index = 0; index < pageEntries.length; index++) if (pageEntries[index].page <= page) owner = index;
+    return owner;
+  };
   for (let page = 1; page <= pdf.getNumberOfPages(); page += 1) {
     pdf.setPage(page);
+    const L = left();
     pdf.setFont(pdfFont, "normal");
     pdf.setFontSize(8);
-    if (book.headerText) pdf.text(book.headerText, margin, 18);
-    if (book.footerText) pdf.text(book.footerText, margin, height - 16);
-    pdf.text(
-      String(page),
-      pdf.internal.pageSize.getWidth() - margin,
-      height - 16,
-      { align: "right" }
-    );
+    if (book.runningHeader) {
+      const owner = ownerAt(page);
+      const inChapter = owner >= 0 && chapterSet.has(contentItems[owner]) && page > pageEntries[owner].page && !tocPages.includes(page);
+      if (inChapter) {
+        const recto = page % 2 === 1;
+        const text = recto ? contentItems[owner].title : book.author || book.title;
+        const fitted = (pdf.splitTextToSize(text, width) as string[])[0] ?? "";
+        pdf.text(fitted, L + width / 2, 18 + bleed, { align: "center" });
+      }
+    } else if (book.headerText) pdf.text(book.headerText, L, 18 + bleed);
+    if (book.footerText) pdf.text(book.footerText, L, height - 16 - bleed);
+    pdf.text(String(page), L + width, height - 16 - bleed, { align: "right" });
   }
   return pdf.output("blob");
 }
@@ -1031,16 +1083,27 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       },
     },
   });
-  const makeHeaders = () =>
-    book.headerText
+  const runningStart = parts.length - sectionParagraphs(book.backMatter).length - book.chapters.length;
+  const chapterAt = (index: number) => (index >= runningStart && index < runningStart + book.chapters.length ? book.chapters[index - runningStart] : undefined);
+  const textHeader = (text: string) => new Header({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text, size: 16 })] })] });
+  const makeHeaders = (index: number) => {
+    if (book.runningHeader) {
+      const chapter = chapterAt(index);
+      // Cabeçalho corrente: só nos capítulos; a página de abertura (first) fica sem cabeçalho; páginas pares mostram o autor, ímpares o capítulo.
+      return chapter
+        ? { first: textHeader(""), default: textHeader(chapter.title), even: textHeader(book.author || book.title) }
+        : { first: textHeader(""), default: textHeader(""), even: textHeader("") };
+    }
+    return book.headerText
       ? {
           default: new Header({
             children: [new Paragraph({ children: [new TextRun(book.headerText)] })],
           }),
         }
       : undefined;
-  const makeFooters = () => ({
-    default: new Footer({
+  };
+  const makeFooter = () =>
+    new Footer({
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -1050,8 +1113,8 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
           ],
         }),
       ],
-    }),
-  });
+    });
+  const makeFooters = () => (book.runningHeader ? { default: makeFooter(), even: makeFooter(), first: makeFooter() } : { default: makeFooter() });
   const headingFont = { bold: Number(preset.titleWeight) >= 600 || preset.titleWeight === "bold" };
   return Packer.toBlob(
     new Document({
@@ -1059,6 +1122,7 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       creator: book.author,
       description: book.description,
       features: { updateFields: true },
+      ...(book.runningHeader ? { evenAndOddHeaderAndFooters: true } : {}),
       styles: {
         default: {
           document: {
@@ -1096,8 +1160,8 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
         ],
       },
       sections: parts.map((children, index) => ({
-        properties: pageProperties(index === 0),
-        headers: makeHeaders(),
+        properties: { ...pageProperties(index === 0), ...(book.runningHeader ? { titlePage: true } : {}) },
+        headers: makeHeaders(index),
         footers: makeFooters(),
         children,
       })),
