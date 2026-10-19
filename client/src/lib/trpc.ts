@@ -400,13 +400,19 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   const canon = factsFromDocument(canonDocument);
   const history = historyFromDocument(memoryDocument);
   const approaches = pickApproaches(alternativeCount);
+  // Give each candidate a distinct narrative function before drafting.
+  const narrativePlans = [
+    "Suspense: introduce a concrete anomaly, escalate a decision and end with a consequence.",
+    "Conflito humano: use consequential dialogue, opposing goals and a changed relationship.",
+    "Revelação: introduce evidence or an object that changes the interpretation of the scene.",
+  ];
 
   const alternatives = await Promise.all(approaches.map(async (approach, index) => {
     const prompt = buildContinuationPrompt({
       intent: input.intent,
       targetWords,
       approach,
-      literaryContext: `${literaryContext} ${styleContext}`,
+      literaryContext: `${literaryContext} ${styleContext} PLANO NARRATIVO: ${narrativePlans[index % narrativePlans.length]}. Antes de redigir, defina evento, conflito e consequência. Não exiba o plano. Evite explicações genéricas de sentimentos e descrições sem função.`,
       editorialControls: input.editorialControls,
     });
     const requestSample = (instruction: string) => json<{
@@ -465,6 +471,27 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
     } satisfies CoauthorAlternative;
   }));
 
+  // Compare candidates after generation without additional AI calls or manuscript writes.
+  // Warn about substantial shared passages; the editor retains the final choice.
+  const normalizePassage = (value: string) => value.toLocaleLowerCase("pt-BR")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const passageWindows = (value: string): Set<string> => {
+    const words = normalizePassage(value).split(" ").filter(Boolean);
+    const windows = new Set<string>();
+    for (let i = 0; i + 13 <= words.length; i++) windows.add(words.slice(i, i + 13).join(" "));
+    return windows;
+  };
+  const candidateWindows = alternatives.map(item => passageWindows(item.text));
+  for (let i = 0; i < alternatives.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const shared = [...candidateWindows[i]].filter(window => candidateWindows[j].has(window));
+      if (shared.length >= 2) {
+        alternatives[i].warnings.push("Esta amostra compartilha trechos extensos com outra alternativa; revise a diversidade narrativa.");
+        break;
+      }
+    }
+  }
   const usable = alternatives.filter(item => item.text);
   if (!hasCompleteCoauthorSamples(alternatives)) throw new CloudflareApiError("A Cowila não retornou as três amostras completas. Gere novamente para comparar os três caminhos.", { code: "INCOMPLETE_COAUTHOR_RESULT", status: 502 });
   return {
