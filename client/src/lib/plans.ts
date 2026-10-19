@@ -14,6 +14,9 @@ export type PlanInfo = {
   trialEndsAt?: string;
   paidUntil?: string | null;
   features: Record<Feature, boolean>;
+  /** Direitos do catálogo do servidor (chave estável -> liberado). Ausente em servidores antigos. */
+  entitlements?: Record<string, boolean>;
+  catalogVersion?: number;
   cowilaDaily?: number;
   cowilaUsedToday?: number;
 };
@@ -64,6 +67,11 @@ export async function refreshPlan(): Promise<PlanInfo> {
 export async function guardFresh(feature: Feature): Promise<boolean> {
   await refreshPlan();
   return guard(feature);
+}
+
+/** Direito do catálogo (ex.: "export.pdf"). Servidor antigo sem catálogo: não restringe. Direitos locais são só oferta de interface; a imposição real está no servidor. */
+export function hasEntitlement(key: string, plan: PlanInfo = info): boolean {
+  return plan.entitlements ? plan.entitlements[key] !== false : true;
 }
 
 /** true se o plano libera o recurso; senão abre a tela de planos e devolve false. */

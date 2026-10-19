@@ -23,6 +23,48 @@ export const PLAN_DEFS = {
 };
 export const PAID_PLANS = ["economico", "premium", "vip"];
 
+// ===== Catálogo de direitos (versionado) =====
+// Cada direito tem uma chave estável. "source" diz de onde vem hoje a liberação:
+//   always = fundamental, liberado em qualquer plano (inclusive teste encerrado): nunca depende de assinatura;
+//   export / cowila / share = segue a permissão do plano (PLAN_DEFS);
+//   open = hoje não é restringido por plano (comportamento atual, preservado).
+// "enforce" diz QUEM consegue impor: "server" (passa por rota do Worker) ou "client" (roda no navegador: a trava é só oferta de
+// interface e pode ser contornada; não é segurança). Mudar o plano de um direito = mudar a coluna de PLAN_DEFS ou o "source" daqui.
+export const CATALOG_VERSION = 1;
+export const ENTITLEMENT_DEFS = {
+  "editor.basic": { source: "always", enforce: "client" },
+  "book.structure.basic": { source: "always", enforce: "client" },
+  "backup.json": { source: "always", enforce: "client" },
+  "recovery": { source: "always", enforce: "client" },
+  "export.json": { source: "always", enforce: "client" },
+  "export.txt": { source: "export", enforce: "client" },
+  "export.html": { source: "export", enforce: "client" },
+  "export.epub": { source: "export", enforce: "client" },
+  "export.pdf": { source: "export", enforce: "client" },
+  "export.docx": { source: "export", enforce: "client" },
+  "planning.advanced": { source: "open", enforce: "client" },
+  "book.structure.full": { source: "open", enforce: "client" },
+  "audio.read": { source: "open", enforce: "client" },
+  "translate.chapter": { source: "open", enforce: "client" },
+  "translate.book": { source: "open", enforce: "client" },
+  "typeset.advanced": { source: "open", enforce: "client" },
+  "editorial.advanced": { source: "open", enforce: "client" },
+  "cowila.chat": { source: "cowila", enforce: "server" },
+  "cowila.coauthor": { source: "cowila", enforce: "server" },
+  "cowila.continuity": { source: "cowila", enforce: "server" },
+  "sharing.public": { source: "share", enforce: "server" },
+};
+
+/** Direitos concedidos por uma definição de plano: { chave: true|false }. */
+export function entitlementsFor(def) {
+  const out = {};
+  for (const key of Object.keys(ENTITLEMENT_DEFS)) {
+    const source = ENTITLEMENT_DEFS[key].source;
+    out[key] = source === "always" || source === "open" ? true : Boolean(def[source]);
+  }
+  return out;
+}
+
 /** Calcula o plano vigente de uma conta. row = { created_at, plan, paid_until } (ISO). */
 export function resolvePlan(row, now = Date.now()) {
   const created = Date.parse(row?.created_at || "") || now;
@@ -40,6 +82,8 @@ export function resolvePlan(row, now = Date.now()) {
     daysLeft: plan === "trial" ? Math.max(0, Math.ceil((trialEnd - now) / DAY_MS)) : null,
     paidUntil: paidUntil !== null ? new Date(paidUntil).toISOString() : null,
     features: { export: def.export, cowila: def.cowila, share: def.share },
+    entitlements: entitlementsFor(def),
+    catalogVersion: CATALOG_VERSION,
     cowilaDaily: def.cowilaDaily,
   };
 }
@@ -71,11 +115,11 @@ export async function loadAccount(db, email, now = Date.now()) {
   return { info, day, used };
 }
 
-export const planBlocked = (info, feature) => planJson({ error: "plan_required", feature, plan: info.plan, label: info.label, message: info.plan === "expirado" ? "Seu teste de " + TRIAL_DAYS + " dias terminou. Ative um plano para continuar." : "Este recurso não está incluído no seu plano." }, 402);
+export const planBlocked = (info, feature) => planJson({ error: "plan_required", feature, entitlement: { cowila: "cowila.chat", share: "sharing.public" }[feature] || feature, plan: info.plan, label: info.label, message: info.plan === "expirado" ? "Seu teste de " + TRIAL_DAYS + " dias terminou. Ative um plano para continuar." : "Este recurso não está incluído no seu plano." }, 402);
 
 /** Libera (e contabiliza) uma mensagem do Cowila. Devolve null se pode seguir, ou a resposta de bloqueio (402 plano, 429 limite do dia). */
 export async function useCowila(db, email, account) {
-  if (!account.info.features.cowila) return planBlocked(account.info, "cowila");
+  if (!account.info.entitlements["cowila.chat"]) return planBlocked(account.info, "cowila");
   if (account.used >= account.info.cowilaDaily) return planJson({ error: "quota", message: "Limite diário de mensagens do Cowila atingido. Volta amanhã ou fale com o administrador.", limit: account.info.cowilaDaily }, 429);
   await db.prepare("INSERT INTO shak_usage (email, day, cowila) VALUES (?, ?, 1) ON CONFLICT(email, day) DO UPDATE SET cowila = cowila + 1").bind(email, account.day).run();
   return null;
@@ -156,7 +200,7 @@ async function shakGateCore(req, env, u, options = {}) {
   const owners = (env.MIRROR_EMAILS ? String(env.MIRROR_EMAILS).split(",") : MIRROR_EMAILS).map(item => item.trim().toLowerCase());
   if (!jwt) {
     // Sem credencial do Access: mesmo comportamento de antes (o próprio Access impede que isso chegue de fora).
-    if (path === "/api/me") return { response: planJson({ legacy: true, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true } }) };
+    if (path === "/api/me") return { response: planJson({ legacy: true, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION }) };
     if (path.indexOf("/api/security/antivirus") === 0) return { response: await avRoute(req, env, u, "legacy-owner", now) };
     return {};
   }
@@ -169,7 +213,7 @@ async function shakGateCore(req, env, u, options = {}) {
     return { response: await avRoute(req, env, u, email, now) };
   }
   if (owner) {
-    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true } }) };
+    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION }) };
     if (path === "/api/admin/users" && req.method === "GET") {
       await ensurePlanTables(env.DB);
       const rows = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users ORDER BY created_at DESC LIMIT 500").all();
@@ -207,7 +251,7 @@ async function shakGateCore(req, env, u, options = {}) {
     const stop = await useCowila(db, email, account);
     if (stop) return { response: stop };
   }
-  if (path === "/api/share/visibility" && req.method === "POST" && !info.features.share) return { response: planBlocked(info, "share") };
+  if (path === "/api/share/visibility" && req.method === "POST" && !info.entitlements["sharing.public"]) return { response: planBlocked(info, "share") };
   const prefix = "u/" + (await userKey(email)) + "/";
   if (path === "/api/book" && req.method === "POST") {
     const bytes = await storageUsed(db, prefix);

@@ -5,7 +5,7 @@
 // do Worker principal (tabelas shak_users e shak_usage, por e-mail), de modo que o plano vale nos dois endereços.
 // O texto, o cânone e o planejamento chegam no corpo da requisição; este Worker não lê os livros do D1.
 // Este arquivo é montado com plans.js por scripts/build-contingency-ai.mjs antes de publicar.
-import { antivirusApi, loadAccount, useCowila, withGemini } from "./plans.js";
+import { antivirusApi, loadAccount, useCowila, withGemini, entitlementsFor, PLAN_DEFS, CATALOG_VERSION } from "./plans.js";
 
 export const ALLOWED_ORIGINS = ["https://shaksperio.github.io"];
 export const FIREBASE_PROJECT = "shakstory-93bb1";
@@ -131,7 +131,7 @@ export async function handle(req, env, options = {}) {
     if (req.method !== "GET") return reply(origin, { error: "method not allowed" }, 405);
     const who = await verifyFirebaseToken(token, options);
     if (!who) return reply(origin, { error: "Entre com o Google para continuar." }, 401);
-    if (owner(who)) return reply(origin, { email: who, owner: true, plan: "owner", label: "Administrador", features: { export: true, cowila: true, share: true } });
+    if (owner(who)) return reply(origin, { email: who, owner: true, plan: "owner", label: "Administrador", features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION });
     if (!env.DB) return reply(origin, { error: "Planos indisponíveis no momento." }, 503);
     const account = await loadAccount(env.DB, who, options.now ?? Date.now());
     return reply(origin, { email: who, owner: false, ...account.info, cowilaUsedToday: account.used });
