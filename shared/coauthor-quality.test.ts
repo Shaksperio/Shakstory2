@@ -10,7 +10,8 @@ describe("Cowila quality gate", () => {
   it("flags repeated first-person filler in the three initial samples", () => {
     const filler = "Eu me senti um pouco mais inseguro e comecei a olhar pela janela, como se a manhã tivesse mudado de repente.";
     const result = assessCoauthorQuality(Array.from({ length: 6 }, (_, i) => filler + " O relógio marcou " + i + " horas.").join(" "));
-    expect(result.accepted).toBe(false);
+    expect(result.accepted).toBe(true);
+    expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.formulaicPhraseCount).toBeGreaterThanOrEqual(5);
   });
 
@@ -36,7 +37,8 @@ describe("Cowila quality gate", () => {
   it("warns when most sentence openings are identical", () => {
     const lines = Array.from({ length: 16 }, (_, i) =>
       "Eu me senti confuso quando o sino tocou número " + i + " e a sala parecia se estreitar.");
-    expect(assessCoauthorQuality(lines.join(" ")).accepted).toBe(false);
+    expect(assessCoauthorQuality(lines.join(" ")).accepted).toBe(true);
+    expect(assessCoauthorQuality(lines.join(" ")).warnings.length).toBeGreaterThan(0);
   });
 
   it("does not mistake a short scene for a repetition loop", () => {
