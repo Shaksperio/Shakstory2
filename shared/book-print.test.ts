@@ -12,8 +12,10 @@ const book: ExportBook = {
   backMatter: [],
   trimSize: "5x8",
   chapters: [
-    { id: "a", title: "Capitulo Primeiro", content: "Texto ascii um." },
-    { id: "b", title: "Capitulo Segundo", content: "Texto ascii dois." },
+    { id: "a", title: "Alvorada", content: "Texto ascii um." },
+    { id: "b", title: "Crepusculo", content: "Texto ascii dois." },
+    { id: "c", title: "Meia-noite", content: "Texto ascii tres." },
+    { id: "d", title: "Aurora", content: "Texto ascii quatro." },
   ],
 };
 const pdfText = async (extra: Partial<ExportBook>) => Buffer.from(await buildPdf({ ...book, ...extra }).arrayBuffer()).toString("latin1");
@@ -68,25 +70,29 @@ describe("sangria e lombada (produção gráfica)", () => {
     expect(Math.abs(bled - plain - 3 * MM)).toBeLessThan(0.1);
   });
 
-  it("lombada espelhada: páginas ímpares recuam à esquerda, pares não", async () => {
-    const none = await pdfText({});
-    expect(Math.abs(x(none, "Texto ascii um\\.") - x(none, "Texto ascii dois\\."))).toBeLessThan(0.01);
+  it("lombada espelhada: as páginas alternam o recuo interno (ímpares à esquerda, pares sem)", async () => {
+    const lines = ["Texto ascii um\\.", "Texto ascii dois\\.", "Texto ascii tres\\.", "Texto ascii quatro\\."];
+    const spread = (text: string) => { const xs = lines.map(line => x(text, line)); return Math.max(...xs) - Math.min(...xs); };
+    expect(spread(await pdfText({}))).toBeLessThan(0.01);
     const text = await pdfText({ gutterMm: 10 });
-    // página 3 (ímpar) abre o capítulo 1; página 4 (par) abre o capítulo 2
-    expect(Math.abs(x(text, "Texto ascii um\\.") - x(text, "Texto ascii dois\\.") - 10 * MM)).toBeLessThan(0.1);
+    expect(Math.abs(spread(text) - 10 * MM)).toBeLessThan(0.1);
+    const xs = lines.map(line => Math.round(x(text, line) * 10));
+    expect(xs[0]).toBe(xs[2]); // capítulos 1 e 3 caem em páginas de mesma paridade
+    expect(xs[1]).toBe(xs[3]);
+    expect(xs[0]).not.toBe(xs[1]);
   });
 });
 
 describe("cabeçalho corrente", () => {
   const long = (word: string) => Array.from({ length: 160 }, (_, i) => `${word} paragrafo numero ${i} com texto suficiente para ocupar varias linhas da pagina e seguir adiante.`).join("\n\n");
-  const multi: Partial<ExportBook> = { chapters: [{ id: "a", title: "Capitulo Primeiro", content: long("alfa") }, { id: "b", title: "Capitulo Segundo", content: long("beta") }] };
+  const multi: Partial<ExportBook> = { chapters: [{ id: "a", title: "Alvorada", content: long("alfa") }, { id: "b", title: "Crepusculo", content: long("beta") }] };
 
   it("PDF: autor nas páginas pares e título do capítulo nas ímpares, sem cabeçalho na abertura", async () => {
     const off = await pdfText(multi);
     const on = await pdfText({ ...multi, runningHeader: true });
     expect(count(on, "(Autora Exemplo)")).toBeGreaterThan(count(off, "(Autora Exemplo)") + 2);
-    expect(count(on, "(Capitulo Primeiro)")).toBeGreaterThan(count(off, "(Capitulo Primeiro)") + 1);
-    expect(count(on, "(Capitulo Segundo)")).toBeGreaterThan(count(off, "(Capitulo Segundo)") + 1);
+    expect(count(on, "Alvorada)")).toBeGreaterThan(count(off, "Alvorada)") + 1);
+    expect(count(on, "Crepusculo)")).toBeGreaterThan(count(off, "Crepusculo)") + 1);
   });
 
   it("PDF: o texto fixo do cabeçalho só vale sem cabeçalho corrente", async () => {
@@ -98,8 +104,8 @@ describe("cabeçalho corrente", () => {
     const zip = await JSZip.loadAsync(await (await buildDocx({ ...book, runningHeader: true })).arrayBuffer());
     const headers = await Promise.all(Object.keys(zip.files).filter(name => /^word\/header\d+\.xml$/.test(name)).map(name => zip.file(name)!.async("string")));
     const all = headers.join("\n");
-    expect(all).toContain("Capitulo Primeiro");
-    expect(all).toContain("Capitulo Segundo");
+    expect(all).toContain("Alvorada");
+    expect(all).toContain("Crepusculo");
     expect(all).toContain("Autora Exemplo");
     expect(await zip.file("word/settings.xml")!.async("string")).toContain("evenAndOddHeaders");
     expect(await zip.file("word/document.xml")!.async("string")).toContain("titlePg");
