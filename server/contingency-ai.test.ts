@@ -41,6 +41,29 @@ describe("Worker de IA da contingência", () => {
     expect(request?.max_tokens).toBe(1000);
   });
 
+  it("a coautora gera com controle de repetição, semente própria e regras de ofício; outras ações não mudam", async () => {
+    const m = await load();
+    const calls: any[] = [];
+    const env = { AI: { run: async (_n: string, v: any) => { calls.push(v); return { response: "ok" }; } } };
+    const base = { scene: { id: "c", text: "texto" }, book: { title: "L" }, prompt: "continue" };
+    await m.assist({ ...base, action: "continue_scene", literaryProfile: { role: "coauthor", task: "continue_scene" } }, env);
+    await m.assist({ ...base, action: "continue_scene", literaryProfile: { role: "coauthor", task: "continue_scene" } }, env);
+    await m.assist({ ...base, action: "continue_scene", literaryProfile: { role: "coauthor", phase: "expand_selected_sample" } }, env);
+    await m.assist({ ...base, action: "literary_review", literaryProfile: { role: "reviewer" } }, env);
+    const [a, b, expand, review] = calls;
+    expect(a.frequency_penalty).toBeGreaterThan(0);
+    expect(a.presence_penalty).toBeGreaterThan(0);
+    expect(a.temperature).toBeGreaterThanOrEqual(0.8);
+    expect(a.temperature).toBeLessThanOrEqual(1);
+    expect(Number.isInteger(a.seed)).toBe(true);
+    expect(a.seed).not.toBe(b.seed);
+    expect(a.messages[0].content).toContain("não use as fórmulas");
+    expect(expand.frequency_penalty).toBeGreaterThan(0);
+    expect(review.frequency_penalty).toBeUndefined();
+    expect(review.temperature).toBeUndefined();
+    expect(review.messages[0].content).not.toContain("não use as fórmulas");
+  });
+
   it("só aceita ID token do Firebase válido (e-mail verificado)", async () => {
     const m = await load();
     const { token, opts } = setup();
