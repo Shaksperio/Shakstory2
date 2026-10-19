@@ -6,6 +6,7 @@ export type CoauthorQuality = {
   repeatedParagraphCount: number;
   repeatedBlockCount: number;
   repetitiveOpeningRatio: number;
+  formulaicPhraseCount: number;
 };
 const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase("pt-BR")
   .replace(/[^\w\s\u00C0-\u024F\u1E00-\u1EFF]/g, " ").replace(/\s+/g, " ").trim();
@@ -29,11 +30,19 @@ export function assessCoauthorQuality(text: string): CoauthorQuality {
   for (const s of openings) openerCounts.set(s, (openerCounts.get(s) ?? 0) + 1);
   const repeatedOpenings = Array.from(openerCounts.values()).reduce((n, c) => Math.max(n, c), 0);
   const repetitiveOpeningRatio = openings.length ? repeatedOpenings / openings.length : 0;
+  const phrases = [
+    /\beu me senti\b/gi, /\bcomecei a\b/gi, /\bum pouco mais\b/gi,
+    /\bparecia (?:ser|estar|que)\b/gi, /\bolhar curioso\b/gi,
+  ];
+  const formulaicPhraseCount = phrases.reduce((n, pattern) => n + (text.match(pattern)?.length ?? 0), 0);
+  const wordCount = normalize(text).split(" ").filter(Boolean).length;
   const reasons: string[] = [];
+  if (wordCount >= 100 && formulaicPhraseCount >= 5 && formulaicPhraseCount / wordCount > 0.017)
+    reasons.push("A proposta repete construções formulaicas em excesso.");
   // Reject only obvious degeneration, not intentional rhetorical repetition.
   if (repeatedBlockCount >= 2 || (substantial.length >= 6 && repeatedParagraphCount >= 3))
     reasons.push("A continuação repete blocos inteiros de parágrafos.");
   if (sentences.length >= 12 && repetitiveOpeningRatio > 0.55)
     reasons.push("A continuação repete excessivamente o início das frases.");
-  return { accepted: reasons.length === 0, reasons, repeatedParagraphCount, repeatedBlockCount, repetitiveOpeningRatio };
+  return { accepted: reasons.length === 0, reasons, repeatedParagraphCount, repeatedBlockCount, repetitiveOpeningRatio, formulaicPhraseCount };
 }
