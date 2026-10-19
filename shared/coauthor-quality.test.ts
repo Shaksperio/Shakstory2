@@ -10,8 +10,8 @@ describe("Cowila quality gate", () => {
   it("flags repeated first-person filler in the three initial samples", () => {
     const filler = "Eu me senti um pouco mais inseguro e comecei a olhar pela janela, como se a manhã tivesse mudado de repente.";
     const result = assessCoauthorQuality(Array.from({ length: 6 }, (_, i) => filler + " O relógio marcou " + i + " horas.").join(" "));
-    expect(result.accepted).toBe(true);
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.accepted).toBe(false);
+    expect(result.reasons.length).toBeGreaterThan(0);
     expect(result.formulaicPhraseCount).toBeGreaterThanOrEqual(5);
   });
 
@@ -37,8 +37,32 @@ describe("Cowila quality gate", () => {
   it("warns when most sentence openings are identical", () => {
     const lines = Array.from({ length: 16 }, (_, i) =>
       "Eu me senti confuso quando o sino tocou número " + i + " e a sala parecia se estreitar.");
-    expect(assessCoauthorQuality(lines.join(" ")).accepted).toBe(true);
+    expect(assessCoauthorQuality(lines.join(" ")).accepted).toBe(false);
     expect(assessCoauthorQuality(lines.join(" ")).warnings.length).toBeGreaterThan(0);
+  });
+
+  it("rejects three repetitions of eu me senti even when endings differ", () => {
+    const paragraph = [
+      "Eu me senti um pouco mais forte quando vi a janela aberta e a bolsa esquecida na cadeira.",
+      "O portão rangeu, e a vizinha atravessou a rua carregando uma caixa de ferramentas.",
+      "Eu me senti um pouco mais confiante ao tocar a fechadura que havia resistido antes.",
+      "Uma carta chegou com a notícia da viagem e um endereço escrito às pressas.",
+      "Eu me senti um pouco mais aliviado quando as luzes acenderam no andar de cima.",
+      "Na cozinha, alguém deixou o rádio ligado, anunciando a chegada da tempestade.",
+    ].join(" ");
+    expect(assessCoauthorQuality(paragraph).accepted).toBe(false);
+  });
+
+  it("rejects repeated entire sentences even with different surrounding paragraphs", () => {
+    const repeated = "A janela se abriu lentamente e o vento derrubou os papéis sobre a mesa.";
+    const result = assessCoauthorQuality([
+      repeated, "O carteiro atravessou o pátio levando a carta que todos esperavam.",
+      repeated, "O rádio anunciou a chegada do último trem da noite.",
+      repeated, "Um pássaro pousou no corrimão quando o portão enfim se fechou.",
+      "A mulher guardou a chave e decidiu procurar seu irmão na estação.",
+    ].join(" "));
+    expect(result.accepted).toBe(false);
+    expect(result.repeatedSentenceCount).toBeGreaterThanOrEqual(2);
   });
 
   it("does not mistake a short scene for a repetition loop", () => {
