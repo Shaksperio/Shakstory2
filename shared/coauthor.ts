@@ -1,3 +1,4 @@
+import { COWILA_EDITORIAL_CRAFT, COWILA_CONTINUITY_CHECK } from "./cowila-editorial-craft";
 export type CoauthorApproach = {
   id: string;
   label: string;
@@ -112,6 +113,7 @@ export function buildContinuationPrompt(input: {
     `Tamanho de amostra: aproximadamente ${targetWords} palavras, suficiente para mostrar evento, tom e consequência.`,
     `Caminho desta amostra: ${input.approach.label}. ${input.approach.instruction}`,
     input.literaryContext ? `Contexto editorial: ${input.literaryContext}` : "",
+    COWILA_EDITORIAL_CRAFT,
     "Regras da amostra:",
     "- escreva cena de verdade, não resumo, sinopse ou explicação do que aconteceria;",
     "- mostre um caminho dramático claro que possa ser expandido depois;",
@@ -153,6 +155,11 @@ export function buildExpansionPrompt(input: {
     input.literaryContext ? `Contexto editorial: ${input.literaryContext}` : "",
     targetRule,
     `Referência de capítulo para ${range.label}: ${range.minWords.toLocaleString("pt-BR")}–${range.maxWords.toLocaleString("pt-BR")} palavras; alvo típico ${range.targetWords.toLocaleString("pt-BR")} (${range.origin === "derived" ? "faixa derivada" : "faixa consolidada de fontes"}). Use isso para calibrar o ritmo do capítulo, não para forçar o tamanho desta continuação.`,
+    "PLANO DE PROGRESSÃO CAUSAL (execute mentalmente; não exiba um plano):",
+    "- identifique o estado da cena antes de escrever; escolha até três acontecimentos novos e ordene causa → ação → consequência;",
+    "- mantenha inventário de fatos irreversíveis: depois que a porta abriu, ela não pode ser aberta novamente sem nova justificativa;",
+    "- cada bloco precisa acrescentar informação, decisão, ação ou consequência; não retorne ao mesmo diálogo sem mudança objetiva;",
+    "- se não houver acontecimentos suficientes para a extensão solicitada, encerre a cena organicamente em vez de repetir ou alongar artificialmente;",
     "EXPANSÃO SEM ENCHIMENTO:",
     "- inclua ao menos uma mudança real de situação: algo se revela, se perde, se decide, se rompe ou se complica;",
     "- inclua interioridade do personagem de ponto de vista quando o contexto permitir;",
@@ -183,6 +190,8 @@ export function buildExpansionPrompt(input: {
     "- parágrafos e frases variados;",
     "- pelo menos uma mudança dramática real;",
     "- fecho que sustenta a próxima entrada.",
+    COWILA_EDITORIAL_CRAFT,
+    COWILA_CONTINUITY_CHECK,
     "FORMATO: responda somente com a continuação expandida, sem OPÇÃO, sem prefácio, sem lista, sem explicar o que fez.",
   ].filter(Boolean).join("\n");
 }
