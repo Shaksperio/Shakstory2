@@ -1122,7 +1122,7 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
       creator: book.author,
       description: book.description,
       features: { updateFields: true },
-      evenAndOddHeaderFooters: Boolean(book.runningHeader),
+      evenAndOddHeaderAndFooters: Boolean(book.runningHeader),
       styles: {
         default: {
           document: {
