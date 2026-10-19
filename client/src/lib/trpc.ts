@@ -1,3 +1,4 @@
+import { assessCoauthorQuality } from "@shared/coauthor-quality";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
 import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, hasCompleteCoauthorSamples, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
@@ -403,14 +404,14 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
       approach,
       literaryContext: `${literaryContext} ${styleContext}`,
     });
-    const result = await json<{
+    const requestSample = (instruction: string) => json<{
       proposal?: string;
       canonWarnings?: string[];
     }>("/api/assist", {
       method: "POST",
       body: JSON.stringify({
         action: "continue_scene",
-        prompt,
+        prompt: instruction,
         literaryProfile: {
           genre: input.genre,
           subgenre: input.subgenre,
@@ -426,11 +427,22 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
         history,
       }),
     });
+    const initial = await requestSample(prompt);
+    const initialText = String(initial.proposal ?? "").trim();
+    const firstAssessment = assessCoauthorQuality(initialText);
+    // A single bounded retry for one rejected sample; never silently insert generated text.
+    const retried = initialText && !firstAssessment.accepted
+      ? await requestSample(prompt + "\nREVISÃO OBRIGATÓRIA: a tentativa anterior apresentou " + firstAssessment.reasons.join("; ") + ". Reescreva a cena do zero com acontecimentos novos, verbos precisos e diálogo consequente. Não reproduza nem parafraseie blocos repetidos. Se faltar material, prefira uma amostra mais breve e coerente.")
+      : null;
+    const result = retried ?? initial;
+    const finalText = String(result.proposal ?? "").trim();
+    const quality = assessCoauthorQuality(finalText);
+    if (finalText && !quality.accepted) throw new CloudflareApiError("A Cowila não conseguiu criar a amostra " + approach.label + " sem repetições excessivas. Nenhum texto foi aplicado; tente novamente com uma indicação mais específica do próximo acontecimento.", { code: "COAUTHOR_QUALITY_REJECTED", status: 502 });
     return {
       id: `${approach.id}-${index + 1}`,
       label: approach.label,
       approach: approach.instruction,
-      text: String(result.proposal ?? "").trim(),
+      text: finalText,
       warnings: Array.isArray(result.canonWarnings) ? result.canonWarnings : [],
     } satisfies CoauthorAlternative;
   }));
