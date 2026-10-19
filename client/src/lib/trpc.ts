@@ -485,7 +485,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
   const candidateWindows = alternatives.map(item => passageWindows(item.text));
   for (let i = 0; i < alternatives.length; i++) {
     for (let j = 0; j < i; j++) {
-      const shared = [...candidateWindows[i]].filter(window => candidateWindows[j].has(window));
+      const shared = Array.from(candidateWindows[i]).filter(window => candidateWindows[j].has(window));
       if (shared.length >= 2) {
         alternatives[i].warnings.push("Esta amostra compartilha trechos extensos com outra alternativa; revise a diversidade narrativa.");
         break;
