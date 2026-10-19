@@ -7,6 +7,18 @@ const next = "O relógio na parede começou a marcar treze horas, e a visitante 
 const beat = "Atrás dela havia um corredor comprido. A porta do elevador abriu e dois estranhos entraram apressados.";
 
 describe("Cowila quality gate", () => {
+  it("flags repeated first-person filler in the three initial samples", () => {
+    const filler = "Eu me senti um pouco mais inseguro e comecei a olhar pela janela, como se a manhã tivesse mudado de repente.";
+    const result = assessCoauthorQuality(Array.from({ length: 6 }, (_, i) => filler + " O relógio marcou " + i + " horas.").join(" "));
+    expect(result.accepted).toBe(false);
+    expect(result.formulaicPhraseCount).toBeGreaterThanOrEqual(5);
+  });
+
+  it("permits an isolated first-person emotion inside varied narration", () => {
+    const scene = "Eu me senti aliviado quando o trem parou. A mulher abriu a caixa que trazia sob o casaco e colocou a chave sobre a mesa. O bilhete tinha o nome da minha irmã. Ao longe, o maquinista anunciou a última estação. A escolha agora era minha: descer ou seguir para a fronteira.";
+    expect(assessCoauthorQuality(scene).accepted).toBe(true);
+  });
+
   it("rejects the repeated door-dialogue cycle", () => {
     const output = [door, question, next, beat, door, question, next, beat, door, question, next, beat].join("\n\n");
     const result = assessCoauthorQuality(output);
