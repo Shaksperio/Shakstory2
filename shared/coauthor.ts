@@ -1,3 +1,4 @@
+import { buildEditorialControlsPrompt, type EditorialControls } from "./editorial-controls";
 import { COWILA_EDITORIAL_CRAFT, COWILA_CONTINUITY_CHECK } from "./cowila-editorial-craft";
 export type CoauthorApproach = {
   id: string;
@@ -102,6 +103,7 @@ export function buildContinuationPrompt(input: {
   targetWords?: number;
   approach: CoauthorApproach;
   literaryContext?: string;
+  editorialControls?: Partial<EditorialControls>;
 }): string {
   const targetWords = clampSampleWords(input.targetWords ?? 180);
   const intent = input.intent?.trim();
@@ -113,6 +115,7 @@ export function buildContinuationPrompt(input: {
     `Tamanho de amostra: aproximadamente ${targetWords} palavras, suficiente para mostrar evento, tom e consequência.`,
     `Caminho desta amostra: ${input.approach.label}. ${input.approach.instruction}`,
     input.literaryContext ? `Contexto editorial: ${input.literaryContext}` : "",
+    buildEditorialControlsPrompt(input.editorialControls),
     COWILA_EDITORIAL_CRAFT,
     "Regras da amostra:",
     "- escreva cena de verdade, não resumo, sinopse ou explicação do que aconteceria;",
@@ -137,6 +140,7 @@ export function buildExpansionPrompt(input: {
   subgenre?: string | null;
   literaryContext?: string;
   requestedWords?: number;
+  editorialControls?: Partial<EditorialControls>;
 }): string {
   const range = resolveGenreChapterRange(input.genre, input.subgenre);
   const requested = input.requestedWords && Number.isFinite(input.requestedWords)
@@ -156,6 +160,7 @@ export function buildExpansionPrompt(input: {
     input.intent?.trim() ? `Intenção original do autor: ${input.intent.trim()}` : "",
     input.literaryContext ? `Contexto editorial: ${input.literaryContext}` : "",
     targetRule,
+    buildEditorialControlsPrompt(input.editorialControls),
     `Referência de capítulo para ${range.label}: ${range.minWords.toLocaleString("pt-BR")}–${range.maxWords.toLocaleString("pt-BR")} palavras; alvo típico ${range.targetWords.toLocaleString("pt-BR")} (${range.origin === "derived" ? "faixa derivada" : "faixa consolidada de fontes"}). Use isso para calibrar o ritmo do capítulo, não para forçar o tamanho desta continuação.`,
     "PLANO DE PROGRESSÃO CAUSAL (execute mentalmente; não exiba um plano):",
     "- identifique o estado da cena antes de escrever; escolha até três acontecimentos novos e ordene causa → ação → consequência;",
