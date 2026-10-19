@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { CONTINGENCY } from "@/lib/contingency";
+import { daysUntil } from "@/lib/billing";
+import { PlanPurchase } from "./PlanPurchase";
+import { BillingAdmin } from "./BillingAdmin";
 import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
@@ -21,6 +24,13 @@ export function PlanBanner() {
       <span>Seu teste de 7 dias terminou. Você ainda pode escrever e baixar o backup, mas exportação e Cowila estão bloqueados.</span>
       <Button size="sm" className="h-7 text-xs" onClick={openPlans}>Ativar um plano</Button></p></div>;
   }
+  // Plano pago perto do fim: aviso dentro do app aos 30, 7 e 1 dia (renovação é manual).
+  const left = daysUntil(info.paidUntil);
+  if (!info.owner && left !== null && left > 0 && left <= 30) {
+    return <div className="border-b border-primary/20 bg-primary/5"><p role="status" className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-5 py-1.5 text-xs">
+      <span>Seu plano {info.label} vence em {left === 1 ? "1 dia" : `${left} dias`}. A renovação é feita por novo pagamento.</span>
+      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openPlans}>Renovar</Button></p></div>;
+  }
   return null;
 }
 
@@ -36,8 +46,9 @@ export function PlansDialog() {
         <h2 className="font-serif text-2xl">Planos do Shakstory</h2>
         <p className="mt-1 text-sm text-muted-foreground">{state.reason ? `${FEATURE_LABEL[state.reason]} não está incluído no seu plano atual (${info.label}).` : `Seu plano atual: ${info.label}.`}</p></div>
         <Button size="sm" variant="ghost" aria-label="Fechar planos" onClick={closePlans}>✕</Button></div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => <section key={card.id} className="rounded-xl border border-border p-3 text-sm"><h3 className="font-semibold">{card.label}</h3><p className="text-xs">{PLAN_PRICES[card.id] ? `${PLAN_PRICES[card.id]} / mês` : "Valor: consulte o administrador"}</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(f => <li key={f}>{f}</li>)}</ul></section>)}</div>
-      <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois do pagamento.</p>
+      {CONTINGENCY || info.owner ? <><div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => <section key={card.id} className="rounded-xl border border-border p-3 text-sm"><h3 className="font-semibold">{card.label}</h3><p className="text-xs">{PLAN_PRICES[card.id] ? `${PLAN_PRICES[card.id]} / mês` : "Valor: consulte o administrador"}</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(f => <li key={f}>{f}</li>)}</ul></section>)}</div></> : <PlanPurchase />}
+      {CONTINGENCY && <p className="mt-3 text-xs text-muted-foreground">A assinatura é feita pelo endereço principal do Shakstory.</p>}
+      <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
     </div></div>;
 }
@@ -68,5 +79,6 @@ function AdminPanel({ onClose }: { onClose: () => void }) {
         <span><strong>{user.email}</strong><br /><span className="text-xs text-muted-foreground">{user.label}{user.daysLeft !== null && user.plan === "trial" ? ` · ${user.daysLeft} dia(s)` : ""}{user.paidUntil && user.plan !== "trial" && user.plan !== "expirado" ? ` · até ${new Date(user.paidUntil).toLocaleDateString("pt-BR")}` : ""} · desde {new Date(user.createdAt).toLocaleDateString("pt-BR")}</span></span>
         <span className="flex gap-1">{(["economico", "premium", "vip"] as const).map(id => <Button key={id} size="sm" variant={user.plan === id ? "default" : "outline"} className="h-7 text-xs" onClick={() => void apply(user.email, id)}>{id === "economico" ? "Econ." : id === "premium" ? "Prem." : "VIP"}</Button>)}</span></li>)}
         {users.length === 0 && <li className="py-3 text-xs text-muted-foreground">Nenhuma conta de usuário ainda.</li>}</ul>
+      <BillingAdmin />
     </div></div>;
 }
