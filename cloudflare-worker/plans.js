@@ -296,6 +296,8 @@ async function shakGateCore(req, env, u, options = {}) {
     return { response: await avRoute(req, env, u, email, now) };
   }
   if (owner) {
+    if (path.indexOf("/api/billing/") === 0) return { response: planJson({ error: "owner_has_full_access" }, 400) };
+    if (path === "/api/admin/billing" || path === "/api/admin/offer" || path.indexOf("/api/admin/purchase/") === 0) return { response: await shakBillingAdmin(env.DB, email, path, req, now) };
     // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
     if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
     if (path === "/api/assist" && req.method === "POST") await shakBumpMeter(env.DB, now, { ai: 1 });
@@ -316,7 +318,14 @@ async function shakGateCore(req, env, u, options = {}) {
       await ensurePlanTables(env.DB);
       const stamp = new Date(now).toISOString();
       await env.DB.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(target, stamp).run();
-      if (PAID_PLANS.indexOf(plan) !== -1) await env.DB.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(plan, new Date(now + days * DAY_MS).toISOString(), target).run();
+      if (PAID_PLANS.indexOf(plan) !== -1) {
+        // cortesia/ajuste do administrador: se o mesmo plano ainda está vigente, os dias somam ao vencimento atual (nunca encurtam o que já foi pago)
+        const before = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(target).first();
+        const current = resolvePlan(before, now);
+        const base = current.plan === plan && current.paidUntil && Date.parse(current.paidUntil) > now ? Date.parse(current.paidUntil) : now;
+        await env.DB.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(plan, new Date(base + days * DAY_MS).toISOString(), target).run();
+        await shakEnsureBilling(env.DB); await shakAudit(env.DB, now, email, "plan.courtesy", { target, plan, days });
+      }
       else if (plan === "trial") await env.DB.prepare("UPDATE shak_users SET plan = NULL, paid_until = NULL, created_at = ? WHERE email = ?").bind(stamp, target).run();
       else await env.DB.prepare("UPDATE shak_users SET plan = NULL, paid_until = NULL, created_at = ? WHERE email = ?").bind(new Date(now - (TRIAL_DAYS + 1) * DAY_MS).toISOString(), target).run();
       const row = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(target).first();
@@ -332,6 +341,7 @@ async function shakGateCore(req, env, u, options = {}) {
 
   if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
+  if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now) };
 
   if (path === "/api/assist" && req.method === "POST") {
     // Cowila é o único recurso acessório recusado pelo guardião; escrever e ler manuscritos nunca é.
@@ -351,6 +361,178 @@ async function shakGateCore(req, env, u, options = {}) {
     await shakBumpMeter(db, now, { writes: 1, bytes: write.bytes });
   }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
+}
+
+// ===== Cobrança manual (Ton): ofertas, pedidos, confirmação pelo administrador, períodos e auditoria =====
+// Nada aqui ativa plano por conta própria: voltar do checkout ou clicar em "Já paguei" só pede conferência. Quem ativa é o administrador,
+// com o ID único da transação vista no painel da Ton. Nenhum dado de cartão, CPF ou comprovante é guardado.
+export const BILLING_NOTICE = "Você será redirecionado para a página de pagamento seguro da Ton. Informe na Ton o mesmo endereço de e-mail cadastrado no Shakstory. Ele será usado para facilitar a identificação da compra. Seu plano será ativado após a conferência do pagamento recebido. O pagamento corresponde a 12 meses de acesso; a renovação será feita por novo pagamento ao final do período.";
+export const BILLING_OPEN = ["pending", "awaiting_review", "needs_review"];
+const BILLING_MAX_PER_DAY = 5;
+
+let shakBillingReady = false;
+async function shakEnsureBilling(db) {
+  if (shakBillingReady) return;
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_offers (plan TEXT PRIMARY KEY, price_cents INTEGER NOT NULL, currency TEXT NOT NULL, checkout_url TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_purchases (id TEXT PRIMARY KEY, email TEXT NOT NULL, plan TEXT NOT NULL, price_cents INTEGER NOT NULL, currency TEXT NOT NULL, offer_version INTEGER NOT NULL, provider TEXT NOT NULL DEFAULT 'ton', status TEXT NOT NULL, created_at TEXT NOT NULL, claimed_at TEXT, reviewed_at TEXT, tx_id TEXT, note TEXT)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_payments (provider TEXT NOT NULL, tx_id TEXT NOT NULL, purchase_id TEXT NOT NULL, email TEXT NOT NULL, plan TEXT NOT NULL, amount_cents INTEGER NOT NULL, currency TEXT NOT NULL, confirmed_at TEXT NOT NULL, confirmed_by TEXT NOT NULL, PRIMARY KEY (provider, tx_id))").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_periods (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, plan TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, purchase_id TEXT NOT NULL UNIQUE, source TEXT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, detail TEXT)").run();
+  shakBillingReady = true;
+}
+
+/** Soma meses de calendário (31/jan + 1 mês = 28 ou 29/fev). */
+export function shakAddMonths(ms, months) {
+  const date = new Date(ms);
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, last));
+  return date.getTime();
+}
+
+const shakAudit = (db, now, actor, action, detail) => db.prepare("INSERT INTO shak_audit (at, actor, action, detail) VALUES (?, ?, ?, ?)").bind(new Date(now).toISOString(), actor, action, JSON.stringify(detail || {})).run().catch(() => {});
+async function shakBody(req) { try { const value = await req.json(); return value && typeof value === "object" ? value : null; } catch { return null; } }
+const shakPurchaseView = row => ({ id: row.id, plan: row.plan, label: PLAN_DEFS[row.plan]?.label || row.plan, priceCents: row.price_cents, currency: row.currency, status: row.status, createdAt: row.created_at, claimedAt: row.claimed_at || null, confirmedAt: row.status === "confirmed" ? row.reviewed_at : null });
+const shakOfferView = (row, withUrl) => ({ plan: row.plan, label: PLAN_DEFS[row.plan]?.label || row.plan, priceCents: row.price_cents, currency: row.currency, version: row.version, ...(withUrl ? { checkoutUrl: row.checkout_url, updatedAt: row.updated_at } : {}) });
+
+/** Rotas do assinante: /api/billing/offers, /purchase, /claim, /cancel. A URL do checkout só sai do servidor ao criar o pedido, nunca vem do cliente. */
+async function shakBilling(db, email, path, req, info, now) {
+  await shakEnsureBilling(db);
+  if (path === "/api/billing/offers" && req.method === "GET") {
+    const offers = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1);
+    const mine = ((await db.prepare("SELECT * FROM shak_purchases WHERE email = ? ORDER BY created_at DESC LIMIT 20").bind(email).all()).results || []);
+    return planJson({ email, notice: BILLING_NOTICE, current: { plan: info.plan, label: info.label, paidUntil: info.paidUntil }, offers: PAID_PLANS.map(plan => { const row = offers.find(o => o.plan === plan); return row ? { ...shakOfferView(row, false), available: true } : { plan, label: PLAN_DEFS[plan].label, available: false }; }), purchases: mine.map(shakPurchaseView) });
+  }
+  if (req.method !== "POST") return planJson({ error: "not_found" }, 404);
+  const body = await shakBody(req);
+  if (!body) return planJson({ error: "invalid" }, 400);
+
+  if (path === "/api/billing/purchase") {
+    const plan = String(body.plan || "");
+    if (PAID_PLANS.indexOf(plan) === -1) return planJson({ error: "invalid_plan" }, 400);
+    const offer = await db.prepare("SELECT * FROM shak_offers WHERE plan = ?").bind(plan).first();
+    if (!offer) return planJson({ error: "offer_unavailable", message: "Este plano ainda não está disponível para compra. Fale com o administrador." }, 409);
+    let purchase = await db.prepare("SELECT * FROM shak_purchases WHERE email = ? AND plan = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").bind(email, plan).first();
+    // pedido pendente com preço/versão antigos não é reaproveitado: o valor cobrado tem de ser o da oferta vigente
+    if (purchase && (purchase.offer_version !== offer.version || purchase.price_cents !== offer.price_cents || purchase.currency !== offer.currency)) purchase = null;
+    if (!purchase) {
+      const since = new Date(now - DAY_MS).toISOString();
+      const count = Number((await db.prepare("SELECT COUNT(*) AS n FROM shak_purchases WHERE email = ? AND created_at >= ?").bind(email, since).first())?.n || 0);
+      if (count >= BILLING_MAX_PER_DAY) return planJson({ error: "too_many", message: "Muitos pedidos hoje. Tente novamente amanhã ou fale com o administrador." }, 429);
+      const id = crypto.randomUUID();
+      await db.prepare("INSERT INTO shak_purchases (id, email, plan, price_cents, currency, offer_version, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'ton', 'pending', ?)").bind(id, email, plan, offer.price_cents, offer.currency, offer.version, new Date(now).toISOString()).run();
+      purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(id).first();
+      await shakAudit(db, now, email, "purchase.create", { id, plan });
+    }
+    return planJson({ purchase: shakPurchaseView(purchase), checkoutUrl: offer.checkout_url, email, notice: BILLING_NOTICE });
+  }
+
+  if (path === "/api/billing/claim" || path === "/api/billing/cancel") {
+    const purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(String(body.id || "")).first();
+    if (!purchase || purchase.email !== email) return planJson({ error: "not_found" }, 404); // pedido de outra conta é indistinguível de inexistente
+    const claim = path === "/api/billing/claim";
+    if (claim && purchase.status === "awaiting_review") return planJson({ purchase: shakPurchaseView(purchase) });
+    if (purchase.status !== "pending") return planJson({ error: "invalid_state", status: purchase.status }, 409);
+    const status = claim ? "awaiting_review" : "canceled";
+    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind(status, claim ? new Date(now).toISOString() : null, null, null, null, purchase.id).run();
+    await shakAudit(db, now, email, claim ? "purchase.claim" : "purchase.cancel", { id: purchase.id });
+    return planJson({ purchase: shakPurchaseView({ ...purchase, status, claimed_at: claim ? new Date(now).toISOString() : purchase.claimed_at }) });
+  }
+  return planJson({ error: "not_found" }, 404);
+}
+
+/** Rotas do administrador (só o dono chega aqui): painel, ofertas, confirmação e revisão de pedidos. */
+async function shakBillingAdmin(db, admin, path, req, now) {
+  await shakEnsureBilling(db);
+  if (path === "/api/admin/billing" && req.method === "GET") {
+    const offers = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).map(row => shakOfferView(row, true));
+    const open = ((await db.prepare("SELECT * FROM shak_purchases WHERE status IN ('pending','awaiting_review','needs_review') ORDER BY created_at DESC LIMIT 200").all()).results || []);
+    const recent = ((await db.prepare("SELECT * FROM shak_purchases ORDER BY created_at DESC LIMIT 50").all()).results || []);
+    const payments = ((await db.prepare("SELECT * FROM shak_payments ORDER BY confirmed_at DESC LIMIT 50").all()).results || []);
+    return planJson({ offers, open: open.map(row => ({ ...shakPurchaseView(row), email: row.email, note: row.note || null })), recent: recent.map(row => ({ ...shakPurchaseView(row), email: row.email })), payments: payments.map(row => ({ provider: row.provider, txId: row.tx_id, purchaseId: row.purchase_id, email: row.email, plan: row.plan, amountCents: row.amount_cents, currency: row.currency, confirmedAt: row.confirmed_at })) });
+  }
+  if (req.method !== "POST") return planJson({ error: "not_found" }, 404);
+  const body = await shakBody(req);
+  if (!body) return planJson({ error: "invalid" }, 400);
+
+  if (path === "/api/admin/offer") {
+    const plan = String(body.plan || "");
+    const cents = Number(body.priceCents);
+    const currency = String(body.currency || "BRL").toUpperCase();
+    let url;
+    try { url = new URL(String(body.checkoutUrl || "")); } catch { url = null; }
+    if (PAID_PLANS.indexOf(plan) === -1) return planJson({ error: "invalid_plan" }, 400);
+    if (!Number.isInteger(cents) || cents <= 0 || cents > 100000000) return planJson({ error: "invalid_price" }, 400);
+    if (currency !== "BRL") return planJson({ error: "invalid_currency" }, 400);
+    if (!url || url.protocol !== "https:" || !/(^|\.)ton\.com\.br$/.test(url.hostname)) return planJson({ error: "invalid_url", message: "O link de pagamento deve ser https e do domínio da Ton." }, 400);
+    await db.prepare("INSERT INTO shak_offers (plan, price_cents, currency, checkout_url, version, updated_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(plan) DO UPDATE SET price_cents = excluded.price_cents, currency = excluded.currency, checkout_url = excluded.checkout_url, version = shak_offers.version + 1, updated_at = excluded.updated_at").bind(plan, cents, currency, url.toString(), new Date(now).toISOString()).run();
+    await shakAudit(db, now, admin, "offer.set", { plan, cents, currency });
+    return planJson({ ok: true, offer: shakOfferView(await db.prepare("SELECT * FROM shak_offers WHERE plan = ?").bind(plan).first(), true) });
+  }
+
+  if (path === "/api/admin/purchase/status") {
+    const status = String(body.status || "");
+    if (["needs_review", "rejected"].indexOf(status) === -1) return planJson({ error: "invalid_status" }, 400);
+    const purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(String(body.id || "")).first();
+    if (!purchase) return planJson({ error: "not_found" }, 404);
+    if (purchase.status === "confirmed") return planJson({ error: "already_confirmed" }, 409);
+    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind(status, null, new Date(now).toISOString(), null, String(body.note || "").slice(0, 300) || null, purchase.id).run();
+    await shakAudit(db, now, admin, "purchase." + status, { id: purchase.id });
+    return planJson({ ok: true });
+  }
+
+  if (path === "/api/admin/purchase/confirm") {
+    const purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(String(body.id || "")).first();
+    if (!purchase) return planJson({ error: "not_found" }, 404);
+    const txId = String(body.txId || "").trim();
+    if (!/^[A-Za-z0-9._:-]{4,100}$/.test(txId)) return planJson({ error: "invalid_tx", message: "Informe o ID único da transação da Ton." }, 400);
+    const periodOf = async () => await db.prepare("SELECT * FROM shak_periods WHERE purchase_id = ?").bind(purchase.id).first();
+    const existing = await db.prepare("SELECT * FROM shak_payments WHERE provider = ? AND tx_id = ?").bind("ton", txId).first();
+    if (existing) {
+      // a mesma confirmação repetida é inofensiva; a mesma transação em outro pedido nunca libera um segundo período
+      if (existing.purchase_id === purchase.id) { const period = await periodOf(); return planJson({ ok: true, idempotent: true, endsAt: period?.ends_at || null }); }
+      return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada em outro pedido." }, 409);
+    }
+    if (purchase.status === "confirmed") return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado com outra transação." }, 409);
+    if (["canceled", "rejected"].indexOf(purchase.status) !== -1) return planJson({ error: "invalid_state", status: purchase.status }, 409);
+    const review = async (error, message) => {
+      await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("needs_review", null, new Date(now).toISOString(), null, error, purchase.id).run();
+      await shakAudit(db, now, admin, "purchase.needs_review", { id: purchase.id, reason: error });
+      return planJson({ error, message, status: "needs_review" }, 409);
+    };
+    if (Number(body.amountCents) !== purchase.price_cents || String(body.currency || "").toUpperCase() !== purchase.currency) return await review("amount_mismatch", "Valor ou moeda diferentes do pedido: o pedido foi para revisão e nada foi ativado.");
+    await ensurePlanTables(db);
+    await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(purchase.email, new Date(now).toISOString()).run();
+    const row = await db.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(purchase.email).first();
+    const active = resolvePlan(row, now);
+    const samePlan = active.plan === purchase.plan && active.paidUntil && Date.parse(active.paidUntil) > now;
+    const otherPaid = PAID_PLANS.indexOf(active.plan) !== -1 && active.plan !== purchase.plan;
+    if (otherPaid && body.mode !== "replace") return await review("plan_change", "A conta tem outro plano pago vigente. Confirme com mode \"replace\" para começar agora, ou trate a troca manualmente.");
+    // pagar o mesmo plano antes do vencimento acumula: nunca encurta dias já pagos
+    const start = samePlan ? Date.parse(active.paidUntil) : now;
+    const end = shakAddMonths(start, 12);
+    try {
+      await db.prepare("INSERT INTO shak_payments (provider, tx_id, purchase_id, email, plan, amount_cents, currency, confirmed_at, confirmed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("ton", txId, purchase.id, purchase.email, purchase.plan, purchase.price_cents, purchase.currency, new Date(now).toISOString(), admin).run();
+    } catch (error) {
+      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada." }, 409);
+      throw error;
+    }
+    try {
+      await db.prepare("INSERT INTO shak_periods (email, plan, starts_at, ends_at, purchase_id, source) VALUES (?, ?, ?, ?, ?, 'payment')").bind(purchase.email, purchase.plan, new Date(start).toISOString(), new Date(end).toISOString(), purchase.id).run();
+    } catch (error) {
+      // outro administrador confirmou o mesmo pedido ao mesmo tempo com outra transação: desfaz esta e não duplica o período
+      await db.prepare("DELETE FROM shak_payments WHERE provider = ? AND tx_id = ?").bind("ton", txId).run();
+      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado." }, 409);
+      throw error;
+    }
+    await db.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(purchase.plan, new Date(end).toISOString(), purchase.email).run();
+    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("confirmed", null, new Date(now).toISOString(), txId, null, purchase.id).run();
+    await shakAudit(db, now, admin, "purchase.confirm", { id: purchase.id, plan: purchase.plan, txId, endsAt: new Date(end).toISOString() });
+    return planJson({ ok: true, plan: purchase.plan, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() });
+  }
+  return planJson({ error: "not_found" }, 404);
 }
 
 // ===== Segurança antivírus: credenciais efêmeras por sessão (só hash e prefixo ficam guardados) =====
