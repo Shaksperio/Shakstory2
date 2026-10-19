@@ -60,7 +60,9 @@ export type ExportBook = {
   publicationDate?: string;
   layout?: "classic" | "compact";
   typography?: TypographyPreset;
-  trimSize?: "a5" | "6x9" | "a4";
+  trimSize?: TrimSize;
+  /** Só vale com trimSize "custom": medidas da página em milímetros. */
+  customTrim?: CustomTrim;
   marginPreset?: "narrow" | "normal" | "wide";
   dropCap?: boolean;
   coverImageUrl?: string;
@@ -122,6 +124,50 @@ type Preset = {
   docLine?: number;
   pdfLine?: number;
 };
+export type TrimSize = "a4" | "a5" | "6x9" | "5x8" | "5.25x8" | "5.5x8.5" | "custom";
+export type CustomTrim = { widthMm: number; heightMm: number };
+export const TRIM_SIZES: ReadonlyArray<{ id: TrimSize; label: string }> = [
+  { id: "a4", label: "A4" },
+  { id: "a5", label: "A5" },
+  { id: "6x9", label: "6 × 9 pol." },
+  { id: "5x8", label: "5 × 8 pol." },
+  { id: "5.25x8", label: "5,25 × 8 pol." },
+  { id: "5.5x8.5", label: "5,5 × 8,5 pol." },
+  { id: "custom", label: "Personalizado (mm)" },
+];
+export const CUSTOM_TRIM_LIMITS = { minWidthMm: 90, maxWidthMm: 300, minHeightMm: 120, maxHeightMm: 400 } as const;
+
+/** Medidas válidas do formato personalizado (limitadas e arredondadas a 0,1 mm); undefined se faltar ou for inválido. */
+export function clampCustomTrim(value?: Partial<CustomTrim> | null): CustomTrim | undefined {
+  const width = Number(value?.widthMm);
+  const height = Number(value?.heightMm);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return undefined;
+  const limit = (n: number, min: number, max: number) => Math.round(Math.min(max, Math.max(min, n)) * 10) / 10;
+  return { widthMm: limit(width, CUSTOM_TRIM_LIMITS.minWidthMm, CUSTOM_TRIM_LIMITS.maxWidthMm), heightMm: limit(height, CUSTOM_TRIM_LIMITS.minHeightMm, CUSTOM_TRIM_LIMITS.maxHeightMm) };
+}
+
+const IN = 72;
+const MM = 72 / 25.4;
+export type TrimDimensions = { id: TrimSize; widthPt: number; heightPt: number; widthTwips: number; heightTwips: number; css: string; pdfFormat: "a4" | "a5" | [number, number] };
+
+/** Única fonte das medidas da página, usada por PDF, DOCX e HTML/impressão (A4, A5 e 6×9 mantêm os valores de sempre). */
+export function trimDimensions(book: { trimSize?: string; customTrim?: Partial<CustomTrim> | null }): TrimDimensions {
+  const inches = (id: TrimSize, w: number, h: number): TrimDimensions => ({ id, widthPt: w * IN, heightPt: h * IN, widthTwips: Math.round(w * 1440), heightTwips: Math.round(h * 1440), css: `${w}in ${h}in`, pdfFormat: [w * IN, h * IN] });
+  switch (book.trimSize) {
+    case "a5": return { id: "a5", widthPt: 419.53, heightPt: 595.28, widthTwips: 8391, heightTwips: 11906, css: "A5", pdfFormat: "a5" };
+    case "6x9": return { ...inches("6x9", 6, 9), css: "6in 9in" };
+    case "5x8": return inches("5x8", 5, 8);
+    case "5.25x8": return inches("5.25x8", 5.25, 8);
+    case "5.5x8.5": return inches("5.5x8.5", 5.5, 8.5);
+    case "custom": {
+      const custom = clampCustomTrim(book.customTrim);
+      if (custom) return { id: "custom", widthPt: custom.widthMm * MM, heightPt: custom.heightMm * MM, widthTwips: Math.round(custom.widthMm * 1440 / 25.4), heightTwips: Math.round(custom.heightMm * 1440 / 25.4), css: `${custom.widthMm}mm ${custom.heightMm}mm`, pdfFormat: [custom.widthMm * MM, custom.heightMm * MM] };
+      break;
+    }
+  }
+  return { id: "a4", widthPt: 595.28, heightPt: 841.89, widthTwips: 11906, heightTwips: 16838, css: "A4", pdfFormat: "a4" };
+}
+
 export const TYPOGRAPHY_PRESETS: Record<TypographyPreset, Preset> = {
   reedsy: {
     label: "Shakstory · leitura confortável",
@@ -470,7 +516,7 @@ export function buildPrintHtml(book: ExportBook): string {
         `<article id="chapter-${index + 1}" class="chapter"><h1>${escapeHtml(chapter.title)}</h1>${richMarkup(chapter)}</article>`
     )
     .join("");
-  return `<!doctype html><html lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"${exportLabels(book.languageCode).dir ? ` dir="rtl"` : ""}><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700;900&display=swap" /><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1,h2{font-family:${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc{padding-top:2em}.toc h2{font-size:1.6em;margin:0 0 1.6em;letter-spacing:.02em}.toc li{margin:.7em 0}.toc a{color:inherit;text-decoration:none;display:flex;align-items:baseline;gap:.4em}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}${paragraphCss(preset, compact, true)}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${book.trimSize === "a5" ? "A5" : book.trimSize === "6x9" ? "6in 9in" : "A4"};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc,.cover{background:white;padding:${bodyMargin};margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh;box-sizing:border-box}.cover{padding:24px}.cover img{max-height:65vh;width:auto;max-width:100%}.toc a::after{content:"";flex:1;order:2;border-bottom:1px dotted #999;transform:translateY(-.2em)}.toc a{flex-wrap:nowrap}.toc a>span{order:1}.toc .pg{order:3;font-weight:400;font-variant-numeric:tabular-nums}}@media print{body{margin:0;max-width:none}.toc .pg{display:none}.toc a{display:flex}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup(tocEntries(book), exportLabels(book.languageCode).contents)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}<script>document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest('a[href^="#"]');if(!a)return;var t=document.getElementById(a.getAttribute("href").slice(1));if(t){e.preventDefault();t.scrollIntoView({behavior:"smooth",block:"start"})}});</script></body></html>`;
+  return `<!doctype html><html lang="${escapeXml(book.languageCode ?? book.language ?? "pt-BR")}"${exportLabels(book.languageCode).dir ? ` dir="rtl"` : ""}><head><meta charset="utf-8" /><title>${escapeHtml(book.title)}</title><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gelasio:ital,wght@0,400;0,700;1,400&family=Lato:wght@400;700;900&display=swap" /><style>body{font-family:${preset.webFont};max-width:${compact ? "860px" : "720px"};margin:${bodyMargin} auto;line-height:${preset.lineHeight};font-size:${preset.bodySize}px;color:#222}header,footer{font-size:.7em;color:#666;text-align:center;position:fixed;width:100%;left:0}header{top:12px}footer{bottom:12px}.cover{text-align:center;min-height:70vh;display:grid;place-items:center;break-after:page}.cover img{max-width:100%;max-height:70vh;object-fit:contain}.cover-placeholder{height:70vh;display:grid;place-items:center;break-after:page;background:${preset.accent};color:white;font-size:28px}.cover-placeholder span{font-family:Georgia,serif}.frontmatter{text-align:center;break-after:page}.frontmatter h1{font-size:2.2em;font-weight:${preset.titleWeight}}h1,h2{font-family:${preset.headingFont ?? preset.webFont}}h1{text-align:center;font-weight:${preset.titleWeight};margin:${compact ? "48px" : "80px"} 0 32px}.toc{break-after:page}.toc h2{text-align:center}.toc ol{list-style:none;padding:0}.toc{padding-top:2em}.toc h2{font-size:1.6em;margin:0 0 1.6em;letter-spacing:.02em}.toc li{margin:.7em 0}.toc a{color:inherit;text-decoration:none;display:flex;align-items:baseline;gap:.4em}.front-matter p{text-indent:0;font-size:.85em;line-height:1.55}.chapter h1{font-size:1.8em;max-width:85%;margin:3em auto 2em}.chapter,.front-matter,.back-matter{break-before:page}img{max-width:100%;height:auto}${paragraphCss(preset, compact, true)}${dropCap}@page{@bottom-center{content:counter(page);font-size:9pt}size:${trimDimensions(book).css};margin:24mm}@media screen{body{background:#f2f0ec;padding:24px}.chapter,.front-matter,.back-matter,.frontmatter,.toc,.cover{background:white;padding:${bodyMargin};margin:24px 0;box-shadow:0 4px 24px #0000000d;min-height:70vh;box-sizing:border-box}.cover{padding:24px}.cover img{max-height:65vh;width:auto;max-width:100%}.toc a::after{content:"";flex:1;order:2;border-bottom:1px dotted #999;transform:translateY(-.2em)}.toc a{flex-wrap:nowrap}.toc a>span{order:1}.toc .pg{order:3;font-weight:400;font-variant-numeric:tabular-nums}}@media print{body{margin:0;max-width:none}.toc .pg{display:none}.toc a{display:flex}.toc a::after{content:leader(dotted) target-counter(attr(href),page)}}</style></head><body>${coverMarkup(book)}<section class="frontmatter"><h1>${escapeHtml(book.title)}</h1>${book.subtitle ? `<p>${escapeHtml(book.subtitle)}</p>` : ""}<p>${escapeHtml(book.author ?? "")}</p></section>${sectionMarkup(book.frontMatter, "front-matter")}${book.includeToc === false ? "" : tocMarkup(tocEntries(book), exportLabels(book.languageCode).contents)}${chapters}${sectionMarkup(book.backMatter, "back-matter")}${book.headerText ? `<header>${escapeHtml(book.headerText)}</header>` : ""}${book.footerText ? `<footer>${escapeHtml(book.footerText)}</footer>` : ""}<script>document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest('a[href^="#"]');if(!a)return;var t=document.getElementById(a.getAttribute("href").slice(1));if(t){e.preventDefault();t.scrollIntoView({behavior:"smooth",block:"start"})}});</script></body></html>`;
 }
 
 export async function buildEpub(book: ExportBook): Promise<Blob> {
@@ -552,8 +598,7 @@ export async function loadPdfFonts(): Promise<void> {
 export function buildPdf(book: ExportBook): Blob {
   book = normalizeExportBook(book);
   const preset = presetFor(book);
-  const pdfFormat =
-    book.trimSize === "a5" ? "a5" : book.trimSize === "6x9" ? [432, 648] : "a4";
+  const pdfFormat = trimDimensions(book).pdfFormat;
   const pdf = new jsPDF({
     unit: "pt",
     format: pdfFormat,
@@ -977,12 +1022,7 @@ export async function buildDocx(book: ExportBook): Promise<Blob> {
   const pageProperties = (first: boolean) => ({
     type: first ? undefined : SectionType.NEXT_PAGE,
     page: {
-      size:
-        book.trimSize === "a5"
-          ? { width: 8391, height: 11906 }
-          : book.trimSize === "6x9"
-            ? { width: 8640, height: 12960 }
-            : { width: 11906, height: 16838 },
+      size: { width: trimDimensions(book).widthTwips, height: trimDimensions(book).heightTwips },
       margin: {
         top: docMargin,
         right: docMargin,

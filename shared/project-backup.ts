@@ -246,7 +246,8 @@ const bookSchema = z
             "children",
           ])
           .optional(),
-        trimSize: z.enum(["a5", "6x9", "a4"]).optional(),
+        trimSize: z.enum(["a5", "6x9", "a4", "5x8", "5.25x8", "5.5x8.5", "custom"]).optional(),
+        customTrim: z.object({ widthMm: z.number().min(90).max(300), heightMm: z.number().min(120).max(400) }).optional(),
         marginPreset: z.enum(["narrow", "normal", "wide"]).optional(),
         dropCap: z.boolean().optional(),
         headerText: z.string().optional(),
