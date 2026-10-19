@@ -36,13 +36,15 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   const [sdkFailed, setSdkFailed] = useState(false);
   const [error, setError] = useState("");
   const [lastAt, setLastAt] = useState<number | undefined>();
+  /** Maior numeração de edição já enviada com sucesso (para o estado "sincronização concluída" não confirmar alterações mais novas). */
+  const [syncedSeq, setSyncedSeq] = useState(0);
   const [remoteEmpty, setRemoteEmpty] = useState<boolean | null>(null);
   const userRef = useRef<MirrorUser | null>(null);
   const lastPush = useRef(0);
   const timer = useRef<number | undefined>(undefined);
-  const latest = useRef<LibraryLike | undefined>(undefined);
+  const latest = useRef<{ library: LibraryLike; seq?: number } | undefined>(undefined);
   const syncing = useRef(false);
-  const again = useRef<LibraryLike | undefined>(undefined);
+  const again = useRef<{ library: LibraryLike; seq?: number } | undefined>(undefined);
   userRef.current = user;
 
   useEffect(() => {
@@ -62,10 +64,10 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   }, []);
 
   /** Lê o espelho, mescla com a biblioteca daqui e grava o resultado. Se o espelho trouxe algo novo, avisa quem chamou. */
-  const sync = useCallback(async (library: LibraryLike): Promise<boolean> => {
+  const sync = useCallback(async (library: LibraryLike, seq?: number): Promise<boolean> => {
     const who = userRef.current;
     if (!who || !navigator.onLine) return false;
-    if (syncing.current) { again.current = library; return false; }
+    if (syncing.current) { again.current = { library, seq }; return false; }
     syncing.current = true;
     setBusy(true);
     let ok = false;
@@ -75,6 +77,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       setLastAt(lastPush.current);
       setRemoteEmpty(result.stamp === null);
       setError("");
+      if (seq !== undefined) setSyncedSeq(current => Math.max(current, seq));
       ok = true;
       if (result.changedLocal) onMerged?.()?.(result.doc, result.report);
     } catch (failure) { setError(explain(failure)); }
@@ -82,30 +85,30 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       syncing.current = false; setBusy(false);
       // uma alteração chegou durante o envio: manda a versão mais nova em seguida
       const next = again.current; again.current = undefined;
-      if (next && ok) void sync(next);
+      if (next && ok) void sync(next.library, next.seq);
     }
     return ok;
   }, []);
 
   /** Chamado depois que o D1 confirmou. Respeita o intervalo mínimo e guarda a versão mais recente para o fim da espera. */
-  const requestPush = useCallback((library: LibraryLike) => {
+  const requestPush = useCallback((library: LibraryLike, seq?: number) => {
     if (!userRef.current) return;
-    latest.current = library;
+    latest.current = { library, seq };
     const wait = lastPush.current + MIN_INTERVAL - Date.now();
-    if (wait <= 0) { void sync(library); return; }
+    if (wait <= 0) { void sync(library, seq); return; }
     if (timer.current !== undefined) return;
     timer.current = window.setTimeout(() => {
       timer.current = undefined;
-      if (latest.current) void sync(latest.current);
+      if (latest.current) void sync(latest.current.library, latest.current.seq);
     }, wait);
   }, [sync]);
 
-  const connect = useCallback(async (library?: LibraryLike) => {
+  const connect = useCallback(async (library?: LibraryLike, seq?: number) => {
     setBusy(true); setError("");
     try {
       const who = await signInMirror();
       flag("1"); setUser(who); userRef.current = who;
-      if (library) { syncing.current = false; await sync(library); }
+      if (library) { syncing.current = false; await sync(library, seq); }
     } catch (failure) { setError(explain(failure)); }
     finally { setBusy(false); }
   }, [sync]);
@@ -125,5 +128,5 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     finally { setBusy(false); }
   }, []);
 
-  return { user, busy, ready, sdkFailed, error, lastAt, remoteEmpty, connect, disconnect, requestPush, sync, restore };
+  return { user, busy, ready, sdkFailed, error, lastAt, syncedSeq, remoteEmpty, connect, disconnect, requestPush, sync, restore };
 }
