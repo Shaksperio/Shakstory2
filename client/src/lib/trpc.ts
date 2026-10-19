@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { buildCowilaLiteraryContext, type LiteraryRole, type LiteraryTask } from "@shared/literary-intelligence";
 import { buildContinuationPrompt, buildExpansionPrompt, clampAlternativeCount, clampContinuationWords, hasCompleteCoauthorSamples, pickApproaches, type CoauthorAlternative } from "@shared/coauthor";
 import { buildStyleDnaPrompt } from "@shared/style-dna";
+import type { EditorialControls } from "@shared/editorial-controls";
 import { buildContinuityPrompt } from "@shared/continuity-radar";
 import { CONTINGENCY } from "./contingency";
 import { mirrorIdToken } from "./mirror/firebase";
@@ -74,6 +75,7 @@ type LiteraryInput = {
   planning?: unknown;
   story?: unknown;
   styleSample?: string;
+  editorialControls?: Partial<EditorialControls>;
 };
 
 type LiterarySuggestion = {
@@ -111,6 +113,7 @@ type CoauthorInput = {
   planning?: unknown;
   story?: unknown;
   styleSample?: string;
+  editorialControls?: Partial<EditorialControls>;
 };
 
 type CoauthorResult = {
@@ -139,6 +142,7 @@ type CoauthorExpansionInput = {
   planning?: unknown;
   story?: unknown;
   styleSample?: string;
+  editorialControls?: Partial<EditorialControls>;
 };
 
 type CoauthorExpansionResult = {
@@ -403,6 +407,7 @@ const generateCoauthorAlternatives = async (input: CoauthorInput): Promise<Coaut
       targetWords,
       approach,
       literaryContext: `${literaryContext} ${styleContext}`,
+      editorialControls: input.editorialControls,
     });
     const requestSample = (instruction: string) => json<{
       proposal?: string;
@@ -484,6 +489,7 @@ const expandSelectedCoauthorAlternative = async (input: CoauthorExpansionInput):
     subgenre: input.subgenre,
     literaryContext: `${literaryContext} ${styleContext}`,
     requestedWords: input.requestedWords,
+    editorialControls: input.editorialControls,
   });
 
   const result = await json<{
