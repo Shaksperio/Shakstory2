@@ -3,6 +3,7 @@
 export type CoauthorQuality = {
   accepted: boolean;
   reasons: string[];
+  warnings: string[];
   repeatedParagraphCount: number;
   repeatedBlockCount: number;
   repetitiveOpeningRatio: number;
@@ -37,12 +38,13 @@ export function assessCoauthorQuality(text: string): CoauthorQuality {
   const formulaicPhraseCount = phrases.reduce((n, pattern) => n + (text.match(pattern)?.length ?? 0), 0);
   const wordCount = normalize(text).split(" ").filter(Boolean).length;
   const reasons: string[] = [];
+  const warnings: string[] = [];
   if (wordCount >= 100 && formulaicPhraseCount >= 5 && formulaicPhraseCount / wordCount > 0.017)
-    reasons.push("A proposta repete construções formulaicas em excesso.");
+    warnings.push("Há construções formulaicas repetidas; revise a variação e a naturalidade.");
   // Reject only obvious degeneration, not intentional rhetorical repetition.
   if (repeatedBlockCount >= 2 || (substantial.length >= 6 && repeatedParagraphCount >= 3))
     reasons.push("A continuação repete blocos inteiros de parágrafos.");
   if (sentences.length >= 12 && repetitiveOpeningRatio > 0.55)
-    reasons.push("A continuação repete excessivamente o início das frases.");
-  return { accepted: reasons.length === 0, reasons, repeatedParagraphCount, repeatedBlockCount, repetitiveOpeningRatio, formulaicPhraseCount };
+    warnings.push("Há inícios de frase excessivamente semelhantes.");
+  return { accepted: reasons.length === 0, reasons, warnings, repeatedParagraphCount, repeatedBlockCount, repetitiveOpeningRatio, formulaicPhraseCount };
 }

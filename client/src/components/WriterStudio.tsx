@@ -1098,7 +1098,8 @@ export function LiteraryAssistant({
             <Badge variant="outline" className="text-[9px]">{assessCoauthorQuality(alternative.text).accepted ? "Amostra" : "Revisão necessária"}</Badge>
           </div>
           <p className="mt-3 max-h-64 overflow-y-auto whitespace-pre-wrap font-serif text-[13px] leading-6">{alternative.text}</p>
-          {!assessCoauthorQuality(alternative.text).accepted && <p role="alert" className="mt-2 text-xs text-destructive">Esta amostra contém repetição excessiva. Gere novas alternativas.</p>}
+          {!assessCoauthorQuality(alternative.text).accepted && <p role="alert" className="mt-2 text-xs text-destructive">Esta amostra contém blocos duplicados e não pode ser escolhida. As outras opções continuam disponíveis.</p>}
+          {assessCoauthorQuality(alternative.text).warnings.length > 0 && <p className="mt-2 text-xs text-amber-600">{assessCoauthorQuality(alternative.text).warnings.join(" ")}</p>}
           <Button className="mt-3 w-full" size="sm" variant="outline" disabled={coauthorExpansionLoading || !assessCoauthorQuality(alternative.text).accepted} onClick={() => { setSelectedSampleId(alternative.id); onChoose(alternative, intent); }}>
             <ChevronRight className="mr-2 h-3.5 w-3.5" />{coauthorExpansionLoading && selectedSampleId === alternative.id ? "Expandindo este caminho…" : "Escolher este caminho"}
           </Button>
