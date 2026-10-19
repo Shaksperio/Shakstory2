@@ -54,7 +54,8 @@ describe("compra de plano", () => {
     fireEvent.click(screen.getByText("Já paguei"));
     await waitFor(() => expect(screen.getByText(/Pedido enviado para conferência/)).toBeTruthy());
     expect(calls.some(call => call.url === "/api/billing/claim" && call.body.id === "p1")).toBe(true);
-    expect(screen.getByText(/não ativa o plano|O plano é ativado depois/)).toBeTruthy();
+    expect(screen.getByText(/O plano é ativado depois que o pagamento for confirmado/)).toBeTruthy();
+    expect(screen.getByText(/não ativa o plano: o administrador confere/)).toBeTruthy();
   });
 
   it("sem servidor de compra, orienta a usar o pedido por e-mail e não quebra", async () => {
