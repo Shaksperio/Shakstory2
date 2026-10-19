@@ -108,13 +108,14 @@ describe("cabeçalho corrente", () => {
     expect(all).toContain("Crepusculo");
     expect(all).toContain("Autora Exemplo");
     expect(await zip.file("word/settings.xml")!.async("string")).toContain("evenAndOddHeaders");
+    expect(await zip.file("word/settings.xml")!.async("string")).not.toMatch(/evenAndOddHeaders[^>]*w:val="(false|0)"/);
     expect(await zip.file("word/document.xml")!.async("string")).toContain("titlePg");
   });
 
   it("DOCX: sem a opção nada muda", async () => {
     const zip = await JSZip.loadAsync(await (await buildDocx({ ...book })).arrayBuffer());
     expect(await zip.file("word/document.xml")!.async("string")).not.toContain("titlePg");
-    expect(await zip.file("word/settings.xml")!.async("string")).not.toContain("evenAndOddHeaders");
+    expect(await zip.file("word/settings.xml")!.async("string")).toMatch(/evenAndOddHeaders[^>]*w:val="(false|0)"|^(?:(?!evenAndOddHeaders)[\s\S])*$/);
   });
 });
 
