@@ -492,14 +492,14 @@ const expandSelectedCoauthorAlternative = async (input: CoauthorExpansionInput):
     editorialControls: input.editorialControls,
   });
 
-  const result = await json<{
+  const requestExpansion = (instruction: string) => json<{
     proposal?: string;
     canonWarnings?: string[];
   }>("/api/assist", {
     method: "POST",
     body: JSON.stringify({
       action: "continue_scene",
-      prompt,
+      prompt: instruction,
       literaryProfile: {
         genre: input.genre,
         subgenre: input.subgenre,
@@ -517,13 +517,28 @@ const expandSelectedCoauthorAlternative = async (input: CoauthorExpansionInput):
       selectedAlternative: input.selectedAlternative,
     }),
   });
-
+  const initial = await requestExpansion(prompt);
+  const firstText = String(initial.proposal ?? "").trim();
+  const initialQuality = assessCoauthorQuality(firstText);
+  const revised = firstText && !initialQuality.accepted
+    ? await requestExpansion(prompt + "\nCORREÇÃO EDITORIAL OBRIGATÓRIA: a primeira geração foi reprovada por " +
+      initialQuality.reasons.join("; ") +
+      ". Redija uma nova continuação do zero, mantendo fatos, POV e caminho escolhido. Substitua vícios de linguagem por ações, percepções e consequências específicas; não repita frases, aberturas nem cenas.")
+    : null;
+  const result = revised ?? initial;
   const text = String(result.proposal ?? "").trim();
   if (!text) {
     throw new CloudflareApiError("A Cowila não retornou a expansão da opção escolhida.", {
       code: "EMPTY_COAUTHOR_EXPANSION",
       status: 502,
     });
+  }
+  const finalQuality = assessCoauthorQuality(text);
+  if (!finalQuality.accepted) {
+    throw new CloudflareApiError(
+      "A Cowila recusou a continuação por repetição de frases ou vícios de linguagem. Nenhum texto foi aplicado. Tente gerar novamente ou use um trecho de contexto menor.",
+      { code: "COAUTHOR_QUALITY_REJECTED", status: 422 },
+    );
   }
 
   return {
