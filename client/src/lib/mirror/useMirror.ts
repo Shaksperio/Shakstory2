@@ -47,6 +47,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   const timer = useRef<number | undefined>(undefined);
   const latest = useRef<{ library: LibraryLike; seq?: number } | undefined>(undefined);
   const syncing = useRef(false);
+  const pendingWrite = useRef<Promise<unknown>>(Promise.resolve());
   const again = useRef<{ library: LibraryLike; seq?: number } | undefined>(undefined);
   userRef.current = user;
 
@@ -75,11 +76,14 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     setBusy(true);
     let ok = false;
     try {
+      await pendingWrite.current;
+      if (userRef.current?.uid !== who.uid) throw new Error("SYNC_ACCOUNT_CHANGED");
       const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
+      await pendingWrite.current;
       const pending = await readPendingMirror(getKv(), who);
-      if (pending && stableStringify(pending.library) === stableStringify(library)) {
-        await clearPendingMirror(getKv(), who);
-        latest.current = undefined;
+      if (pending?.revision && stableStringify(pending.library) === stableStringify(library)) {
+        await clearPendingMirror(getKv(), who, pending.revision);
+        if (latest.current && stableStringify(latest.current.library) === stableStringify(library)) latest.current = undefined;
       }
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
@@ -98,7 +102,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       syncing.current = false; setBusy(false);
       // uma alteração chegou durante o envio: manda a versão mais nova em seguida
       const next = again.current; again.current = undefined;
-      if (next && ok) void sync(next.library, next.seq);
+      if (next && userRef.current?.uid === who.uid) void sync(next.library, next.seq);
     }
     return ok;
   }, []);
@@ -108,7 +112,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     if (!userRef.current) return;
     latest.current = { library, seq };
     const who = userRef.current;
-    if (who) void savePendingMirror(getKv(), who, library, seq).catch(() => {
+    if (who) pendingWrite.current = pendingWrite.current.catch(() => {}).then(() => savePendingMirror(getKv(), who, library, seq)).catch(() => {
       setError("Não foi possível guardar a fila de sincronização no IndexedDB.");
     });
     const wait = lastPush.current + MIN_INTERVAL - Date.now();
@@ -156,6 +160,10 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
 
   const disconnect = useCallback(async () => {
     flag("0");
+    if (timer.current !== undefined) window.clearTimeout(timer.current);
+    timer.current = undefined;
+    latest.current = undefined;
+    again.current = undefined;
     try { await signOutMirror(); } catch { /* já desconectado */ }
     setUser(null); userRef.current = null;
   }, []);
