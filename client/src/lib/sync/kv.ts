@@ -14,6 +14,8 @@ export interface KV {
   keys(store: StoreName): Promise<string[]>;
   /** Várias gravações na mesma transação: ou entram todas, ou nenhuma. */
   batch(writes: KvWrite[]): Promise<void>;
+  /** Compare and remove in one atomic transaction. */
+  removeIfRevision(store: StoreName, key: string, revision: string): Promise<boolean>;
 }
 
 const clone = <T>(value: T): T => (value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T));
@@ -25,6 +27,12 @@ export class MemoryKV implements KV {
   async put(store: StoreName, key: string, value: unknown) { this.bucket(store)[key] = clone(value); }
   async remove(store: StoreName, key: string) { delete this.bucket(store)[key]; }
   async keys(store: StoreName) { return Object.keys(this.bucket(store)).sort(); }
+  async removeIfRevision(store: StoreName, key: string, revision: string) {
+    const current = this.bucket(store)[key] as { revision?: string } | undefined;
+    if (current?.revision !== revision) return false;
+    delete this.bucket(store)[key];
+    return true;
+  }
   async batch(writes: KvWrite[]) {
     writes.forEach(write => { if (write.remove) delete this.bucket(write.store)[write.key]; else this.bucket(write.store)[write.key] = clone(write.value); });
   }
@@ -76,4 +84,21 @@ export class IdbKV implements KV {
       writes.forEach(write => { const store = tx.objectStore(write.store); if (write.remove) store.delete(write.key); else store.put(write.value, write.key); });
     });
   }
+  async removeIfRevision(store: StoreName, key: string, revision: string): Promise<boolean> {
+    const db = await this.db();
+    return new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction([store], "readwrite");
+      const bucket = tx.objectStore(store);
+      let removed = false;
+      const request = bucket.get(key);
+      request.onsuccess = () => {
+        const current = request.result as { revision?: string } | undefined;
+        if (current?.revision === revision) { bucket.delete(key); removed = true; }
+      };
+      tx.oncomplete = () => resolve(removed);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error("Transação cancelada"));
+    });
+  }
+
 }
