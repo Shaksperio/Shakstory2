@@ -35,6 +35,9 @@ export async function syncLibrary(args: { kv: KV; transport: Transport; local: L
     const remote = await transport.read(LIBRARY_PATH);
     const remoteDoc = remote.data as LibraryLike | null;
     if (!remoteDoc || !Array.isArray(remoteDoc.books)) {
+      if (local.books.length === 0 && (base?.books?.length ?? 0) > 0) {
+        throw new Error("Sincronização suspensa: biblioteca remota indisponível e cópia local vazia. Nenhum livro foi apagado.");
+      }
       const written = await transport.write({ path: LIBRARY_PATH, data: local as unknown as Record<string, unknown> });
       await rememberSynced(kv, local, written.sha);
       return { doc: local, sha: written.sha, wrote: true, report: total };
@@ -43,6 +46,11 @@ export async function syncLibrary(args: { kv: KV; transport: Transport; local: L
     total.conflictCopies += report.conflictCopies;
     total.booksMerged += report.booksMerged;
     total.booksKept += report.booksKept;
+    // Fail closed: never accept an unexpected full-library deletion from a sync merge.
+    // Explicit deletion must use a separately confirmed, audited operation.
+    if (doc.books.length === 0 && (local.books.length > 0 || remoteDoc.books.length > 0 || (base?.books?.length ?? 0) > 0)) {
+      throw new Error("Sincronização suspensa: mesclagem resultaria em biblioteca vazia. Preserve as cópias locais e remotas.");
+    }
     if (stableStringify(doc) === stableStringify(remoteDoc)) {
       await rememberSynced(kv, remoteDoc, remote.sha);
       return { doc: remoteDoc, sha: remote.sha, wrote: false, report: total };
