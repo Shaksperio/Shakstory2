@@ -1,0 +1,52 @@
+name: Publish Shakstory frontend to Cloudflare asset branch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cloudflare-assets-publish
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VITE_BASE: /
+      VITE_CONTINGENCY: "0"
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_OAUTH_CLIENT_ID: ci-test-client
+      GITHUB_OAUTH_CLIENT_SECRET: ci-test-secret
+      GITHUB_WEBHOOK_SECRET: ci-test-webhook-secret
+      JWT_SECRET: ci-test-jwt-secret-for-unit-tests-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: turbo
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: corepack prepare pnpm@10.4.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Validate and build principal frontend
+        run: pnpm exec vite build
+      - name: Publish static files without touching Worker or databases
+        run: |
+          set -euo pipefail
+          test -s dist/public/index.html
+          grep -q '/assets/' dist/public/index.html
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git worktree add /tmp/shakstory-dist cloudflare-dist-v2
+          cp -a dist/public/. /tmp/shakstory-dist/
+          cd /tmp/shakstory-dist
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "deploy(frontend): native account center from turbo"
+            git push origin HEAD:cloudflare-dist-v2
+          fi
