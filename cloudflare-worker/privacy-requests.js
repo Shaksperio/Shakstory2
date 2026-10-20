@@ -21,9 +21,9 @@ export async function handlePrivacyRequest(request, env, verifiedOwnerId) {
         (body.details != null && (typeof body.details !== "string" || body.details.length > 1500))) {
       return json({ error: "Solicitação inválida" }, 400);
     }
-    const existing = await env.DB.prepare("SELECT id, status FROM privacy_requests WHERE owner_id = ? AND idempotency_key = ?")
+    const existing = await env.DB.prepare("SELECT id, status, kind, details FROM privacy_requests WHERE owner_id = ? AND idempotency_key = ?")
       .bind(verifiedOwnerId, body.idempotencyKey).first();
-    if (existing) return json({ protocol: existing.id, status: existing.status });
+    if (existing) { if (existing.kind !== body.kind || (existing.details || "") !== (body.details?.trim() || "")) return json({ error: "Chave já utilizada para outro pedido" }, 409); return json({ protocol: existing.id, status: existing.status }); }
     const protocol = "LGPD-" + crypto.randomUUID();
     try {
       await env.DB.prepare("INSERT INTO privacy_requests (id, owner_id, kind, details, status, idempotency_key) VALUES (?, ?, ?, ?, 'received', ?)")
@@ -31,7 +31,7 @@ export async function handlePrivacyRequest(request, env, verifiedOwnerId) {
     } catch {
       const retry = await env.DB.prepare("SELECT id, status FROM privacy_requests WHERE owner_id = ? AND idempotency_key = ?")
         .bind(verifiedOwnerId, body.idempotencyKey).first();
-      if (retry) return json({ protocol: retry.id, status: retry.status });
+      if (retry) { if (retry.kind !== body.kind || (retry.details || "") !== (body.details?.trim() || "")) return json({ error: "Chave já utilizada para outro pedido" }, 409); return json({ protocol: retry.id, status: retry.status }); }
       return json({ error: "Não foi possível registrar o pedido" }, 503);
     }
     return json({ protocol, status: "received" }, 201);
@@ -42,8 +42,8 @@ export async function handlePrivacyRequest(request, env, verifiedOwnerId) {
     return json({ requests: rows.results || [] });
   }
   if (url.pathname.startsWith(base + "/") && request.method === "GET") {
-    const protocol = decodeURIComponent(url.pathname.slice(base.length + 1));
-    if (protocol.length > 64 || !protocol.startsWith("LGPD-")) return json({ error: "Não encontrado" }, 404);
+    const protocol = url.pathname.slice(base.length + 1);
+    if (!/^LGPD-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(protocol)) return json({ error: "Não encontrado" }, 404);
     const row = await env.DB.prepare("SELECT id AS protocol, kind, status, created_at AS createdAt, updated_at AS updatedAt FROM privacy_requests WHERE owner_id = ? AND id = ?")
       .bind(verifiedOwnerId, protocol).first();
     return row ? json(row) : json({ error: "Não encontrado" }, 404);
