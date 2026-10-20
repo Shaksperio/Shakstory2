@@ -141,7 +141,7 @@ export async function readMirrorStamp(user: MirrorUser): Promise<number | null> 
 }
 
 export function mirrorIO(kv: KV, user: MirrorUser): MirrorIO {
-  return { stamp: () => readMirrorStamp(user), pull: () => pullMirror(user), push: library => pushMirror(kv, library, user) };
+  return { scope: mirrorRoot(user.email) + ":" + user.uid, stamp: () => readMirrorStamp(user), pull: () => pullMirror(user), push: library => pushMirror(kv, library, user) };
 }
 
 /** Lê o espelho inteiro. Retorna null se vazio ou incompleto. */
