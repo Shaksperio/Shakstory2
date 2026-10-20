@@ -14,6 +14,6 @@ export async function verifyDeletionTurnstile(token, secret, { fetcher = fetch, 
     const res = await fetcher("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
     if (!res.ok) return false;
     const result = await res.json();
-    return result.success === true && (!hostname || result.hostname === hostname) && (!result.action || result.action === "delete_account");
+    return result.success === true && (!hostname || result.hostname === hostname) && result.action === "delete_account";
   } catch { return false; }
 }
