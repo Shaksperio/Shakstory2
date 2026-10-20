@@ -23,6 +23,8 @@ export const MIRROR_ROOT = "workspaces/main";
 export const mirrorRoot = (email: string) => (isOwnerEmail(email) ? MIRROR_ROOT : "mirrors/" + email.toLowerCase());
 export const MIRROR_MIN_INTERVAL_MS = 2 * 60 * 1000;
 const HASHES_KEY = "mirror-hashes";
+// Hashes must never be shared across different Firebase workspaces/accounts.
+const hashesKeyFor = (root: string) => HASHES_KEY + ":" + encodeURIComponent(root);
 const STATE_KEY = "mirror-state";
 
 export type MirrorUser = { uid: string; email: string };
@@ -98,7 +100,8 @@ export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser)
   const root = mirrorRoot(user.email);
   const sdk = await loadSdk();
   const docs = await planMirror(root, library);
-  const previous = (await kv.get<Record<string, string>>("meta", HASHES_KEY)) ?? {};
+  const scopedHashesKey = hashesKeyFor(root);
+  const previous = (await kv.get<Record<string, string>>("meta", scopedHashesKey)) ?? {};
   const toWrite = changedDocs(docs, previous);
   const toDelete = removedPaths(docs, previous);
   if (toWrite.length === 0 && toDelete.length === 0) return null;
@@ -122,7 +125,7 @@ export async function pushMirror(kv: KV, library: LibraryLike, user: MirrorUser)
     });
     await batch.commit();
     slice.forEach(operation => { if (operation.kind === "set") next[operation.path] = operation.hash as string; else delete next[operation.path]; });
-    await kv.put("meta", HASHES_KEY, next);
+    await kv.put("meta", scopedHashesKey, next);
   }
   await kv.put("meta", STATE_KEY, { at: stamp, writes: operations.length });
   return stamp;
