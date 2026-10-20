@@ -55,3 +55,17 @@ export const antivirusScans = mysqlTable("antivirus_scans", {
 
 export type AntivirusScan = typeof antivirusScans.$inferSelect;
 export type InsertAntivirusScan = typeof antivirusScans.$inferInsert;
+
+/** LGPD requests: owner-scoped, immutable protocol identifier; no manuscript content stored. */
+export const privacyRequests = mysqlTable("privacy_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  protocol: varchar("protocol", { length: 64 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  kind: mysqlEnum("kind", ["access", "correction", "portability", "processing_info"]).notNull(),
+  details: text("details"),
+  status: mysqlEnum("status", ["received", "verification_pending", "verified", "manual_review", "completed", "failed"]).default("received").notNull(),
+  idempotencyKey: varchar("idempotencyKey", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type PrivacyRequest = typeof privacyRequests.$inferSelect;
