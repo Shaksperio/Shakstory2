@@ -74,6 +74,7 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     let ok = false;
     try {
       const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
+      latest.current = undefined;
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
       setRemoteEmpty(result.stamp === null);
@@ -81,7 +82,12 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       if (seq !== undefined) setSyncedSeq(current => Math.max(current, seq));
       ok = true;
       if (result.changedLocal) onMerged?.()?.(result.doc, result.report);
-    } catch (failure) { setError(explain(failure)); }
+    } catch (failure) {
+      setError(explain(failure));
+      // Keep the latest unsent manuscript in memory for a reconnect retry.
+      // Never retry an identity conflict automatically.
+      if (!(failure instanceof Error && failure.message === "SYNC_ACCOUNT_CHANGED")) latest.current = { library, seq };
+    }
     finally {
       syncing.current = false; setBusy(false);
       // uma alteração chegou durante o envio: manda a versão mais nova em seguida
@@ -102,6 +108,18 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       timer.current = undefined;
       if (latest.current) void sync(latest.current.library, latest.current.seq);
     }, wait);
+  }, [sync]);
+
+  // When connectivity returns, retry only the latest pending local edit.
+  // The mirror identity guard still runs before any remote write.
+  useEffect(() => {
+    const retryOnline = () => {
+      const pending = latest.current;
+      if (!pending || !userRef.current || syncing.current) return;
+      void sync(pending.library, pending.seq);
+    };
+    window.addEventListener("online", retryOnline);
+    return () => window.removeEventListener("online", retryOnline);
   }, [sync]);
 
   const connect = useCallback(async (library?: LibraryLike, seq?: number) => {
