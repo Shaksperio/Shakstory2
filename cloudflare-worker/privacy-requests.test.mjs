@@ -13,7 +13,7 @@ function mockDB() {
         async first() {
           if (sql.includes("idempotency_key")) {
             const row = records.find(r => r.owner === params[0] && r.key === params[1]);
-            return row ? { id: row.id, status: row.status } : null;
+            return row ? { id: row.id, status: row.status, kind: row.kind, details: row.details } : null;
           }
           const row = records.find(r => r.owner === params[0] && r.id === params[1]);
           return row ? { protocol: row.id, kind: row.kind, status: row.status } : null;
@@ -21,7 +21,7 @@ function mockDB() {
         async all() { return { results: records.filter(r => r.owner === params[0]).map(r => ({ protocol: r.id, kind: r.kind, status: r.status })) }; },
         async run() {
           if (records.some(r => r.owner === params[1] && r.key === params[4])) throw new Error("unique");
-          records.push({ id: params[0], owner: params[1], kind: params[2], key: params[4], status: "received" });
+          records.push({ id: params[0], owner: params[1], kind: params[2], details: params[3], key: params[4], status: "received" });
           return { success: true };
         },
       };
@@ -61,4 +61,11 @@ test("rejects malformed requests and unrelated routes", async () => {
   assert.equal((await handlePrivacyRequest(request(endpoint, "POST", { kind: "access", idempotencyKey: "not-a-uuid" }), { DB: db }, "user-a")).status, 400);
   assert.equal(await handlePrivacyRequest(request(endpoint + "-unexpected"), { DB: db }, "user-a"), null);
   assert.equal(db.records.length, 0);
+});
+
+test("same idempotency key with different request is rejected", async () => {
+  const db = mockDB();
+  assert.equal((await handlePrivacyRequest(request(endpoint, "POST", { kind: "access", idempotencyKey: key }), { DB: db }, "user-a")).status, 201);
+  assert.equal((await handlePrivacyRequest(request(endpoint, "POST", { kind: "correction", idempotencyKey: key }), { DB: db }, "user-a")).status, 409);
+  assert.equal(db.records.length, 1);
 });
