@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryKV } from "../sync/kv";
 import type { LibraryLike } from "../sync/merge";
 import { syncWithMirror, type MirrorIO } from "./mirrorSync";
@@ -53,4 +53,36 @@ describe("sincronização nos dois sentidos com o espelho", () => {
     expect(result.doc.books[0].nodes.map(n => n.content)).toEqual(["a LOCAL", "b REMOTO"]);
     expect((state.doc as LibraryLike).books[0].nodes.map(n => n.content)).toEqual(["a LOCAL", "b REMOTO"]);
   });
+  it("bloqueia a troca de identidade antes de acessar o espelho remoto", async () => {
+    const kv = new MemoryKV();
+    const first = fakeMirror(null);
+    first.io.scope = "mirrors/alice@example.com:uid-alice";
+    await syncWithMirror(kv, first.io, lib("privado"));
+    const other = fakeMirror(null);
+    other.io.scope = "mirrors/bob@example.com:uid-bob";
+    const remoteWrite = vi.spyOn(other.io, "push");
+    await expect(syncWithMirror(kv, other.io, lib("privado"))).rejects.toThrow("SYNC_ACCOUNT_CHANGED");
+    expect(other.state.pulls).toBe(0);
+    expect(remoteWrite).not.toHaveBeenCalled();
+  });
+
+  it("não registra base nem confirmação após falha de rede", async () => {
+    const kv = new MemoryKV();
+    const mirror = fakeMirror(null);
+    mirror.io.scope = "mirrors/alice@example.com:uid-alice";
+    mirror.io.push = async () => { throw new Error("network unavailable"); };
+    await expect(syncWithMirror(kv, mirror.io, lib("rascunho"))).rejects.toThrow("network unavailable");
+    expect(await kv.keys("bases")).toEqual([]);
+    expect(await kv.keys("meta")).toEqual([]);
+  });
+
+  it("registra confirmação somente depois de uma gravação remota bem-sucedida", async () => {
+    const kv = new MemoryKV();
+    const mirror = fakeMirror(null);
+    mirror.io.scope = "mirrors/alice@example.com:uid-alice";
+    const result = await syncWithMirror(kv, mirror.io, lib("ok"));
+    expect(result.stamp).not.toBeNull();
+    expect(await kv.get("meta", "mirror-seen:" + encodeURIComponent(mirror.io.scope))).toBe(result.stamp);
+  });
+
 });
