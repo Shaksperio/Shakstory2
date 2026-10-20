@@ -77,6 +77,30 @@ export async function signInMirror(): Promise<MirrorUser> {
   return { uid: result.user.uid, email: result.user.email };
 }
 
+/** Registra apenas um pedido de revisão no Firestore, sem apagar a conta.
+ * Requer Firebase Auth; as regras verificam o UID do token, nunca o e-mail.
+ * A operação falha sem conexão e não deve ser apresentada como concluída offline.
+ */
+export async function requestContingencyAccountDeletion(): Promise<void> {
+  const sdk = await loadSdk();
+  await sdk.authInstance.authStateReady();
+  const user = sdk.authInstance.currentUser;
+  if (!user) throw new Error("Entre com sua conta Google para solicitar a exclusão.");
+  const token = await user.getIdTokenResult();
+  if (token.signInProvider !== "google.com" || user.emailVerified !== true) {
+    throw new Error("Confirme sua identidade com o Google antes de solicitar a exclusão.");
+  }
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new Error("Sem conexão. A solicitação ainda não foi enviada ao Firebase.");
+  }
+  await sdk.fs.setDoc(sdk.fs.doc(sdk.db, "accountDeletionRequests/" + user.uid), {
+    uid: user.uid,
+    status: "pending_review",
+    requestedAt: sdk.fs.serverTimestamp(),
+    confirmation: "SOLICITAR EXCLUSÃO",
+  });
+}
+
 /** Token de identidade do Firebase do usuário atual (para autenticar chamadas ao Worker de IA). */
 export async function mirrorIdToken(): Promise<string> {
   const sdk = await loadSdk();
