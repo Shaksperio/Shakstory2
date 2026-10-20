@@ -1,5 +1,5 @@
 import { verifyAccessJwt } from "./mirror-token.js";
-import { findLinkedGoogleIdentity } from "./account-identity-link.js";
+import { findLinkedGoogleIdentity, linkGoogleIdentity } from "./account-identity-link.js";
 import { deletionPreflight } from "./deletion-preflight.js";
 
 const respond = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -29,11 +29,30 @@ export async function handleAccountDeletionPreflight(req, env, options = {}) {
   if (!user) return respond({ eligible: false, reason: "account_not_found" }, 403);
   const linked = await findLinkedGoogleIdentity(env.DB, accessEmail);
   if (!linked || linked.google_email !== accessEmail) return respond({ eligible: false, reason: "identity_unlinked" }, 403);
-  // Shakstory's D1 users table currently has no display-name column.
+  // Require a canonical, server-stored display name.
   // Fail closed until a canonical, server-stored display name is available.
   if (!user.display_name) return respond({ eligible: false, reason: "display_name_unavailable" }, 403);
   const result = await deletionPreflight(req, env, {
     email: user.email, name: user.display_name, googleUid: linked.google_uid, accountStatus: "active",
   }, body, { ...options, firebase: { ...options.firebase, projectId: env.FIREBASE_PROJECT_ID } });
   return respond(result, result.eligible ? 200 : 403);
+}
+
+export async function handleAccountGoogleLink(req, env, options = {}) {
+  if (req.method !== "POST") return respond({ error: "method_not_allowed" }, 405);
+  if (!env?.DB || !env?.FIREBASE_PROJECT_ID) return respond({ error: "not_configured" }, 503);
+  const origin = req.headers.get("Origin");
+  if (!origin || origin !== new URL(req.url).origin) return respond({ error: "invalid_origin" }, 403);
+  const accessEmail = await verifyAccessJwt(req.headers.get("Cf-Access-Jwt-Assertion"), options.access || {});
+  if (!accessEmail) return respond({ error: "unauthorized" }, 401);
+  try {
+    const user = await env.DB.prepare("SELECT email FROM shak_users WHERE email = ?").bind(accessEmail).first();
+    if (!user || user.email.toLowerCase() !== accessEmail) return respond({ error: "account_not_found" }, 403);
+    const result = await linkGoogleIdentity(req, env.DB, user.email, {
+      ...options, firebase: { ...options.firebase, projectId: env.FIREBASE_PROJECT_ID },
+    });
+    return respond(result, result.ok ? 200 : 403);
+  } catch {
+    return respond({ error: "database_unavailable" }, 503);
+  }
 }
