@@ -5,6 +5,7 @@ import { Route, Router as WouterRouter, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import AccountCenter from "./pages/AccountCenter";
 import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
 import { LoadRecovery } from "./components/LoadRecovery";
