@@ -26,7 +26,12 @@ export async function requestPermanentDeletion(db, { accountEmail, requestId, no
     const row = await db.prepare(
       "SELECT request_id, account_email, status FROM shak_account_deletion_requests WHERE request_id = ?"
     ).bind(requestId).first();
-    if (!row || row.account_email.toLowerCase() !== email) return { ok: false, reason: "request_conflict" };
+    if (!row) {
+      const existing = await db.prepare("SELECT request_id, status FROM shak_account_deletion_requests WHERE account_email = ? COLLATE NOCASE AND status IN ('pending', 'processing', 'retry') LIMIT 1").bind(email).first();
+      if (existing) return { ok: true, requestId: existing.request_id, status: existing.status, deletionExecuted: false };
+      return { ok: false, reason: "request_conflict" };
+    }
+    if (row.account_email.toLowerCase() !== email) return { ok: false, reason: "request_conflict" };
     return { ok: true, requestId: row.request_id, status: row.status, deletionExecuted: false };
   } catch {
     return { ok: false, reason: "storage_unavailable" };
