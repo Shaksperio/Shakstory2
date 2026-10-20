@@ -18,8 +18,17 @@ export type MirrorSyncResult = { doc: LibraryLike; changedLocal: boolean; report
 
 const SEEN_KEY = "mirror-seen";
 const BASE_KEY = "mirror";
+const ACTIVE_SCOPE_KEY = "mirror-active-scope";
 
 export async function syncWithMirror(kv: KV, io: MirrorIO, local: LibraryLike): Promise<MirrorSyncResult> {
+  // Fail closed when a different Firebase account signs in on the same browser.
+  // Keep the local manuscript untouched; never upload it into the new account.
+  if (io.scope) {
+    const previousScope = await kv.get<string>("meta", ACTIVE_SCOPE_KEY);
+    if (previousScope && previousScope !== io.scope) {
+      throw new Error("SYNC_ACCOUNT_CHANGED");
+    }
+  }
   const seenKey = io.scope ? SEEN_KEY + ":" + encodeURIComponent(io.scope) : SEEN_KEY;
   const baseKey = io.scope ? BASE_KEY + ":" + encodeURIComponent(io.scope) : BASE_KEY;
   const seen = (await kv.get<number>("meta", seenKey)) ?? null;
@@ -43,6 +52,7 @@ export async function syncWithMirror(kv: KV, io: MirrorIO, local: LibraryLike): 
   await kv.batch([
     { store: "bases", key: baseKey, value: { doc } },
     { store: "meta", key: seenKey, value: finalStamp },
+    ...(io.scope ? [{ store: "meta" as const, key: ACTIVE_SCOPE_KEY, value: io.scope }] : []),
   ]);
   return { doc, changedLocal, report, pulled, stamp: finalStamp };
 }
