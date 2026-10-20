@@ -19,8 +19,5 @@ export async function readPendingMirror(kv: KV, user: MirrorUser): Promise<Pendi
 }
 /** Only acknowledge a revision if it is still the latest pending snapshot. */
 export async function clearPendingMirror(kv: KV, user: MirrorUser, revision: string) {
-  const current = await readPendingMirror(kv, user);
-  if (!current || current.revision !== revision) return false;
-  await kv.remove("outbox", keyFor(user));
-  return true;
+  return kv.removeIfRevision("outbox", keyFor(user), revision);
 }
