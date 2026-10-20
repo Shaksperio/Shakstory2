@@ -1,6 +1,6 @@
 // Firebase ID token verification for a real Google login, never a Worker-issued custom token.
 // Uses Google's Firebase Secure Token public keys, pinned project and issuer.
-const CERT_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+const CERT_URL = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 const decode = value => {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
   const binary = atob(padded + "=".repeat((4 - padded.length % 4) % 4));
@@ -28,14 +28,11 @@ export async function verifyGoogleFirebaseIdToken(token, { projectId = "shakstor
     if (!email) return null;
     const response = await fetcher(CERT_URL);
     if (!response.ok) return null;
-    const certificates = await response.json();
-    const pem = certificates[header.kid];
-    if (typeof pem !== "string") return null;
-    const base64 = pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, "");
-    const der = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-    // X.509 public certificates are not SPKI blobs. WebCrypto cannot import X.509 directly.
-    // Fail closed until a tested X.509-to-SPKI extractor is supplied.
-    void der;
-    return null;
+    const jwks = await response.json();
+    const jwk = Array.isArray(jwks.keys) ? jwks.keys.find(key => key.kid === header.kid && key.kty === "RSA") : null;
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const verified = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, decode(parts[2]), new TextEncoder().encode(parts[0] + "." + parts[1]));
+    return verified ? { email, uid: claims.sub, authTime: claims.auth_time, provider: "google.com" } : null;
   } catch { return null; }
 }
