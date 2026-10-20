@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ProjectView, PlanningView } from "@/components/WriterStudio";
 import { FileText, ShieldCheck, Sparkles, Target, UsersRound } from "lucide-react";
 
-type PreviewView = "project" | "planning" | "manuscript" | "prepare" | "security";
+type PreviewView = "project" | "planning" | "manuscript" | "prepare" | "security" | "account-center";
 type Book = React.ComponentProps<typeof ProjectView>["book"];
 
 const previewBook: Book = { id: "preview-book", title: "A cidade entre marés", status: "planning", targetWordCount: 50000, updatedAt: Date.now(), nodes: [{ id: "preview-node", title: "Capítulo 1", kind: "chapter", content: "", updatedAt: Date.now() }], planning: { characters: [{ id: "c1", name: "Lia", role: "Protagonista", notes: "" }], locations: [{ id: "l1", name: "Porto velho", atmosphere: "Nebuloso", notes: "" }], timeline: [{ id: "t1", title: "A partida", date: "Noite 1", description: "" }] }, nextSteps: ["Definir a sinopse"] };
