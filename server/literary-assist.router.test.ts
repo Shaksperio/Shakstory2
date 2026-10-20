@@ -17,7 +17,7 @@ vi.mock("./_core/llm", () => ({ listLLMModels }));
 vi.mock("./data-access", () => ({ getEditorialRepository: () => ({ get: vi.fn(), put: vi.fn() }), getEditorialRepositoryMode: () => "json" }));
 
 const { appRouter } = await import("./routers");
-const context = { user: { id: 42 }, req: {}, res: {} } as TrpcContext;
+const context = { user: { id: 42, accountStatus: "active" }, req: {}, res: {} } as TrpcContext;
 
 describe("literaryAssist router", () => {
   beforeEach(() => vi.clearAllMocks());
