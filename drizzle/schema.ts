@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -67,5 +67,5 @@ export const privacyRequests = mysqlTable("privacy_requests", {
   idempotencyKey: varchar("idempotencyKey", { length: 64 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [uniqueIndex("privacy_requests_user_idempotency").on(table.userId, table.idempotencyKey)]);
 export type PrivacyRequest = typeof privacyRequests.$inferSelect;
