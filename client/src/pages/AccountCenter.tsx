@@ -1,10 +1,43 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { ADMIN_CONTACT, PLAN_CARDS, currentPlan, refreshPlan, usePlan } from "@/lib/plans";
+import { ADMIN_CONTACT, PLAN_CARDS, refreshPlan, usePlan } from "@/lib/plans";
 
 /** Interface informativa: não apresenta exclusão/cancelamento como disponível antes do backend seguro. */
 export default function AccountCenter() {
   const plan = usePlan();
+  const [name, setName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileState, setProfileState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch("/api/trpc/account.profile", { credentials: "same-origin" });
+        if (!response.ok) throw new Error("Profile unavailable");
+        const json = await response.json() as { result?: { data?: { json?: { name?: string; email?: string } } } };
+        const profile = json.result?.data?.json;
+        if (!profile) throw new Error("Profile unavailable");
+        if (active) { setName(profile.name ?? ""); setProfileEmail(profile.email ?? ""); setProfileState("ready"); }
+      } catch { if (active) setProfileState("unavailable"); }
+    })();
+    return () => { active = false; };
+  }, []);
+  const saveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/trpc/account.updateProfile", {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { name: name.trim() } }),
+      });
+      if (!response.ok) throw new Error("Update failed");
+      setMessage("Nome atualizado com sucesso.");
+    } catch { setMessage("Não foi possível atualizar seu nome. Confira sua sessão e tente novamente."); }
+    finally { setSaving(false); }
+  };
   useEffect(() => { void refreshPlan(); }, []);
   const contactSubject = encodeURIComponent("Shakstory — solicitação sobre minha conta");
   const contact = `mailto:${ADMIN_CONTACT}?subject=${contactSubject}`;
@@ -25,6 +58,15 @@ export default function AccountCenter() {
       </section>
       <section aria-labelledby="account-data">
         <h2 id="account-data">Dados cadastrais</h2>
+        {profileState === "loading" && <p>Carregando dados do perfil…</p>}
+        {profileState === "unavailable" && <p>A edição do perfil não está disponível neste ambiente. Entre em contato com o suporte.</p>}
+        {profileState === "ready" && <form onSubmit={saveProfile}>
+          <label htmlFor="account-display-name">Nome de exibição</label>
+          <input id="account-display-name" value={name} onChange={event => setName(event.target.value)} required maxLength={120} style={{ display: "block", width: "100%", padding: "0.5rem", marginBottom: "0.75rem" }} />
+          <p>E-mail verificado: <strong>{profileEmail || "Não informado"}</strong></p>
+          <button type="submit" disabled={saving || !name.trim()}>{saving ? "Salvando…" : "Salvar nome"}</button>
+          {message && <p role="status">{message}</p>}
+        </form>}
         <p>O e-mail de acesso é gerenciado pelo provedor de identidade. Alterações cadastrais devem preservar a identidade verificada.</p>
         <p><a href={contact}>Solicitar correção de dados</a></p>
       </section>
