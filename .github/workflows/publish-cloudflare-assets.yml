@@ -1,6 +1,16 @@
 name: Publish Shakstory frontend to Cloudflare asset branch
 
 on:
+  push:
+    branches: [turbo]
+    paths:
+      - 'client/**'
+      - 'server/**'
+      - 'shared/**'
+      - 'vite.config.*'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/publish-cloudflare-assets.yml'
   workflow_dispatch:
 
 permissions:
