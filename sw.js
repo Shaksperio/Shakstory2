@@ -1,8 +1,8 @@
 /* Shakstory service worker — gerado no build. Não editar. */
-const VERSION = "t18eim";
+const VERSION = "b9wp8y";
 const SHELL_CACHE = 'shakstory-shell-' + VERSION;
 const RUNTIME_CACHE = 'shakstory-runtime-v1';
-const PRECACHE = ["","assets/html2canvas.esm-B0tyYwQk.js","assets/index-BBfeQUyt.css","assets/index-BQ5QA4QP.js","assets/index.es-BwXqwcLJ.js","assets/pdf-fonts-B031VheP.js","assets/purify.es-CYR4BTuT.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","manifest.webmanifest","shakstory-icon.svg"];
+const PRECACHE = ["","assets/html2canvas.esm-B0tyYwQk.js","assets/index-BBfeQUyt.css","assets/index-lEF2jxVp.js","assets/index.es-BG-jMhp_.js","assets/pdf-fonts-B031VheP.js","assets/purify.es-CYR4BTuT.js","icons/icon-192.png","icons/icon-512.png","icons/icon-maskable-512.png","manifest.webmanifest","shakstory-icon.svg"];
 const SCOPE = self.registration.scope;
 const abs = rel => new URL(rel, SCOPE).href;
 const PRECACHE_URLS = PRECACHE.map(abs);
