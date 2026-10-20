@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { and, desc, eq } from "drizzle-orm";
+import { privacyRequests } from "../drizzle/schema";
+import { getDb } from "./db";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -19,6 +23,33 @@ const scopedPath = (ownerId: number, path: string) => `authors/${ownerId}/${path
 
 export const appRouter = router({
   system: systemRouter,
+  privacy: router({
+    submit: protectedProcedure.input(z.object({
+      kind: z.enum(["access", "correction", "portability", "processing_info"]),
+      details: z.string().max(1500).optional(),
+      idempotencyKey: z.string().uuid(),
+    })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Serviço de protocolos indisponível." });
+      const previous = await db.select().from(privacyRequests).where(and(eq(privacyRequests.userId, ctx.user.id), eq(privacyRequests.idempotencyKey, input.idempotencyKey))).limit(1);
+      if (previous[0]) return { protocol: previous[0].protocol, status: previous[0].status };
+      const protocol = "LGPD-" + randomUUID();
+      await db.insert(privacyRequests).values({ protocol, userId: ctx.user.id, kind: input.kind, details: input.details?.trim() || null, idempotencyKey: input.idempotencyKey });
+      return { protocol, status: "received" as const };
+    }),
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Serviço de protocolos indisponível." });
+      return db.select({ protocol: privacyRequests.protocol, kind: privacyRequests.kind, status: privacyRequests.status, createdAt: privacyRequests.createdAt, updatedAt: privacyRequests.updatedAt }).from(privacyRequests).where(eq(privacyRequests.userId, ctx.user.id)).orderBy(desc(privacyRequests.createdAt)).limit(50);
+    }),
+    get: protectedProcedure.input(z.object({ protocol: z.string().max(64) })).query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Serviço de protocolos indisponível." });
+      const records = await db.select({ protocol: privacyRequests.protocol, kind: privacyRequests.kind, status: privacyRequests.status, createdAt: privacyRequests.createdAt, updatedAt: privacyRequests.updatedAt }).from(privacyRequests).where(and(eq(privacyRequests.userId, ctx.user.id), eq(privacyRequests.protocol, input.protocol))).limit(1);
+      if (!records[0]) throw new TRPCError({ code: "NOT_FOUND" });
+      return records[0];
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(async opts => {
       if (opts.ctx.user) {
