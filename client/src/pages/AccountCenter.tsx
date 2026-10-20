@@ -11,6 +11,8 @@ export default function AccountCenter() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [requestKind, setRequestKind] = useState("access");
+  const [typedDeletionName, setTypedDeletionName] = useState("");
+  const [acknowledgeDeletion, setAcknowledgeDeletion] = useState(false);
   const [requestDetails, setRequestDetails] = useState("");
   const [requestMessage, setRequestMessage] = useState("");
   const [requestSending, setRequestSending] = useState(false);
@@ -30,6 +32,10 @@ export default function AccountCenter() {
   }, []);
   const sendRequest = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (requestKind === "delete" && (profileState !== "ready" || !name.trim() || typedDeletionName.trim() !== name.trim() || !acknowledgeDeletion)) {
+      setRequestMessage("Para solicitar exclusão, confirme o nome exibido e reconheça as consequências.");
+      return;
+    }
     setRequestSending(true);
     setRequestMessage("");
     try {
@@ -115,9 +121,15 @@ export default function AccountCenter() {
             <option value="deactivate">Desativação da conta</option>
             <option value="delete">Exclusão da conta</option>
           </select>
+          {requestKind === "delete" && <div role="group" aria-label="Confirmação de solicitação de exclusão">
+            <p><strong>Atenção:</strong> este formulário registra apenas um pedido de análise; ele não apaga a conta ou manuscritos.</p>
+            <label htmlFor="account-delete-name">Digite exatamente seu nome de exibição ({profileState === "ready" ? name : "perfil indisponível"})</label>
+            <input id="account-delete-name" autoComplete="off" value={typedDeletionName} onChange={event => setTypedDeletionName(event.target.value)} required maxLength={120} style={{ display: "block", width: "100%", marginBottom: "0.75rem" }} />
+            <label><input type="checkbox" checked={acknowledgeDeletion} onChange={event => setAcknowledgeDeletion(event.target.checked)} /> Entendo que a exclusão definitiva, quando implementada, poderá apagar meus manuscritos e será irreversível.</label>
+          </div>}
           <label htmlFor="account-request-details">Detalhes (opcional)</label>
           <textarea id="account-request-details" value={requestDetails} onChange={event => setRequestDetails(event.target.value)} maxLength={2000} rows={3} style={{ display: "block", width: "100%", marginBottom: "0.75rem" }} />
-          <button type="submit" disabled={requestSending}>{requestSending ? "Registrando…" : "Registrar solicitação"}</button>
+          <button type="submit" disabled={requestSending || (requestKind === "delete" && (profileState !== "ready" || !name.trim() || typedDeletionName.trim() !== name.trim() || !acknowledgeDeletion))}>{requestSending ? "Registrando…" : "Registrar solicitação"}</button>
           {requestMessage && <p role="status">{requestMessage}</p>}
         </form>
       </section>
