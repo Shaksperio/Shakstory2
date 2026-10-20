@@ -6,7 +6,7 @@
  */
 export async function handlePrivacyRequest(request, env, verifiedOwnerId) {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith("/api/privacy/requests")) return null;
+  if (url.pathname !== "/api/privacy/requests" && !url.pathname.startsWith("/api/privacy/requests/")) return null;
   const json = (body, status = 200) => new Response(JSON.stringify(body), {
     status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
@@ -17,7 +17,7 @@ export async function handlePrivacyRequest(request, env, verifiedOwnerId) {
     let body;
     try { body = await request.json(); } catch { return json({ error: "JSON inválido" }, 400); }
     if (!body || !["access", "correction", "portability", "processing_info"].includes(body.kind) ||
-        typeof body.idempotencyKey !== "string" || !/^[0-9a-f-]{36}$/i.test(body.idempotencyKey) ||
+        typeof body.idempotencyKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.idempotencyKey) ||
         (body.details != null && (typeof body.details !== "string" || body.details.length > 1500))) {
       return json({ error: "Solicitação inválida" }, 400);
     }
