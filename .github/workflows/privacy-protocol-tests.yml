@@ -1,0 +1,22 @@
+name: Verify privacy protocol handler
+on:
+  pull_request:
+    paths:
+      - 'cloudflare-worker/privacy-requests.js'
+      - 'cloudflare-worker/privacy-requests.test.mjs'
+      - '.github/workflows/privacy-protocol-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  privacy-protocol-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run isolated Worker handler tests
+        run: node --test cloudflare-worker/privacy-requests.test.mjs
+      - name: Check JavaScript syntax
+        run: node --check cloudflare-worker/privacy-requests.js
