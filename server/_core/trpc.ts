@@ -16,6 +16,9 @@ const requireUser = t.middleware(async opts => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
+  if (ctx.user.accountStatus !== "active") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Conta indisponível. Entre em contato com o suporte para verificar seu estado." });
+  }
 
   return next({
     ctx: {
