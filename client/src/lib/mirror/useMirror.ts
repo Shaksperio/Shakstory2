@@ -17,6 +17,7 @@ const flag = (value?: "1" | "0") => {
 const explicitlyOff = () => { try { return localStorage.getItem(ENABLED_KEY) === "0"; } catch { return false; } };
 const explain = (error: unknown) => {
   const code = String((error as { code?: string } | undefined)?.code ?? "");
+  if (error instanceof Error && error.message === "SYNC_ACCOUNT_CHANGED") return "Outra conta foi conectada neste navegador. A sincronização foi bloqueada para proteger os manuscritos locais; não houve envio para a nova conta.";
   if (code.indexOf("popup-closed") !== -1 || code.indexOf("cancelled") !== -1) return "Login cancelado.";
   if (code.indexOf("unauthorized-domain") !== -1) return "Este endereço ainda não está autorizado para entrar com o Google. Avise o administrador.";
   if (code.indexOf("permission-denied") !== -1) return "A cópia na nuvem recusou a gravação. Avise o administrador.";
