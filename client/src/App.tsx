@@ -17,6 +17,7 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/conta"} component={AccountCenter} />
       <Route path={"/ler/:token"} component={ReaderPage} />
       <Route path={"/preview/editorial"} component={EditorialPreview} />
       <Route path={"/404"} component={NotFound} />
