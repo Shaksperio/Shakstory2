@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, antivirusScans, users } from "../drizzle/schema";
+import { InsertUser, accountRequests, antivirusScans, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -119,4 +119,24 @@ export async function updateUserDisplayName(userId: number, name: string): Promi
     and(eq(users.id, userId), eq(users.accountStatus, "active"))
   );
   return Number(result[0].affectedRows) > 0;
+}
+
+export type AccountRequestKind = "access" | "correction" | "export" | "privacy" | "plan_change" | "cancel_plan" | "deactivate" | "delete";
+
+export async function createAccountRequest(userId: number, kind: AccountRequestKind, details?: string): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const result = await db.insert(accountRequests).values({ userId, kind, details });
+  return Number(result[0].insertId);
+}
+
+export async function listAccountRequests(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  return db.select({
+    id: accountRequests.id,
+    kind: accountRequests.kind,
+    status: accountRequests.status,
+    createdAt: accountRequests.createdAt,
+  }).from(accountRequests).where(eq(accountRequests.userId, userId)).orderBy(accountRequests.createdAt);
 }
