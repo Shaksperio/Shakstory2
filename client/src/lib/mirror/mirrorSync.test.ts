@@ -85,4 +85,30 @@ describe("sincronização nos dois sentidos com o espelho", () => {
     expect(await kv.get("meta", "mirror-seen:" + encodeURIComponent(mirror.io.scope))).toBe(result.stamp);
   });
 
+  it("retoma após indisponibilidade do Firebase sem perder o manuscrito local", async () => {
+    const kv = new MemoryKV();
+    const mirror = fakeMirror(null);
+    mirror.io.scope = "mirrors/alice@example.com:uid-alice";
+    const push = mirror.io.push;
+    mirror.io.push = async () => { throw new Error("offline"); };
+    await expect(syncWithMirror(kv, mirror.io, lib("rascunho offline"))).rejects.toThrow("offline");
+    mirror.io.push = push;
+    const recovered = await syncWithMirror(kv, mirror.io, lib("rascunho offline"));
+    expect(recovered.doc).toEqual(lib("rascunho offline"));
+    expect(mirror.state.doc).toEqual(lib("rascunho offline"));
+    expect(await kv.get("meta", "mirror-active-scope")).toBe(mirror.io.scope);
+  });
+
+  it("mantém o bloqueio de conta mesmo após falha e reconexão", async () => {
+    const kv = new MemoryKV();
+    const first = fakeMirror(null);
+    first.io.scope = "mirrors/alice@example.com:uid-alice";
+    await syncWithMirror(kv, first.io, lib("conteúdo da Alice"));
+    const second = fakeMirror(null);
+    second.io.scope = "mirrors/bob@example.com:uid-bob";
+    await expect(syncWithMirror(kv, second.io, lib("conteúdo da Alice"))).rejects.toThrow("SYNC_ACCOUNT_CHANGED");
+    expect(second.state.doc).toBeNull();
+    expect(await kv.get("meta", "mirror-active-scope")).toBe(first.io.scope);
+  });
+
 });
