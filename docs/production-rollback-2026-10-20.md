@@ -5,7 +5,7 @@ Deployment antes das próximas mudanças: `54c1135f-0bd7-4fc5-8eee-c4acc216730a`
 Versão implantada a 100%: `d7f113c6-ddb3-4553-b776-492d13c5b4a2` (Worker Version 14).
 D1 binding `DB`: `shakstory-pilot`, UUID `b2c9c84a-0ff2-4d7f-8b17-e1046149af4a`.
 Export SQL D1 via API concluído no bookmark `0000009d-00000000-0000510a-53d0551dd3e001af659fe88aaf8cca81`.
-Arquivo exportado: `b2c9c84a-0ff2-4d7f-8b17-e1046149af659fe88aaf8cca81.sql` **não usar este nome como localizador**; a exportação real possui o UUID completo e bookmark no resultado Cloudflare.
+Arquivo exportado: `b2c9c84a-0ff2-4d7f-8b17-e1046149af4a-0000009d-00000000-0000510a-53d0551dd3e001af659fe88aaf8cca81.sql` (armazenamento temporário Cloudflare; ainda não retido em backup privado).
 Não incluir signed_url temporária no GitHub nem credenciais nos commits.
 Antes de alterar o Worker, D1 continha 30 documentos editoriais, somando 1.454.633 bytes de `data_json`.
 
