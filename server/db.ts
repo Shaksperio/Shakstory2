@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, antivirusScans, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -109,4 +109,14 @@ export async function recordAntivirusScan(input: {
     detail: input.detail,
     engine: input.engine,
   });
+}
+
+/** Altera apenas o nome exibido; identidade OAuth e e-mail verificado são imutáveis por esta API. */
+export async function updateUserDisplayName(userId: number, name: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const result = await db.update(users).set({ name }).where(
+    and(eq(users.id, userId), eq(users.accountStatus, "active"))
+  );
+  return Number(result[0].affectedRows) > 0;
 }
