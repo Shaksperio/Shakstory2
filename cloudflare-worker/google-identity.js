@@ -10,8 +10,9 @@ const parse = value => JSON.parse(new TextDecoder().decode(decode(value)));
 const validEmail = value => typeof value === "string" && value.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value.toLowerCase() : null;
 
 /** Returns verified Google identity or null. Rejects Firebase custom-token users and other providers. */
-export async function verifyGoogleFirebaseIdToken(token, { projectId = "shakstory-93bb1", fetcher = fetch, now = Date.now() } = {}) {
+export async function verifyGoogleFirebaseIdToken(token, { projectId, fetcher = fetch, now = Date.now() } = {}) {
   try {
+    if (typeof projectId !== "string" || !/^[a-z][a-z0-9-]{4,60}$/.test(projectId)) return null;
     const parts = String(token || "").split(".");
     if (parts.length !== 3 || parts.some(part => !part)) return null;
     const header = parse(parts[0]);
