@@ -9,7 +9,7 @@ import { RepositoryConflictError } from "../backend/src/repositories/types";
 import { analyzeLiteraryText, listLiteraryModels, literaryAnalysisInputSchema } from "./literary-analysis";
 import { getSyncSnapshot, markSyncConflict, markSyncFailed, markSyncStarted, markSyncSucceeded } from "./sync-state";
 import { storagePut } from "./storage";
-import { recordAntivirusScan, updateUserDisplayName } from "./db";
+import { recordAntivirusScan, updateUserDisplayName, createAccountRequest, listAccountRequests } from "./db";
 import { isSafeToPersist, scanWithLocalKicomAV } from "./antivirus";
 import { ENV } from "./_core/env";
 import { createProjectBaseUrl, ensureAntivirusSession, fingerprintSession, listAntivirusSessions, revokeAntivirusSession, rotateAntivirusSessions } from "./antivirus-sessions";
@@ -41,6 +41,14 @@ export const appRouter = router({
     }),
   }),
   account: router({
+    requests: protectedProcedure.query(({ ctx }) => listAccountRequests(ctx.user.id)),
+    request: protectedProcedure.input(z.object({
+      kind: z.enum(["access", "correction", "export", "privacy", "plan_change", "cancel_plan", "deactivate", "delete"]),
+      details: z.string().trim().max(2000).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const id = await createAccountRequest(ctx.user.id, input.kind, input.details);
+      return { id, status: "pending" as const, executed: false };
+    }),
     profile: protectedProcedure.query(({ ctx }) => ({
       name: ctx.user.name,
       email: ctx.user.email,
