@@ -40,6 +40,13 @@ export function registerOAuthRoutes(app: Express) {
         return;
       }
 
+      // Não reativar nem recriar automaticamente uma conta encerrada.
+      const existingAccount = await db.getUserByOpenId(userInfo.openId);
+      if (existingAccount && existingAccount.accountStatus !== "active") {
+        res.status(403).json({ error: "account_inactive", message: "Esta conta não está ativa. Utilize o fluxo de recuperação ou entre em contato com o suporte." });
+        return;
+      }
+
       await db.upsertUser({
         openId: userInfo.openId,
         name: userInfo.name || null,
