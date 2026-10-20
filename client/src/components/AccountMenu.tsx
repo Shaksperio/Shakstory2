@@ -111,17 +111,35 @@ export function Avatar({ name, photo, size = 36 }: { name: string; photo?: strin
 }
 
 export function AvatarCard({ name, email, photo, online, onOpen }: { name: string; email: string; photo: string; online: boolean; onOpen: () => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenuOpen(false);
+    };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeEscape); };
+  }, [menuOpen]);
   return (
-    <button type="button" className="sk-avatar-card" onClick={onOpen} aria-label={`Minha conta, ${name}, ${online ? "online" : "offline"}`} title="Minha conta">
-      <span className={`sk-avatar-ring ${online ? "is-online" : "is-offline"}`}>
-        <Avatar name={name} photo={photo} size={34} />
-        <i className="sk-status-dot" aria-hidden="true" />
-      </span>
-      <span className="sk-avatar-text">
-        <strong>{name}</strong>
-        <small>{online ? "Online" : "Offline"}{email ? ` · ${email}` : ""}</small>
-      </span>
-    </button>
+    <div className="relative" ref={menuRef}>
+      <button type="button" className="sk-avatar-card" onClick={() => setMenuOpen(value => !value)} aria-label={`Abrir menu de perfil de ${name}`} aria-expanded={menuOpen} aria-haspopup="menu" title="Perfil">
+        <span className={`sk-avatar-ring ${online ? "is-online" : "is-offline"}`}>
+          <Avatar name={name} photo={photo} size={34} />
+          <i className="sk-status-dot" aria-hidden="true" />
+        </span>
+        <span className="sk-avatar-text">
+          <strong>{name}</strong>
+          <small>{online ? "Online" : "Offline"}{email ? ` · ${email}` : ""}</small>
+        </span>
+      </button>
+      {menuOpen && <div role="menu" aria-label="Perfil" className="absolute right-0 top-full z-50 mt-2 min-w-[210px] max-w-[min(90vw,320px)] rounded-xl border border-border bg-card p-2 shadow-xl">
+        <p className="truncate px-3 py-2 text-sm font-semibold text-foreground" title={name}>{name}</p>
+        <button type="button" role="menuitem" className="w-full rounded-lg px-3 py-2 text-left text-sm text-primary hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" onClick={() => { setMenuOpen(false); onOpen(); }}>Minha conta</button>
+      </div>}
+    </div>
   );
 }
 
