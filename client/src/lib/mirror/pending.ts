@@ -3,18 +3,24 @@ import type { LibraryLike } from "../sync/merge";
 import type { MirrorUser } from "./firebase";
 import { mirrorRoot } from "./firebase";
 
-export type PendingMirror = { library: LibraryLike; seq?: number; scope: string; savedAt: number };
+export type PendingMirror = { library: LibraryLike; seq?: number; scope: string; savedAt: number; revision: string };
 const keyFor = (user: MirrorUser) => "mirror-pending:" + encodeURIComponent(mirrorRoot(user.email) + ":" + user.uid);
 
 /** Store before attempting network I/O. Never read another account's pending edits. */
 export async function savePendingMirror(kv: KV, user: MirrorUser, library: LibraryLike, seq?: number) {
   const scope = mirrorRoot(user.email) + ":" + user.uid;
-  await kv.put("outbox", keyFor(user), { library, seq, scope, savedAt: Date.now() } satisfies PendingMirror);
+  const revision = crypto.randomUUID();
+  await kv.put("outbox", keyFor(user), { library, seq, scope, savedAt: Date.now(), revision } satisfies PendingMirror);
+  return revision;
 }
 export async function readPendingMirror(kv: KV, user: MirrorUser): Promise<PendingMirror | undefined> {
   const item = await kv.get<PendingMirror>("outbox", keyFor(user));
   return item?.scope === mirrorRoot(user.email) + ":" + user.uid ? item : undefined;
 }
-export async function clearPendingMirror(kv: KV, user: MirrorUser) {
+/** Only acknowledge a revision if it is still the latest pending snapshot. */
+export async function clearPendingMirror(kv: KV, user: MirrorUser, revision: string) {
+  const current = await readPendingMirror(kv, user);
+  if (!current || current.revision !== revision) return false;
   await kv.remove("outbox", keyFor(user));
+  return true;
 }
