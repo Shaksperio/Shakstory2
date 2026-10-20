@@ -57,6 +57,9 @@ jobs:
       - name: Tests
         run: pnpm test
 
+      - name: Account Center Worker patch tests
+        run: node --test scripts/patch-worker-account-center.test.mjs
+
       - name: Validate data
         run: pnpm validate:data
 
