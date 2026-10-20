@@ -10,6 +10,10 @@ export default function AccountCenter() {
   const [profileState, setProfileState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [requestKind, setRequestKind] = useState("access");
+  const [requestDetails, setRequestDetails] = useState("");
+  const [requestMessage, setRequestMessage] = useState("");
+  const [requestSending, setRequestSending] = useState(false);
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -24,6 +28,21 @@ export default function AccountCenter() {
     })();
     return () => { active = false; };
   }, []);
+  const sendRequest = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRequestSending(true);
+    setRequestMessage("");
+    try {
+      const response = await fetch("/api/trpc/account.request", {
+        method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { kind: requestKind, details: requestDetails.trim() || undefined } }),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      setRequestMessage("Solicitação registrada para análise. Nenhuma mudança foi executada automaticamente.");
+      setRequestDetails("");
+    } catch { setRequestMessage("Não foi possível registrar a solicitação neste ambiente. Use o contato administrativo."); }
+    finally { setRequestSending(false); }
+  };
   const saveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
@@ -80,6 +99,27 @@ export default function AccountCenter() {
         <p>Desativação é temporária; exclusão é irreversível após conclusão, ressalvadas retenções legais. A janela proposta para reativação é de 30 dias, conforme política do serviço, não por exigência da LGPD.</p>
         <p>Por segurança, a exclusão automática ainda não está disponível: será exigida confirmação por e-mail e autenticação recente, sem solicitar sua senha Google ao Shakstory.</p>
         <p><a href={contact}>Solicitar atendimento para desativação ou exclusão</a></p>
+      </section>
+      <section aria-labelledby="account-requests">
+        <h2 id="account-requests">Registrar solicitação</h2>
+        <p>O registro exige sessão autenticada e não altera plano, acesso ou dados automaticamente.</p>
+        <form onSubmit={sendRequest}>
+          <label htmlFor="account-request-kind">Tipo de solicitação</label>
+          <select id="account-request-kind" value={requestKind} onChange={event => setRequestKind(event.target.value)} style={{ display: "block", marginBottom: "0.75rem" }}>
+            <option value="access">Acesso aos meus dados</option>
+            <option value="correction">Correção cadastral</option>
+            <option value="export">Exportação de dados</option>
+            <option value="privacy">Outros direitos LGPD</option>
+            <option value="plan_change">Mudança de plano</option>
+            <option value="cancel_plan">Cancelamento do plano</option>
+            <option value="deactivate">Desativação da conta</option>
+            <option value="delete">Exclusão da conta</option>
+          </select>
+          <label htmlFor="account-request-details">Detalhes (opcional)</label>
+          <textarea id="account-request-details" value={requestDetails} onChange={event => setRequestDetails(event.target.value)} maxLength={2000} rows={3} style={{ display: "block", width: "100%", marginBottom: "0.75rem" }} />
+          <button type="submit" disabled={requestSending}>{requestSending ? "Registrando…" : "Registrar solicitação"}</button>
+          {requestMessage && <p role="status">{requestMessage}</p>}
+        </form>
       </section>
       <small>Esta página não executa cancelamento, desativação ou exclusão automaticamente.</small>
     </main>
