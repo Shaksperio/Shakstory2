@@ -36,3 +36,26 @@ Exceções: `verificacao_recusada`, `falha`, `revisao_necessaria`, `cancelado`.
 3. Implementar exportação real dos dados pessoais e manuscritos com conferência de integridade.
 4. Integrar Cowila ao fluxo sem delegar a ela autorização de segurança.
 5. Integrar Central de Contas e habilitar ações gradualmente após testes.
+
+## Contrato inicial de protocolo (para implementação)
+
+### Entrada
+`POST /privacy/requests` recebe somente `kind` (acesso, correção, portabilidade, informações) e `details` limitado a 1500 caracteres. O identificador do titular vem exclusivamente da sessão autenticada; nunca do corpo da requisição.
+
+### Registro
+A persistência deve ser transacional e atribuir identificador opaco único, `createdAt`, `updatedAt`, tipo, estado inicial `recebido` e titular autenticado. A resposta inclui protocolo e estado. O registro deve ser idempotente por chave de requisição por titular para impedir duplicação em novas tentativas.
+
+### Consulta
+`GET /privacy/requests` lista exclusivamente pedidos do titular da sessão, com paginação. `GET /privacy/requests/:id` deve retornar não encontrado também quando o protocolo pertence a outro titular, para evitar revelar sua existência.
+
+### Execução
+O registro do pedido não concede permissão para executar operações. A verificação exige desafio confiável e reautenticação quando aplicável. Um executor separado verifica autorização e registra resultado antes de atualizar o estado. Nenhuma instrução gerada pelo modelo é tratada como autorização.
+
+### Testes de aceite
+- Requisição sem sessão válida: 401 e nenhum registro.
+- Usuário A não consegue consultar, alterar ou executar protocolo de B.
+- Reenvio com mesma chave idempotente não duplica protocolo.
+- Erro na gravação não retorna protocolo fictício.
+- Exportação incompleta bloqueia qualquer operação destrutiva.
+- Exclusão permanece indisponível em todos os ambientes.
+- Em contingência sem API, interface informa indisponibilidade; não simula envio.
