@@ -4,6 +4,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error("input and output paths required");
 let source = readFileSync(input, "utf8");
+if (source.startsWith("--") && source.includes('name="worker.js"')) {
+  const boundary = source.slice(0, source.indexOf("\r\n"));
+  const start = source.indexOf("\r\n\r\n", source.indexOf('name="worker.js"'));
+  const end = source.indexOf("\r\n" + boundary, start + 4);
+  if (start < 0 || end < 0) throw new Error("Invalid multipart backup");
+  source = source.slice(start + 4, end);
+}
+if (!source.includes("async function verifyAccessJwt(")) throw new Error("Access verifier missing");
 const marker = "export default{async fetch(req,env){const u=new URL(req.url);";
 if (source.split(marker).length !== 2) throw new Error("Unexpected Worker entry point");
 if (source.includes("'/account-center'")) throw new Error("Account Center already patched");
