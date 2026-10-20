@@ -29,6 +29,18 @@ service cloud.firestore {
           || ('mirrorEmail' in request.auth.token && request.auth.token.mirrorEmail.lower() == email)
         );
     }
+    // Solicitações de exclusão da contingência: cada Firebase UID só acessa
+    // seus próprios pedidos. Não concede permissão para apagar contas/dados.
+    match /accountDeletionRequests/{uid} {
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'status', 'requestedAt', 'confirmation'])
+        && request.resource.data.uid == uid
+        && request.resource.data.status == 'pending_review'
+        && request.resource.data.confirmation == 'SOLICITAR EXCLUSÃO'
+        && request.resource.data.requestedAt == request.time;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
     match /mirrors/{email}/{document=**} {
       allow read, write: if minhaPasta(email);
     }
