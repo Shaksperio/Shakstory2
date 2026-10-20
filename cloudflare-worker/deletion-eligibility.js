@@ -18,7 +18,7 @@ export async function verifyDeletionEligibility(req, d1Account, options = {}) {
     accessEmail, firebaseEmail: google.email, firebaseEmailVerified: true, d1Email: d1Account.email,
   }) || d1Account.googleUid !== google.uid) return { eligible: false, reason: "identity_mismatch" };
   const now = Math.floor((options.now ?? Date.now()) / 1000);
-  if (now - google.authTime > 300 || google.authTime > now) return { eligible: false, reason: "reauth_required" };
+  if (!Number.isFinite(google.authTime) || now - google.authTime > 300 || google.authTime > now) return { eligible: false, reason: "reauth_required" };
   if (d1Account.accountStatus && d1Account.accountStatus !== "active") return { eligible: false, reason: "account_inactive" };
   return { eligible: true, reason: "verified" };
 }
