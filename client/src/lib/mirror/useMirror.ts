@@ -4,6 +4,8 @@ import type { LibraryLike } from "../sync/merge";
 import { CONTINGENCY } from "../contingency";
 import { MIRROR_MIN_INTERVAL_MS, currentMirrorUser, mirrorIO, pullMirror, readMirrorState, signInMirror, signInMirrorWithAccess, signOutMirror, type MirrorUser } from "./firebase";
 import { syncWithMirror } from "./mirrorSync";
+import { savePendingMirror, readPendingMirror, clearPendingMirror } from "./pending";
+import { stableStringify } from "../sync/hash";
 import type { MergeReport } from "../sync/merge";
 
 const ENABLED_KEY = "shakstory:mirror-enabled";
@@ -74,7 +76,11 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
     let ok = false;
     try {
       const result = await syncWithMirror(getKv(), mirrorIO(getKv(), who), library);
-      latest.current = undefined;
+      const pending = await readPendingMirror(getKv(), who);
+      if (pending && stableStringify(pending.library) === stableStringify(library)) {
+        await clearPendingMirror(getKv(), who);
+        latest.current = undefined;
+      }
       lastPush.current = Date.now();
       setLastAt(lastPush.current);
       setRemoteEmpty(result.stamp === null);
@@ -101,6 +107,10 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
   const requestPush = useCallback((library: LibraryLike, seq?: number) => {
     if (!userRef.current) return;
     latest.current = { library, seq };
+    const who = userRef.current;
+    if (who) void savePendingMirror(getKv(), who, library, seq).catch(() => {
+      setError("Não foi possível guardar a fila de sincronização no IndexedDB.");
+    });
     const wait = lastPush.current + MIN_INTERVAL - Date.now();
     if (wait <= 0) { void sync(library, seq); return; }
     if (timer.current !== undefined) return;
@@ -109,6 +119,18 @@ export function useMirror(getKv: () => KV, onMerged?: () => ((doc: LibraryLike, 
       if (latest.current) void sync(latest.current.library, latest.current.seq);
     }, wait);
   }, [sync]);
+
+  // Restore only the authenticated Firebase identity's pending edits after a reload.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    void readPendingMirror(getKv(), user).then(pending => {
+      if (cancelled || !pending || userRef.current?.uid !== user.uid) return;
+      latest.current = { library: pending.library, seq: pending.seq };
+      if (navigator.onLine) void sync(pending.library, pending.seq);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.uid, sync]);
 
   // When connectivity returns, retry only the latest pending local edit.
   // The mirror identity guard still runs before any remote write.
