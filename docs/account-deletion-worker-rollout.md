@@ -24,3 +24,17 @@ Estado: **não ativada em produção**. O código de elegibilidade é um módulo
 ## Regra de publicação
 
 Não fazer deploy nem habilitar exclusão enquanto faltar qualquer pré-requisito. CI verde não comprova recuperação de manuscritos nem segurança do fluxo completo.
+
+## Verificação de produção — 20/10/2026
+
+Leitura via API Cloudflare confirmou que o Worker publicado é `shakstory` (módulo `worker.js` no multipart de `/content/v2`) e seu binding `DB` aponta para D1 `shakstory-pilot`, ID `b2c9c84a-0ff2-4d7f-8b17-e1046149af4a`.
+
+A migração aditiva `shak_account_identity_links` foi aplicada nesse D1 após consulta da estrutura e obtenção de marcador Time Travel. A consulta de confirmação mostrou a tabela criada e **0 vínculos**. Nenhum manuscrito ou conta existente foi modificado.
+
+**Bloqueio encontrado no código publicado:** `shakGateCore` permite modo legado quando `Cf-Access-Jwt-Assertion` não está presente, inclusive retornando `owner:true` em `/api/me`. Isso é incompatível com autorização de exclusão. O novo adaptador `account-deletion-route.js` rejeita qualquer requisição sem JWT validado; ele não deve herdar permissões legadas.
+
+O adaptador é **somente código de integração**, não está registrado na entrada publicada do Worker. A tabela D1 `shak_users` possui `email, created_at, plan, paid_until`, mas não possui nome de exibição canônico. Por isso o adaptador **nega a pré-verificação** até existir esse dado no servidor. Também faltam `FIREBASE_PROJECT_ID` e credenciais Turnstile verificadas. Não publicar a rota nem expor um botão de exclusão como funcional antes de resolver esses bloqueios.
+
+**Sincronização e recuperação:** os testes unitários de falha fechada não simulam uma sincronização D1 ↔ Firebase nem restauração real de manuscrito. É necessário um teste de staging isolado, com documento sintético, falhas injetadas, reconciliação e comparação de hashes antes/depois. Não utilizar dados editoriais de produção como fixture. Não houve teste de escrita em produção.
+
+**Deploy:** nenhum deploy realizado nesta etapa. O Worker atualmente publicado não inclui a nova rota; a migração da tabela por si só não altera o roteamento.
