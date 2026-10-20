@@ -25,7 +25,7 @@ export async function handleAccountDeletionPreflight(req, env, options = {}) {
   if (bodyText.length > 4096) return respond({ error: "payload_too_large" }, 413);
   let body;
   try { body = JSON.parse(bodyText); } catch { return respond({ error: "invalid_json" }, 400); }
-  const user = await env.DB.prepare("SELECT email FROM shak_users WHERE email = ?").bind(accessEmail).first();
+  const user = await env.DB.prepare("SELECT email, display_name FROM shak_users WHERE email = ?").bind(accessEmail).first();
   if (!user) return respond({ eligible: false, reason: "account_not_found" }, 403);
   const linked = await findLinkedGoogleIdentity(env.DB, accessEmail);
   if (!linked || linked.google_email !== accessEmail) return respond({ eligible: false, reason: "identity_unlinked" }, 403);
