@@ -18,7 +18,7 @@ export async function linkGoogleIdentity(req, db, canonicalEmail, options = {}) 
     accessEmail, firebaseEmail: google.email, d1Email: canonicalEmail, firebaseEmailVerified: true,
   })) return failure("identity_mismatch");
   const now = Math.floor((options.now ?? Date.now()) / 1000);
-  if (google.authTime > now || now - google.authTime > 300) return failure("reauth_required");
+  if (!Number.isFinite(google.authTime) || google.authTime > now || now - google.authTime > 300) return failure("reauth_required");
   try {
     const existing = await db.prepare("SELECT access_email, google_uid FROM shak_account_identity_links WHERE access_email = ? OR google_uid = ?")
       .bind(accessEmail, google.uid).all();
