@@ -414,3 +414,63 @@ h1, h2, h3, .font-serif { font-feature-settings: "ss01"; letter-spacing: -0.01em
 /* Cowila lateral: abre espaço à direita em telas largas */
 @media (min-width: 640px) { body.cowila-open .sk-app { padding-right: 380px; } }
 
+
+/* Identidade editorial do site de apresentação, aplicada apenas à contingência.
+   Sem alterações na estrutura, fluxos ou proporções do cabeçalho compartilhado. */
+.sk-contingency-editorial {
+  --background: #f0f4fb;
+  --foreground: #222c3c;
+  --card: #ffffff;
+  --card-foreground: #222c3c;
+  --primary: #08758a;
+  --primary-foreground: #ffffff;
+  --secondary: #e5f0ed;
+  --secondary-foreground: #214b47;
+  --muted: #e8eef4;
+  --muted-foreground: #667480;
+  --border: #dce5e8;
+  --ring: #08758a;
+  --ink: #f9fbfc;
+  background: linear-gradient(165deg, #f1f5ff 0%, #eaf2fa 55%, #f2f5f7 100%);
+  color: var(--foreground);
+}
+.sk-contingency-editorial .sk-main { background: transparent; }
+.sk-contingency-editorial .sk-topbar {
+  background: #ffffffee;
+  border-bottom-color: #e2e9ed;
+}
+.sk-contingency-editorial .sk-brand-mark {
+  background: #132451;
+  color: #ffffff;
+  border-radius: .8rem;
+}
+.sk-contingency-editorial .sk-sidebar {
+  background: #fbfcff;
+  border-right-color: #dce5e8;
+}
+.sk-contingency-editorial .sk-nav {
+  background: #ffffff;
+  border-top-color: #dce5e8;
+}
+.sk-contingency-editorial .library-intro {
+  background: linear-gradient(120deg, #ffffff 0%, #e6f0ec 100%);
+  border: 1px solid #dce5e8;
+  border-radius: 1.5rem;
+  box-shadow: 0 12px 36px #1b35520c;
+}
+.sk-contingency-editorial .library-book-card,
+.sk-contingency-editorial .account-card,
+.sk-contingency-editorial .account-book {
+  border-radius: 1.25rem;
+  border-color: #dce5e8;
+  box-shadow: 0 8px 24px #1b35520a;
+}
+.sk-contingency-editorial .library-view h1,
+.sk-contingency-editorial .library-intro h1 {
+  color: #1d2b3c;
+}
+.sk-contingency-editorial .sk-nav-item:hover,
+.sk-contingency-editorial .sk-nav-item[aria-current="page"] {
+  background: #dcece5;
+  color: #176e69;
+}
