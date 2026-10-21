@@ -34,7 +34,11 @@ export function BillingAdmin() {
       <label className="text-xs">Plano<select className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={offerPlan} onChange={e => setOfferPlan(e.target.value)}>{PAID.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label className="text-xs">Preço (R$)<input className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={price} onChange={e => setPrice(e.target.value)} placeholder="349,49" inputMode="decimal" /></label>
       <label className="text-xs">Link de pagamento<input className="mt-1 block h-10 w-full min-w-0 rounded-lg border bg-background px-3 text-sm" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://payment-link-v3.ton.com.br/…" /></label>
-      <Button size="sm" className="h-10 w-full sm:self-end" disabled={busy || available !== true || parseBRL(price) === null || !url.trim().startsWith("https://")} onClick={() => void run(async () => { await saveOffer(offerPlan, parseBRL(price)!, url.trim()); return "Oferta salva e confirmada pelo servidor."; })}>{busy ? "Salvando…" : "Salvar oferta"}</Button>
+      <Button size="sm" className="h-10 w-full sm:self-end" disabled={busy || available !== true || parseBRL(price) === null || !url.trim().startsWith("https://")} onClick={() => void run(async () => { const cents = parseBRL(price)!; const link = url.trim();
+await saveOffer(offerPlan, cents, link);
+if (!/^https:\/\/payment-link-v3\.ton\.com\.br\//.test(link)) return "Oferta salva no servidor, mas o link não é do padrão payment-link-v3.ton.com.br e não foi publicado em “Ver planos e links Ton”.";
+try { await savePublicPlanOffer({ plan: offerPlan as "economico" | "premium" | "vip", priceCents: cents, checkoutUrl: link }); return "Oferta salva no servidor e publicada em “Ver planos e links Ton”."; }
+catch (error) { return "Oferta salva no servidor, mas NÃO publicada em “Ver planos e links Ton”: " + (error instanceof Error ? error.message : "falha no Firebase") + " (confira se as regras do Firestore foram publicadas e se você entrou como administrador)."; } })}>{busy ? "Salvando…" : "Salvar oferta"}</Button>
     </div>
     <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
       <p className="text-sm font-medium">Catálogo público da contingência</p>
