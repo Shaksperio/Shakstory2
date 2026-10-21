@@ -27,7 +27,11 @@ export function parseBRL(text: string): number | null {
 async function call<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, { method: body === undefined ? "GET" : "POST", headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
-  if (!response.ok) throw new Error(data.message || data.error || "Não foi possível concluir a operação.");
+  if (!response.ok) {
+    if (response.status === 404) throw new Error("Rota de pagamentos não encontrada no Worker principal (HTTP 404). A atualização do frontend não instala essa API. Nenhuma oferta foi alterada.");
+    if (response.status === 401 || response.status === 403) throw new Error("Operação não autorizada: confirme a sessão de administrador no servidor.");
+    throw new Error(data.message || data.error || `Não foi possível concluir a operação (HTTP ${response.status}).`);
+  }
   return data as T;
 }
 
