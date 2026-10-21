@@ -29,6 +29,20 @@ service cloud.firestore {
           || ('mirrorEmail' in request.auth.token && request.auth.token.mirrorEmail.lower() == email)
         );
     }
+    // Catálogo de checkout público, somente links Ton. Leitura para qualquer visitante;
+    // edição exige token Firebase de administrador e formato estrito.
+    match /publicCatalog/plans {
+      allow read: if true;
+      allow create, update: if autorizado()
+        && request.resource.data.keys().hasOnly(['offers', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['offers', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.offers is list
+        && request.resource.data.offers.size() <= 3
+        && request.resource.data.offers.size() > 0
+        && request.resource.data.offers.toSet().size() == request.resource.data.offers.size();
+      allow delete: if false;
+    }
     // Solicitações de exclusão da contingência: cada Firebase UID só acessa
     // seus próprios pedidos. Não concede permissão para apagar contas/dados.
     match /accountDeletionRequests/{uid} {
