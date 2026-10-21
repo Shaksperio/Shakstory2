@@ -160,6 +160,49 @@ describe("patch-worker-plans", () => {
     expect(spawnSync("node", ["--check", output]).status).toBe(0);
     expect(spawnSync("node", [new URL("../scripts/patch-worker-plans.mjs", import.meta.url).pathname, output, output], { encoding: "utf8" }).status).toBe(3);
   });
+
+  it("--upgrade troca o código antigo pelo atual sem duplicar o portão nem mexer no resto do Worker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "plans-up-"));
+    const script = new URL("../scripts/patch-worker-plans.mjs", import.meta.url).pathname;
+    const input = join(dir, "in.mjs");
+    const once = join(dir, "once.mjs");
+    const old = join(dir, "old.mjs");
+    const upgraded = join(dir, "up.mjs");
+    writeFileSync(input, [
+      "async function verifyAccessJwt(){return null}",
+      "const MIRROR_EMAILS=['a@b.c'];",
+      "const MARCA_DO_RESTO='nao-mexer';",
+      "export default{async fetch(req,env){const u=new URL(req.url);",
+      "if(u.pathname==='/api/mirror-token'&&req.method==='GET')return mirrorToken(req,env);",
+      "return new Response('ok')}}",
+    ].join("\n"));
+    expect(spawnSync("node", [script, input, once], { encoding: "utf8" }).status).toBe(0);
+    // simula uma instalação antiga: versão diferente dentro do bloco injetado
+    writeFileSync(old, readFileSync(once, "utf8").replace(/SHAK_WORKER_VERSION = "[^"]+"/, 'SHAK_WORKER_VERSION = "ANTIGA"'));
+    expect(readFileSync(old, "utf8")).toContain("ANTIGA");
+    // sem --upgrade continua recusando; com --upgrade atualiza
+    expect(spawnSync("node", [script, old, upgraded], { encoding: "utf8" }).status).toBe(3);
+    const run = spawnSync("node", [script, "--upgrade", old, upgraded], { encoding: "utf8" });
+    expect(run.status).toBe(0);
+    const out = readFileSync(upgraded, "utf8");
+    expect(out).not.toContain("ANTIGA");
+    expect(out).toContain("MARCA_DO_RESTO='nao-mexer'");
+    expect(out.split("shakGate(req,env,u)").length).toBe(2);
+    expect(out.split("// Contas, teste de 7 dias e planos do Shakstory").length).toBe(2);
+    expect(spawnSync("node", ["--check", upgraded]).status).toBe(0);
+    // atualizar de novo dá o mesmo resultado (idempotente)
+    const again = join(dir, "again.mjs");
+    expect(spawnSync("node", [script, "--upgrade", upgraded, again], { encoding: "utf8" }).status).toBe(0);
+    expect(readFileSync(again, "utf8")).toBe(out);
+    // sem nada instalado, --upgrade não faz nada
+    expect(spawnSync("node", [script, "--upgrade", input, join(dir, "x.mjs")], { encoding: "utf8" }).status).toBe(3);
+  });
+
+  it("o Worker informa a versão que o app espera", async () => {
+    const { SHAK_WORKER_VERSION } = await load();
+    const client = readFileSync(new URL("../client/src/lib/plans.ts", import.meta.url), "utf8");
+    expect(client).toContain(`EXPECTED_WORKER_VERSION = "${SHAK_WORKER_VERSION}"`);
+  });
 });
 
 describe("withGemini (IA opcional)", () => {

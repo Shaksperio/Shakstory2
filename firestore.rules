@@ -29,8 +29,19 @@ service cloud.firestore {
           || ('mirrorEmail' in request.auth.token && request.auth.token.mirrorEmail.lower() == email)
         );
     }
+    // Oferta válida do catálogo público: só plano, preço em centavos e link oficial Ton (HTTPS, domínio e formato fixos).
+    // Nada de campos extras, preço zero ou negativo, nem link fora de payment-link-v3.ton.com.br.
+    function ofertaValida(o) {
+      return o is map
+        && o.keys().hasOnly(['plan', 'priceCents', 'checkoutUrl'])
+        && o.keys().hasAll(['plan', 'priceCents', 'checkoutUrl'])
+        && o.plan in ['economico', 'premium', 'vip']
+        && o.priceCents is int && o.priceCents > 0 && o.priceCents <= 100000000
+        && o.checkoutUrl is string
+        && o.checkoutUrl.matches('^https://payment-link-v3\\.ton\\.com\\.br/pl_[A-Za-z0-9_-]{8,80}$');
+    }
     // Catálogo de checkout público, somente links Ton. Leitura para qualquer visitante;
-    // edição exige token Firebase de administrador e formato estrito.
+    // edição exige token Firebase de administrador e formato estrito (1 a 3 ofertas, cada plano uma vez).
     match /publicCatalog/plans {
       allow read: if true;
       allow create, update: if autorizado()
@@ -38,9 +49,14 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['offers', 'updatedAt'])
         && request.resource.data.updatedAt == request.time
         && request.resource.data.offers is list
+        && request.resource.data.offers.size() >= 1
         && request.resource.data.offers.size() <= 3
-        && request.resource.data.offers.size() > 0
-        && request.resource.data.offers.toSet().size() == request.resource.data.offers.size();
+        && ofertaValida(request.resource.data.offers[0])
+        && (request.resource.data.offers.size() < 2 || (ofertaValida(request.resource.data.offers[1])
+              && request.resource.data.offers[1].plan != request.resource.data.offers[0].plan))
+        && (request.resource.data.offers.size() < 3 || (ofertaValida(request.resource.data.offers[2])
+              && request.resource.data.offers[2].plan != request.resource.data.offers[0].plan
+              && request.resource.data.offers[2].plan != request.resource.data.offers[1].plan));
       allow delete: if false;
     }
     // Solicitações de exclusão da contingência: cada Firebase UID só acessa

@@ -17,9 +17,21 @@ export type PlanInfo = {
   /** Direitos do catálogo do servidor (chave estável -> liberado). Ausente em servidores antigos. */
   entitlements?: Record<string, boolean>;
   catalogVersion?: number;
+  /** Versão do código de contas/planos que o Worker está rodando. Ausente em Workers antigos (sem as rotas de pagamentos). */
+  workerVersion?: string;
+  /** Verdadeiro só quando a resposta veio mesmo do servidor (não é o padrão offline). */
+  serverChecked?: boolean;
   cowilaDaily?: number;
   cowilaUsedToday?: number;
 };
+
+/** Versão que o Worker em produção deve informar em /api/me. Igual a SHAK_WORKER_VERSION em cloudflare-worker/plans.js (um teste confere). */
+export const EXPECTED_WORKER_VERSION = "2026-10-21.1";
+/** "outdated": o servidor respondeu, mas o Worker não tem (ou tem outra versão do) código de contas e pagamentos; as rotas /api/admin/* e /api/billing/* podem dar 404. */
+export function workerStatus(plan: PlanInfo): "ok" | "outdated" | "unknown" {
+  if (!plan.serverChecked) return "unknown";
+  return plan.workerVersion === EXPECTED_WORKER_VERSION ? "ok" : "outdated";
+}
 
 export const FEATURE_LABEL: Record<Feature, string> = { export: "Exportar o livro", cowila: "Cowila atendimento", share: "Tornar a leitura pública" };
 /** Espelho de PLAN_DEFS em cloudflare-worker/plans.js, só para a tela de planos. */
@@ -57,7 +69,7 @@ export async function refreshPlan(): Promise<PlanInfo> {
     if (!response.ok) return info;
     const data = await response.json() as Partial<PlanInfo>;
     if (!data || typeof data.plan !== "string" || !data.features) return info;
-    info = { ...FULL, ...data, features: { ...FULL.features, ...data.features } } as PlanInfo;
+    info = { ...FULL, ...data, serverChecked: true, features: { ...FULL.features, ...data.features } } as PlanInfo;
     emit();
   } catch { /* sem servidor: mantém tudo aberto */ }
   return info;
