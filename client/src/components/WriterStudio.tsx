@@ -121,7 +121,7 @@ const countCharacters = (book: Book) => book.nodes.reduce((sum, node) => sum + n
 const countPages = (book: Book) => Math.max(1, Math.ceil(countCharacters(book) / 1800));
 const wordsOf = (book: Book) => book.nodes.reduce((sum, node) => sum + countWords(node.content), 0);
 const coverHue = (title: string) => Array.from(title).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
-const viewLabels: Record<View, string> = { library: "Biblioteca", project: "Visão geral", editor: "Escrita", planning: "Planejar história", prepare: "Preparar edição", security: "Segurança", "account-center": "Central de Contas" };
+const viewLabels: Record<View, string> = { library: "Biblioteca", project: "Visão geral", editor: "Escrita", planning: "Planejar história", prepare: "Preparar edição", security: "Segurança", "account-center": "Central de Contas", "admin-plans": "Contas e planos" };
 const styleSampleForBook = (book: Book, activeNodeId?: string | null, activeDraft?: string) => book.nodes.map(node => node.id === activeNodeId && activeDraft !== undefined ? activeDraft : node.content).join("\n\n").slice(-24000);
 const formatDuration = (seconds = 0) => { const minutes = Math.max(0, Math.round(seconds / 60)); return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}min`; };
 const hierarchyId = (prefix: "universe" | "series", value: string) => {
@@ -308,11 +308,12 @@ export default function WriterStudio() {
   const utils = trpc.useUtils();
   const literaryMutation = trpc.literaryAssist.analyze.useMutation({ onSuccess: data => setAssistResult(data) });
   const coauthorMutation = trpc.literaryAssist.coauthor.useMutation({ onSuccess: data => { setCoauthorResult(data); setCoauthorExpansion(null); } });
+  const expansionTarget = useRef<{ bookId: string; sceneId: string } | null>(null);
   const expandCoauthorMutation = trpc.literaryAssist.expandCoauthor.useMutation({
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       // A expansão escolhida deve chegar ao manuscrito, não ficar apenas na prévia.
       // Nunca aplique uma resposta tardia a outro capítulo/livro.
-      if (variables.bookId !== activeBookId || variables.sceneId !== activeNodeId) {
+      if (!expansionTarget.current || expansionTarget.current.bookId !== activeBookId || expansionTarget.current.sceneId !== activeNodeId) {
         setNotice("Expansão recebida para outra cena; nada foi alterado.");
         return;
       }
@@ -904,6 +905,7 @@ export default function WriterStudio() {
         if (!activeNode || !alternative.text.trim()) return;
         if (operation === "expand") {
           setCoauthorExpansion(null);
+          expansionTarget.current = { bookId: activeBook.id, sceneId: activeNode.id };
           expandCoauthorMutation.mutate({ bookId: activeBook.id, bookTitle: activeBook.title, sceneId: activeNode.id, sceneTitle: activeNode.title, text: draft, selectedAlternative: alternative, intent, editorialControls, genre: activeBook.publication?.genre, subgenre: activeBook.publication?.category, planning: activeBook.planning, story: activeBook.story, styleSample: styleSampleForBook(activeBook, activeNode.id, draft) });
         } else {
           applyCoauthorExpansion(alternative.text, operation);
