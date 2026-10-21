@@ -89,10 +89,10 @@ export const usePlansDialog = () => useSyncExternalStore(subscribe, () => dialog
 
 export async function adminUsers(): Promise<Array<{ email: string; plan: string; label: string; createdAt: string; daysLeft: number | null; paidUntil: string | null }>> {
   const response = await fetch("/api/admin/users");
-  if (!response.ok) throw new Error("Não foi possível listar as contas.");
+  if (!response.ok) throw new Error(response.status === 404 ? "A rota de contas não está instalada no Worker principal (HTTP 404). Atualize o Worker antes de administrar assinaturas." : response.status === 401 || response.status === 403 ? "A sessão não tem autorização para listar contas. Verifique o acesso de administrador." : `Não foi possível listar as contas (HTTP ${response.status}).`);
   return ((await response.json()) as { users: never[] }).users;
 }
 export async function adminSetPlan(email: string, plan: string, days: number): Promise<void> {
   const response = await fetch("/api/admin/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, plan, days }) });
-  if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || "Não foi possível alterar o plano.");
+  if (!response.ok) throw new Error(response.status === 404 ? "A rota de alteração de planos não está instalada no Worker principal (HTTP 404). Nenhuma assinatura foi modificada." : response.status === 401 || response.status === 403 ? "Operação negada: é necessário acesso de administrador validado no servidor." : ((await response.json().catch(() => ({}))) as { error?: string }).error || `Não foi possível alterar o plano (HTTP ${response.status}).`);
 }
