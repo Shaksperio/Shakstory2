@@ -1274,7 +1274,7 @@ export function LiteraryAssistant({
         <span>Termos e voz protegidos conforme as preferências acima.</span>
       </div>
 
-      <Button className="mt-3 w-full" size="sm" onClick={() => { const chosenOperation = operation === "continue" && /\\b(reescrev|reescrit|reescrever|reformular|refaça|refazer|substitu)/i.test(intent) ? "rewrite" : operation; setSelectedSampleId(null); setGeneratedOperation(chosenOperation); onGenerate({ intent: (chosenOperation === "rewrite" ? "Reescreva integralmente o texto fornecido, sem continuar a cena. " : chosenOperation === "expand" ? "Expanda o contexto e desenvolva o caminho escolhido. " : "Continue o texto sem reescrever o que já existe. ") + intent, operation: chosenOperation, editorialControls }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
+      <Button className="mt-3 w-full" size="sm" onClick={() => { const chosenOperation = operation === "continue" && /\b(reescrev|reescrit|reescrever|reformular|refaça|refazer|substitu)/i.test(intent) ? "rewrite" : operation; setSelectedSampleId(null); setGeneratedOperation(chosenOperation); onGenerate({ intent: (chosenOperation === "rewrite" ? "Reescreva integralmente o texto fornecido, sem continuar a cena. " : chosenOperation === "expand" ? "Expanda o contexto e desenvolva o caminho escolhido. " : "Continue o texto sem reescrever o que já existe. ") + intent, operation: chosenOperation, editorialControls }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
         <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando 3 amostras…" : "Gerar 3 amostras"}
       </Button>
 
