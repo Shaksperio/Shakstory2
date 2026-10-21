@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { savePublicPlanOffer } from "@/lib/mirror/firebase";
+import { usePlan, workerStatus, EXPECTED_WORKER_VERSION } from "@/lib/plans";
 import { STATUS_LABEL, confirmPurchase, fetchAdminBilling, formatBRL, parseBRL, saveOffer, setPurchaseStatus, type AdminBilling } from "@/lib/billing";
 
 const PAID = [["economico", "Econômico"], ["premium", "Premium"], ["vip", "VIP"]] as const;
 
 /** Painel do administrador: preço e link de cada plano, pedidos em aberto e confirmação do pagamento visto no painel da Ton. */
 export function BillingAdmin() {
+  const plan = usePlan();
+  const outdated = workerStatus(plan) === "outdated";
   const [data, setData] = useState<AdminBilling | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,6 +26,7 @@ export function BillingAdmin() {
   return <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-5" aria-label="Pagamentos">
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-serif text-2xl">Pagamentos e ofertas</h3><Button size="sm" variant="outline" disabled={busy} onClick={() => void load()}>Atualizar dados</Button></div>
     <p className="text-xs text-muted-foreground">Confira o pagamento no painel da Ton (valor, moeda, ID único da transação e e-mail, se aparecer) antes de confirmar.</p>
+    {outdated && <p role="alert" className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">O Worker em produção está desatualizado (versão {plan.workerVersion ?? "sem versão"}; esperada {EXPECTED_WORKER_VERSION}). Por isso as rotas de pagamentos e de contas podem responder 404. Publicar o frontend não atualiza o Worker: aplique o patch descrito em docs/DEPLOY-WORKER.md.</p>}
     {available === false && <p role="alert" className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">O serviço de administração de pagamentos não respondeu. As ofertas não podem ser gravadas até que a API do servidor esteja disponível. Nenhuma alteração foi confirmada.</p>}
     {message && <p role="status" className="mt-2 text-sm">{message}</p>}
     <h4 className="mt-5 text-sm font-semibold">Configurar oferta</h4>

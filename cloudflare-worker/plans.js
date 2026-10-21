@@ -9,6 +9,8 @@
 //  - Escrever e ler o próprio texto nunca é bloqueado. Bloqueia-se o que tem custo ou sai do app: Cowila, exportação e tornar a leitura pública (a prévia privada do próprio livro segue livre).
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
+/** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
+export const SHAK_WORKER_VERSION = "2026-10-21.1";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -83,7 +85,7 @@ export function resolvePlan(row, now = Date.now()) {
     paidUntil: paidUntil !== null ? new Date(paidUntil).toISOString() : null,
     features: { export: def.export, cowila: def.cowila, share: def.share },
     entitlements: entitlementsFor(def),
-    catalogVersion: CATALOG_VERSION,
+    catalogVersion: CATALOG_VERSION, workerVersion: SHAK_WORKER_VERSION,
     cowilaDaily: def.cowilaDaily,
   };
 }
@@ -283,7 +285,7 @@ async function shakGateCore(req, env, u, options = {}) {
   const owners = (env.MIRROR_EMAILS ? String(env.MIRROR_EMAILS).split(",") : MIRROR_EMAILS).map(item => item.trim().toLowerCase());
   if (!jwt) {
     // Sem credencial do Access: mesmo comportamento de antes (o próprio Access impede que isso chegue de fora).
-    if (path === "/api/me") return { response: planJson({ legacy: true, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION }) };
+    if (path === "/api/me") return { response: planJson({ legacy: true, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION, workerVersion: SHAK_WORKER_VERSION }) };
     if (path.indexOf("/api/security/antivirus") === 0) return { response: await avRoute(req, env, u, "legacy-owner", now) };
     return {};
   }
@@ -301,7 +303,7 @@ async function shakGateCore(req, env, u, options = {}) {
     // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
     if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
     if (path === "/api/assist" && req.method === "POST") await shakBumpMeter(env.DB, now, { ai: 1 });
-    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION, protection: await shakReadProtection(env.DB, env, now) }) };
+    if (path === "/api/me") return { response: planJson({ email, owner: true, plan: "owner", label: PLAN_DEFS.owner.label, features: { export: true, cowila: true, share: true }, entitlements: entitlementsFor(PLAN_DEFS.owner), catalogVersion: CATALOG_VERSION, workerVersion: SHAK_WORKER_VERSION, protection: await shakReadProtection(env.DB, env, now) }) };
     if (path === "/api/admin/users" && req.method === "GET") {
       await ensurePlanTables(env.DB);
       const rows = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users ORDER BY created_at DESC LIMIT 500").all();
@@ -339,7 +341,7 @@ async function shakGateCore(req, env, u, options = {}) {
   const account = await loadAccount(db, email, now);
   const info = account.info;
 
-  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
+  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, workerVersion: SHAK_WORKER_VERSION, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
   if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now) };
 
