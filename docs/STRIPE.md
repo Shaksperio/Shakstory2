@@ -11,7 +11,7 @@
    - Eventos: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`
    - Copie o *Segredo de assinatura* (`whsec_…`) e cadastre no Worker como segredo `STRIPE_WEBHOOK_SECRET`.
 4. **Cloudflare Access:** a rota `/api/public/stripe-webhook` precisa de uma política **Bypass** (a Stripe não tem login do Access). Só essa rota; o resto continua protegido. A rota se protege sozinha: sem a assinatura correta responde 400.
-5. Em *Contas e planos*, salve o preço de cada plano (o link da Ton passa a ser opcional).
+5. Em *Contas e planos*, use **Gerar link de pagamento** (e-mail + plano) para testar ou enviar a um cliente, e salve o preço de cada plano (o link da Ton passa a ser opcional).
 
 ## Regras de segurança do Worker
 

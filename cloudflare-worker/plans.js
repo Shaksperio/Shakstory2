@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.3";
+export const SHAK_WORKER_VERSION = "2026-10-21.4";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -299,7 +299,7 @@ async function shakGateCore(req, env, u, options = {}) {
   }
   if (owner) {
     if (path.indexOf("/api/billing/") === 0) return { response: planJson({ error: "owner_has_full_access" }, 400) };
-    if (path === "/api/admin/billing" || path === "/api/admin/offer" || path.indexOf("/api/admin/purchase/") === 0) return { response: await shakBillingAdmin(env.DB, email, path, req, now) };
+    if (path === "/api/admin/billing" || path === "/api/admin/offer" || path === "/api/admin/stripe/link" || path.indexOf("/api/admin/purchase/") === 0) return { response: await shakBillingAdmin(env.DB, email, path, req, now, env, options.fetch) };
     // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
     if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
     if (path === "/api/assist" && req.method === "POST") await shakBumpMeter(env.DB, now, { ai: 1 });
@@ -536,7 +536,7 @@ async function shakConfirmPurchase(db, admin, purchase, txId, amountCents, curre
 }
 
 /** Rotas do administrador (só o dono chega aqui): painel, ofertas, confirmação e revisão de pedidos. */
-async function shakBillingAdmin(db, admin, path, req, now) {
+async function shakBillingAdmin(db, admin, path, req, now, env = {}, fetchFn = null) {
   await shakEnsureBilling(db);
   if (path === "/api/admin/billing" && req.method === "GET") {
     const offers = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).map(row => shakOfferView(row, true));
@@ -548,6 +548,14 @@ async function shakBillingAdmin(db, admin, path, req, now) {
   if (req.method !== "POST") return planJson({ error: "not_found" }, 404);
   const body = await shakBody(req);
   if (!body) return planJson({ error: "invalid" }, 400);
+
+  if (path === "/api/admin/stripe/link") {
+    // link de pagamento para uma conta (teste ou envio a um cliente): o pedido é daquele e-mail e o plano só ativa quando a Stripe confirmar
+    const target = String(body.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target) || target.length > 200) return planJson({ error: "invalid_email" }, 400);
+    await shakAudit(db, now, admin, "stripe.link", { target, plan: String(body.plan || "") });
+    return await shakStripeCheckout(db, target, String(body.plan || ""), req, env, fetchFn, now);
+  }
 
   if (path === "/api/admin/offer") {
     const plan = String(body.plan || "");

@@ -338,4 +338,22 @@ describe("Stripe: checkout e webhook assinado", () => {
     expect(body.stripe).toBe(true);
     expect(body.offers.find((o: any) => o.plan === "vip")).toEqual({ plan: "vip", priceCents: 100795 });
   });
+
+  it("o administrador gera o link de pagamento de uma conta; usuário comum não pode; o plano só ativa pelo webhook", async () => {
+    const { mod, db } = await setup();
+    let sent: URLSearchParams | null = null;
+    const fetchFn = async (_u: string, init: any) => { sent = new URLSearchParams(init.body); return new Response(JSON.stringify({ id: "cs_test_9", url: "https://checkout.stripe.com/c/pay/cs_test_9" }), { status: 200, headers: { "content-type": "application/json" } }); };
+    const adminLink = async (email: string, target: string, plan = "premium") => {
+      const r = new Request("https://app.example/api/admin/stripe/link", { method: "POST", headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json" }, body: JSON.stringify({ email: target, plan }) });
+      const out = await mod.shakGate(r, env(db), new URL(r.url), { verify: async () => email, fetch: fetchFn });
+      return { status: out.response.status, json: await out.response.json() };
+    };
+    const ok = await adminLink(OWNER, "Cliente@Example.com");
+    expect(ok.status).toBe(200);
+    expect(ok.json.url).toContain("checkout.stripe.com");
+    expect(sent!.get("customer_email")).toBe("cliente@example.com");
+    expect((await me(mod, db, "cliente@example.com")).plan).toBe("trial");
+    expect((await adminLink("ana@example.com", "cliente@example.com")).status).toBe(403);
+    expect((await adminLink(OWNER, "sem-arroba")).status).toBe(400);
+  });
 });
