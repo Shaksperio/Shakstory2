@@ -673,7 +673,7 @@ export default function WriterStudio() {
   const applyCoauthorExpansion = (expandedText: string, operation: CoauthorOperation = "continue") => {
     if (!activeNode || !expandedText.trim()) return;
     const quality = assessCoauthorQuality(expandedText);
-    if (!quality.accepted) { setNotice("Cowila: continuação rejeitada por repetição. Volte às amostras e gere outra proposta."); return; }
+    if (!quality.accepted) { setNotice("Cowila: texto rejeitado por repetição. Escolha outra amostra."); return; }
     setCoauthorUndo({ nodeId: activeNode.id, text: draft, html: draftHtml });
     const baseHtml = draftHtml || continuationToHtml(draft);
     updateDraft(
@@ -1255,7 +1255,7 @@ export function LiteraryAssistant({
         <span>Termos e voz protegidos conforme as preferências acima.</span>
       </div>
 
-      <Button className="mt-3 w-full" size="sm" onClick={() => { setSelectedSampleId(null); setGeneratedOperation(operation); onGenerate({ intent: (operation === "rewrite" ? "Reescreva integralmente o texto fornecido, sem continuar a cena. " : operation === "expand" ? "Expanda o contexto e desenvolva o caminho escolhido. " : "Continue o texto sem reescrever o que já existe. ") + intent, operation, editorialControls }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
+      <Button className="mt-3 w-full" size="sm" onClick={() => { const chosenOperation = operation === "continue" && /\\b(reescrev|reescrit|reescrever|reformular|refaça|refazer|substitu)/i.test(intent) ? "rewrite" : operation; setSelectedSampleId(null); setGeneratedOperation(chosenOperation); onGenerate({ intent: (chosenOperation === "rewrite" ? "Reescreva integralmente o texto fornecido, sem continuar a cena. " : chosenOperation === "expand" ? "Expanda o contexto e desenvolva o caminho escolhido. " : "Continue o texto sem reescrever o que já existe. ") + intent, operation: chosenOperation, editorialControls }); }} disabled={coauthorLoading || coauthorExpansionLoading}>
         <Sparkles className="mr-2 h-3.5 w-3.5" />{coauthorLoading ? "Criando 3 amostras…" : "Gerar 3 amostras"}
       </Button>
 
