@@ -1,19 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
-import { CONTINGENCY } from "@/lib/contingency";
 import { daysUntil, formatBRL } from "@/lib/billing";
 import { readPublicPlanOffers, type PublicPlanOffer } from "@/lib/mirror/firebase";
 import { PlanPurchase } from "./PlanPurchase";
 import { BillingAdmin } from "./BillingAdmin";
-import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
+import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
 export function PlanBanner() {
   const info = usePlan();
-  if (info.owner) {
-    if (!info.email || CONTINGENCY) return null; // o painel de contas fica no endereço principal
-    return null;
-  }
+
   if (info.plan === "trial") {
     return <div className="border-b border-primary/20 bg-primary/5"><p role="status" className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-5 py-1.5 text-xs">
       <span>Teste grátis: {info.daysLeft === 1 ? "resta 1 dia" : `restam ${info.daysLeft ?? 0} dias`}. Depois, exportação e Cowila exigem um plano.</span>
@@ -31,7 +27,7 @@ export function PlanBanner() {
       <span>Seu plano {info.label} vence em {left === 1 ? "1 dia" : `${left} dias`}. A renovação é feita por novo pagamento.</span>
       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openPlans}>Renovar</Button></p></div>;
   }
-  return null;
+  return <div className="border-b border-border/60 bg-background"><div className="mx-auto flex max-w-7xl justify-end px-5 py-1"><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={openPlans}>Ver planos e links Ton</Button></div></div>;
 }
 
 export function PlansDialog() {
@@ -53,7 +49,7 @@ export function PlansDialog() {
         const offer = publicOffers.find(item => item.plan === card.id);
         return <section key={card.id} className="flex flex-col rounded-xl border border-border bg-card p-4 text-sm">
           <h3 className="font-semibold">{card.label}</h3>
-          <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : PLAN_PRICES[card.id] ?? "Preço indisponível"}</p>
+          <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : "Preço a confirmar"}</p>
           <ul className="mt-3 flex-1 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
           {offer ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Link Ton ainda não cadastrado</span>}
         </section>;
