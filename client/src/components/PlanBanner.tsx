@@ -49,7 +49,7 @@ export function PlansDialog() {
       {CONTINGENCY && <p className="mt-3 text-xs text-muted-foreground">A assinatura é feita pelo endereço principal do Shakstory.</p>}
       <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
-    </div></section>;
+    </div></div>;
 }
 
 export function AdminPanel({ onClose }: { onClose: () => void }) {
@@ -79,5 +79,5 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
         <span className="flex gap-1">{(["economico", "premium", "vip"] as const).map(id => <Button key={id} size="sm" variant={user.plan === id ? "default" : "outline"} className="h-7 text-xs" onClick={() => void apply(user.email, id)}>{id === "economico" ? "Econ." : id === "premium" ? "Prem." : "VIP"}</Button>)}</span></li>)}
         {users.length === 0 && <li className="py-3 text-xs text-muted-foreground">Nenhuma conta de usuário encontrada neste serviço.</li>}</ul></section>
       <BillingAdmin />
-    </div></div>;
+    </div></section>;
 }
