@@ -35,7 +35,12 @@ export function PlansDialog() {
   const info = usePlan();
   const [publicOffers, setPublicOffers] = useState<PublicPlanOffer[]>([]);
   const [catalogError, setCatalogError] = useState(false);
-  useEffect(() => { if (!state.open) return; readPublicPlanOffers().then(offers => { setPublicOffers(offers); setCatalogError(false); }).catch(() => setCatalogError(true)); }, [state.open]);
+  useEffect(() => { if (!state.open) return; const fromServer = fetch("/api/public/plans", { headers: { accept: "application/json" } }).then(r => (r.ok ? r.json() : null)).then((d: { offers?: PublicPlanOffer[] } | null) => (Array.isArray(d?.offers) ? d!.offers! : [])).catch(() => [] as PublicPlanOffer[]);
+    const fromFirebase = readPublicPlanOffers().then(list => ({ list, failed: false })).catch(() => ({ list: [] as PublicPlanOffer[], failed: true }));
+    void Promise.all([fromServer, fromFirebase]).then(([server, firebase]) => {
+      const merged = [...server, ...firebase.list.filter(item => !server.some(other => other.plan === item.plan))];
+      setPublicOffers(merged); setCatalogError(firebase.failed && merged.length === 0);
+    }); }, [state.open]);
   if (!state.open) return null;
   const subject = encodeURIComponent("Plano do Shakstory");
   const body = encodeURIComponent(`Olá! Quero ativar o plano ______ no Shakstory.\nMeu e-mail de acesso: ${info.email ?? ""}`);
