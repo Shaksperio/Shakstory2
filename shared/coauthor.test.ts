@@ -52,6 +52,13 @@ describe("Cowila coauthor two-stage flow", () => {
     expect(prompt).toContain("cada parágrafo deve acrescentar");
   });
 
+  it("requires continuation samples to advance the scene without repeating context", () => {
+    const prompt = buildContinuationPrompt({ approach: pickApproaches()[0], intent: "Continue esta cena." });
+    expect(prompt).toContain("não reconte, não parafraseie nem reencene");
+    expect(prompt).toContain("ação, decisão, descoberta ou consequência concreta");
+    expect(prompt).toContain("elimine frases e blocos duplicados");
+  });
+
   it("builds a Phase 1 sample prompt instead of a final continuation", () => {
     const prompt = buildContinuationPrompt({
       intent: "Elia deve desconfiar da carta sem descobrir toda a verdade.",
