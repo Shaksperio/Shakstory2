@@ -306,7 +306,22 @@ export default function WriterStudio() {
   const utils = trpc.useUtils();
   const literaryMutation = trpc.literaryAssist.analyze.useMutation({ onSuccess: data => setAssistResult(data) });
   const coauthorMutation = trpc.literaryAssist.coauthor.useMutation({ onSuccess: data => { setCoauthorResult(data); setCoauthorExpansion(null); } });
-  const expandCoauthorMutation = trpc.literaryAssist.expandCoauthor.useMutation({ onSuccess: data => setCoauthorExpansion(data) });
+  const expandCoauthorMutation = trpc.literaryAssist.expandCoauthor.useMutation({
+    onSuccess: (data, variables) => {
+      // A expansão escolhida deve chegar ao manuscrito, não ficar apenas na prévia.
+      // Nunca aplique uma resposta tardia a outro capítulo/livro.
+      if (variables.bookId !== activeBookId || variables.sceneId !== activeNodeId) {
+        setNotice("Expansão recebida para outra cena; nada foi alterado.");
+        return;
+      }
+      if (!assessCoauthorQuality(data.text).accepted) {
+        setCoauthorExpansion(data);
+        setNotice("Expansão com duplicações: manuscrito preservado.");
+        return;
+      }
+      applyCoauthorExpansion(data.text, "continue");
+    },
+  });
   const continuityMutation = trpc.literaryAssist.continuity.useMutation({ onSuccess: data => setContinuityResult(data) });
   const [library, setLibrary] = useState<LibraryDocument>(emptyLibrary);
   const [sha, setSha] = useState<string | undefined>();
@@ -1285,10 +1300,10 @@ export function LiteraryAssistant({
           {!assessCoauthorQuality(alternative.text).accepted && <p role="alert" className="mt-2 text-xs text-destructive">Esta amostra contém blocos duplicados e não pode ser escolhida. As outras opções continuam disponíveis.</p>}
           {assessCoauthorQuality(alternative.text).warnings.length > 0 && <p className="mt-2 text-xs text-amber-600">{assessCoauthorQuality(alternative.text).warnings.join(" ")}</p>}
           <Button className="mt-3 w-full" size="sm" variant="outline" disabled={coauthorExpansionLoading || !assessCoauthorQuality(alternative.text).accepted} onClick={() => { setSelectedSampleId(alternative.id); onChoose(alternative, intent, editorialControls, generatedOperation); }}>
-            <ChevronRight className="mr-2 h-3.5 w-3.5" />{coauthorExpansionLoading && selectedSampleId === alternative.id ? "Adicionando…" : (generatedOperation === "expand" ? "Expandir este caminho" : generatedOperation === "rewrite" ? "Substituir pelo texto escolhido" : "Adicionar ao manuscrito")}
+            <ChevronRight className="mr-2 h-3.5 w-3.5" />{coauthorExpansionLoading && selectedSampleId === alternative.id ? "Expandindo e inserindo…" : (generatedOperation === "expand" ? "Expandir este caminho" : generatedOperation === "rewrite" ? "Substituir pelo texto escolhido" : "Adicionar ao manuscrito")}
           </Button>
         </article>)}
-        {coauthorExpansionLoading && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-4 text-muted-foreground">A Cowila está preparando a continuação.</div>}
+        {coauthorExpansionLoading && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-4 text-muted-foreground">A Cowila está expandindo o caminho escolhido. Após a validação, o texto será acrescentado ao final da cena automaticamente.</div>}
         <Button variant="ghost" className="w-full text-xs" onClick={() => { setSelectedSampleId(null); onReject(); }}>Descartar as 3 amostras</Button>
       </div>}
 
