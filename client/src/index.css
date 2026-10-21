@@ -425,3 +425,15 @@ h1, h2, h3, .font-serif { font-feature-settings: "ss01"; letter-spacing: -0.01em
   .sk-contingency .sk-topbar > div { min-width: 0; max-width: 100%; }
   .sk-contingency .sk-topbar .sk-mobile-logout { display: none; }
 }
+
+/* Compact contingency header on narrow phones. No principal-mode selectors. */
+@media (max-width: 639px) {
+  .sk-contingency .sk-topbar { width: 100%; max-width: 100%; }
+  .sk-contingency .sk-topbar-inner { box-sizing: border-box; width: 100%; min-width: 0; gap: .375rem; padding-inline: .5rem; }
+  .sk-contingency .sk-topbar-inner > button:first-child { flex: 0 0 2.25rem; }
+  .sk-contingency .sk-topbar-inner > div:nth-child(2) { flex: 0 0 auto; }
+  .sk-contingency .sk-topbar-actions { min-width: 0; flex: 1 1 auto; justify-content: flex-end; gap: .375rem; }
+  .sk-contingency .sk-topbar-actions > [role="status"] { min-width: 0; max-width: 7.75rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .625rem; padding-inline: .375rem; }
+  .sk-contingency .sk-topbar-search, .sk-contingency .sk-mobile-logout { display: none; }
+  .sk-contingency .sk-topbar-actions > button { flex-shrink: 0; }
+}
