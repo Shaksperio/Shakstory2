@@ -257,6 +257,27 @@ describe("WriterStudio integrated literary assistance", () => {
     await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
   });
 
+  it("replaces the existing scene when the writer requests a rewrite, and supports undo", async () => {
+    render(<WriterStudio />);
+    fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manuscrito" }));
+    const editor = await screen.findByRole("textbox", { name: "Editar bloco 1" });
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
+    fireEvent.click(screen.getByRole("tab", { name: "Coautora" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Intenção da continuação" }), {
+      target: { value: "Reescreva este texto com mais emoção." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Gerar 3 amostras" }));
+    expect(harness.coauthorMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({
+      intent: expect.stringContaining("Reescreva este texto com mais emoção."),
+    }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Substituir pelo texto escolhido" })[0]);
+    await waitFor(() => expect(editor.textContent).toBe("Uma sombra atravessou a janela."));
+    expect(editor.textContent).not.toContain("A noite caiu.");
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer última aplicação" }));
+    await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
+  });
+
   it("runs the Continuity Radar with the real scene without modifying the manuscript", async () => {
     render(<WriterStudio />);
     fireEvent.click(screen.getByRole("button", { name: "Continuar Caderno" }));
