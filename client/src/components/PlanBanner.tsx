@@ -9,16 +9,9 @@ import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, ad
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
 export function PlanBanner() {
   const info = usePlan();
-  const [admin, setAdmin] = useState(false);
-  useEffect(() => {
-    if (!info.owner || !info.email || CONTINGENCY) return;
-    const open = () => setAdmin(true);
-    window.addEventListener("shakstory:open-admin-plans", open);
-    return () => window.removeEventListener("shakstory:open-admin-plans", open);
-  }, [info.owner, info.email]);
   if (info.owner) {
     if (!info.email || CONTINGENCY) return null; // o painel de contas fica no endereço principal
-    return <>{admin && <AdminPanel onClose={() => setAdmin(false)} />}</>;
+    return null;
   }
   if (info.plan === "trial") {
     return <div className="border-b border-primary/20 bg-primary/5"><p role="status" className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-5 py-1.5 text-xs">
@@ -56,10 +49,10 @@ export function PlansDialog() {
       {CONTINGENCY && <p className="mt-3 text-xs text-muted-foreground">A assinatura é feita pelo endereço principal do Shakstory.</p>}
       <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
-    </div></div>;
+    </div></section>;
 }
 
-function AdminPanel({ onClose }: { onClose: () => void }) {
+export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof adminUsers>>>([]);
   const [email, setEmail] = useState("");
   const [plan, setPlan] = useState("premium");
@@ -71,8 +64,8 @@ function AdminPanel({ onClose }: { onClose: () => void }) {
     try { await adminSetPlan(target, nextPlan, days); setMessage(`${target}: plano ${nextPlan} aplicado.`); await load(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao aplicar."); }
   };
-  return <div className="fixed inset-0 z-[70] grid place-items-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Contas e planos">
-    <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-border bg-background p-4 shadow-2xl sm:p-7">
+  return <section className="mx-auto w-full max-w-4xl min-w-0 py-4 sm:py-8" aria-label="Contas e planos">
+    <div className="w-full min-w-0 rounded-3xl border border-border bg-background p-4 shadow-sm sm:p-7">
       <div className="flex items-center justify-between gap-3 border-b border-border pb-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Administração</p><h2 className="mt-1 font-serif text-3xl">Contas e planos</h2><p className="mt-1 text-xs text-muted-foreground">Gerencie assinaturas e confira pagamentos com segurança.</p></div><Button size="sm" variant="ghost" aria-label="Fechar painel" onClick={onClose}>✕</Button></div>
       <section className="mt-5 rounded-2xl border border-border bg-card p-4 sm:p-5"><h3 className="mb-3 text-sm font-semibold">Gerenciar assinatura</h3><div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,0.75fr)_auto]">
         <label className="text-xs">E-mail<input className="mt-1 block h-10 w-full min-w-0 rounded-lg border bg-background px-3 text-sm" value={email} onChange={e => setEmail(e.target.value)} placeholder="pessoa@email.com" /></label>
