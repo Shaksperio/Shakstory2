@@ -185,3 +185,32 @@ export async function pullMirror(user: MirrorUser): Promise<LibraryLike | null> 
   }
   return assembleMirror(root, raw);
 }
+
+/** Catálogo público de ofertas Ton, independente do D1. Nunca concede assinatura. */
+export type PublicPlanOffer = { plan: "economico" | "premium" | "vip"; priceCents: number; checkoutUrl: string };
+export async function readPublicPlanOffers(): Promise<PublicPlanOffer[]> {
+  const sdk = await loadSdk();
+  const snapshot = await sdk.fs.getDoc(sdk.fs.doc(sdk.db, "publicCatalog", "plans"));
+  if (!snapshot.exists()) return [];
+  const offers = snapshot.data()?.offers;
+  if (!Array.isArray(offers)) return [];
+  return offers.filter((offer: unknown): offer is PublicPlanOffer => {
+    if (!offer || typeof offer !== "object") return false;
+    const o = offer as Partial<PublicPlanOffer>;
+    return ["economico", "premium", "vip"].includes(o.plan ?? "") && Number.isSafeInteger(o.priceCents) && (o.priceCents ?? 0) > 0 && typeof o.checkoutUrl === "string" && /^https:\/\/payment-link-v3\.ton\.com\.br\//.test(o.checkoutUrl);
+  });
+}
+export async function savePublicPlanOffer(offer: PublicPlanOffer): Promise<void> {
+  const sdk = await loadSdk();
+  await sdk.authInstance.authStateReady();
+  const user = sdk.authInstance.currentUser;
+  if (!user || !isOwnerEmail(user.email || String((await user.getIdTokenResult()).claims.mirrorEmail ?? ""))) throw new Error("Entre como administrador verificado no Firebase.");
+  if (!["economico", "premium", "vip"].includes(offer.plan) || !Number.isSafeInteger(offer.priceCents) || offer.priceCents <= 0 || !/^https:\/\/payment-link-v3\.ton\.com\.br\//.test(offer.checkoutUrl)) throw new Error("Confira o plano, o valor e o link oficial da Ton.");
+  const ref = sdk.fs.doc(sdk.db, "publicCatalog", "plans");
+  await sdk.fs.runTransaction(sdk.db, async (transaction: { get: (ref: unknown) => Promise<{ data: () => { offers?: PublicPlanOffer[] } | undefined }>; set: (ref: unknown, data: unknown) => void }) => {
+    const previous = await transaction.get(ref);
+    const existing = previous.data()?.offers ?? [];
+    const offers = [...existing.filter(item => item.plan !== offer.plan), offer];
+    transaction.set(ref, { offers, updatedAt: sdk.fs.serverTimestamp() });
+  });
+}
