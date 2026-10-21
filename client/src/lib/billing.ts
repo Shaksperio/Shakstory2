@@ -38,6 +38,7 @@ async function call<T>(url: string, body?: unknown): Promise<T> {
 export const fetchOffers = () => call<OffersResponse>("/api/billing/offers");
 export const createPurchase = (plan: string) => call<{ purchase: PurchaseView; checkoutUrl: string; email: string; notice: string }>("/api/billing/purchase", { plan });
 export const claimPurchase = (id: string) => call<{ purchase: PurchaseView }>("/api/billing/claim", { id });
+export const startStripeCheckout = (plan: string) => call<{ url: string }>("/api/billing/stripe/checkout", { plan });
 export const cancelPurchase = (id: string) => call<{ purchase: PurchaseView }>("/api/billing/cancel", { id });
 
 export const fetchAdminBilling = () => call<AdminBilling>("/api/admin/billing");

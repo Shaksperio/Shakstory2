@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.2";
+export const SHAK_WORKER_VERSION = "2026-10-21.3";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -343,7 +343,7 @@ async function shakGateCore(req, env, u, options = {}) {
 
   if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, workerVersion: SHAK_WORKER_VERSION, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
-  if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now) };
+  if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now, env, options.fetch) };
 
   if (path === "/api/assist" && req.method === "POST") {
     // Cowila é o único recurso acessório recusado pelo guardião; escrever e ler manuscritos nunca é.
@@ -399,8 +399,64 @@ async function shakBody(req) { try { const value = await req.json(); return valu
 const shakPurchaseView = row => ({ id: row.id, plan: row.plan, label: PLAN_DEFS[row.plan]?.label || row.plan, priceCents: row.price_cents, currency: row.currency, status: row.status, createdAt: row.created_at, claimedAt: row.claimed_at || null, confirmedAt: row.status === "confirmed" ? row.reviewed_at : null });
 const shakOfferView = (row, withUrl) => ({ plan: row.plan, label: PLAN_DEFS[row.plan]?.label || row.plan, priceCents: row.price_cents, currency: row.currency, version: row.version, ...(withUrl ? { checkoutUrl: row.checkout_url, updatedAt: row.updated_at } : {}) });
 
+/** Pedido pendente do plano (cria se preciso) com o preço da oferta vigente. Devolve { purchase, offer } ou { error } (resposta pronta). */
+async function shakOpenPurchase(db, email, plan, now) {
+  if (PAID_PLANS.indexOf(plan) === -1) return { error: planJson({ error: "invalid_plan" }, 400) };
+  const offer = await db.prepare("SELECT * FROM shak_offers WHERE plan = ?").bind(plan).first();
+  if (!offer) return { error: planJson({ error: "offer_unavailable", message: "Este plano ainda não está disponível para compra. Fale com o administrador." }, 409) };
+  let purchase = await db.prepare("SELECT * FROM shak_purchases WHERE email = ? AND plan = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").bind(email, plan).first();
+  // pedido pendente com preço/versão antigos não é reaproveitado: o valor cobrado tem de ser o da oferta vigente
+  if (purchase && (purchase.offer_version !== offer.version || purchase.price_cents !== offer.price_cents || purchase.currency !== offer.currency)) purchase = null;
+  if (!purchase) {
+    const since = new Date(now - DAY_MS).toISOString();
+    const count = Number((await db.prepare("SELECT COUNT(*) AS n FROM shak_purchases WHERE email = ? AND created_at >= ?").bind(email, since).first())?.n || 0);
+    if (count >= BILLING_MAX_PER_DAY) return { error: planJson({ error: "too_many", message: "Muitos pedidos hoje. Tente novamente amanhã ou fale com o administrador." }, 429) };
+    const id = crypto.randomUUID();
+    await db.prepare("INSERT INTO shak_purchases (id, email, plan, price_cents, currency, offer_version, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'ton', 'pending', ?)").bind(id, email, plan, offer.price_cents, offer.currency, offer.version, new Date(now).toISOString()).run();
+    purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(id).first();
+    await shakAudit(db, now, email, "purchase.create", { id, plan });
+  }
+  return { purchase, offer };
+}
+
+/** Abre uma sessão de pagamento na Stripe (cartão e Pix, 12 meses). Quem ativa o plano é o webhook assinado, nunca a volta do navegador. */
+async function shakStripeCheckout(db, email, plan, req, env, fetchFn, now) {
+  if (!env.STRIPE_SECRET_KEY) return planJson({ error: "stripe_not_configured", message: "O pagamento online ainda não está configurado." }, 503);
+  const opened = await shakOpenPurchase(db, email, plan, now);
+  if (opened.error) return opened.error;
+  const { purchase, offer } = opened;
+  const origin = new URL(req.url).origin;
+  const form = new URLSearchParams();
+  const set = (key, value) => form.set(key, String(value));
+  set("mode", "payment");
+  set("payment_method_types[0]", "card");
+  set("payment_method_types[1]", "pix");
+  set("line_items[0][quantity]", 1);
+  set("line_items[0][price_data][currency]", String(offer.currency).toLowerCase());
+  set("line_items[0][price_data][unit_amount]", offer.price_cents);
+  set("line_items[0][price_data][product_data][name]", "Shakstory " + (PLAN_DEFS[purchase.plan]?.label || purchase.plan) + " — 12 meses");
+  set("client_reference_id", purchase.id);
+  set("customer_email", email);
+  set("metadata[purchase_id]", purchase.id);
+  set("metadata[plan]", purchase.plan);
+  set("locale", "pt-BR");
+  set("success_url", origin + "/?pagamento=ok");
+  set("cancel_url", origin + "/?pagamento=cancelado");
+  let res = null; let data = null;
+  try {
+    res = await (fetchFn || fetch)("https://api.stripe.com/v1/checkout/sessions", { method: "POST", headers: { authorization: "Bearer " + env.STRIPE_SECRET_KEY, "content-type": "application/x-www-form-urlencoded", "idempotency-key": "shak-" + purchase.id + "-" + Math.floor(now / 600000) }, body: form.toString() });
+    data = await res.json().catch(() => null);
+  } catch { res = null; }
+  if (!res || !res.ok || !data || typeof data.url !== "string") {
+    await shakAudit(db, now, email, "stripe.checkout_failed", { id: purchase.id, status: res ? res.status : 0, code: data && data.error ? data.error.code || data.error.type || null : null });
+    return planJson({ error: "stripe_error", message: "Não foi possível abrir o pagamento agora. Tente novamente em instantes." }, 502);
+  }
+  await shakAudit(db, now, email, "stripe.checkout", { id: purchase.id, session: data.id });
+  return planJson({ url: data.url, purchase: shakPurchaseView(purchase) });
+}
+
 /** Rotas do assinante: /api/billing/offers, /purchase, /claim, /cancel. A URL do checkout só sai do servidor ao criar o pedido, nunca vem do cliente. */
-async function shakBilling(db, email, path, req, info, now) {
+async function shakBilling(db, email, path, req, info, now, env = {}, fetchFn = null) {
   await shakEnsureBilling(db);
   if (path === "/api/billing/offers" && req.method === "GET") {
     const offers = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1);
@@ -412,24 +468,11 @@ async function shakBilling(db, email, path, req, info, now) {
   if (!body) return planJson({ error: "invalid" }, 400);
 
   if (path === "/api/billing/purchase") {
-    const plan = String(body.plan || "");
-    if (PAID_PLANS.indexOf(plan) === -1) return planJson({ error: "invalid_plan" }, 400);
-    const offer = await db.prepare("SELECT * FROM shak_offers WHERE plan = ?").bind(plan).first();
-    if (!offer) return planJson({ error: "offer_unavailable", message: "Este plano ainda não está disponível para compra. Fale com o administrador." }, 409);
-    let purchase = await db.prepare("SELECT * FROM shak_purchases WHERE email = ? AND plan = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1").bind(email, plan).first();
-    // pedido pendente com preço/versão antigos não é reaproveitado: o valor cobrado tem de ser o da oferta vigente
-    if (purchase && (purchase.offer_version !== offer.version || purchase.price_cents !== offer.price_cents || purchase.currency !== offer.currency)) purchase = null;
-    if (!purchase) {
-      const since = new Date(now - DAY_MS).toISOString();
-      const count = Number((await db.prepare("SELECT COUNT(*) AS n FROM shak_purchases WHERE email = ? AND created_at >= ?").bind(email, since).first())?.n || 0);
-      if (count >= BILLING_MAX_PER_DAY) return planJson({ error: "too_many", message: "Muitos pedidos hoje. Tente novamente amanhã ou fale com o administrador." }, 429);
-      const id = crypto.randomUUID();
-      await db.prepare("INSERT INTO shak_purchases (id, email, plan, price_cents, currency, offer_version, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'ton', 'pending', ?)").bind(id, email, plan, offer.price_cents, offer.currency, offer.version, new Date(now).toISOString()).run();
-      purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(id).first();
-      await shakAudit(db, now, email, "purchase.create", { id, plan });
-    }
-    return planJson({ purchase: shakPurchaseView(purchase), checkoutUrl: offer.checkout_url, email, notice: BILLING_NOTICE });
+    const opened = await shakOpenPurchase(db, email, String(body.plan || ""), now);
+    if (opened.error) return opened.error;
+    return planJson({ purchase: shakPurchaseView(opened.purchase), checkoutUrl: opened.offer.checkout_url, email, notice: BILLING_NOTICE });
   }
+  if (path === "/api/billing/stripe/checkout") return await shakStripeCheckout(db, email, String(body.plan || ""), req, env, fetchFn, now);
 
   if (path === "/api/billing/claim" || path === "/api/billing/cancel") {
     const purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(String(body.id || "")).first();
@@ -443,6 +486,53 @@ async function shakBilling(db, email, path, req, info, now) {
     return planJson({ purchase: shakPurchaseView({ ...purchase, status, claimed_at: claim ? new Date(now).toISOString() : purchase.claimed_at }) });
   }
   return planJson({ error: "not_found" }, 404);
+}
+
+/** Ativa o plano de um pedido a partir de um pagamento conferido (administrador ou webhook da Stripe). Idempotente por (provedor, transação). */
+async function shakConfirmPurchase(db, admin, purchase, txId, amountCents, currency, mode, now, provider = "ton") {
+    const periodOf = async () => await db.prepare("SELECT * FROM shak_periods WHERE purchase_id = ?").bind(purchase.id).first();
+    const existing = await db.prepare("SELECT * FROM shak_payments WHERE provider = ? AND tx_id = ?").bind(provider, txId).first();
+    if (existing) {
+      // a mesma confirmação repetida é inofensiva; a mesma transação em outro pedido nunca libera um segundo período
+      if (existing.purchase_id === purchase.id) { const period = await periodOf(); return planJson({ ok: true, idempotent: true, endsAt: period?.ends_at || null }); }
+      return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada em outro pedido." }, 409);
+    }
+    if (purchase.status === "confirmed") return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado com outra transação." }, 409);
+    if (["canceled", "rejected"].indexOf(purchase.status) !== -1) return planJson({ error: "invalid_state", status: purchase.status }, 409);
+    const review = async (error, message) => {
+      await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("needs_review", null, new Date(now).toISOString(), null, error, purchase.id).run();
+      await shakAudit(db, now, admin, "purchase.needs_review", { id: purchase.id, reason: error });
+      return planJson({ error, message, status: "needs_review" }, 409);
+    };
+    if (amountCents !== purchase.price_cents || currency !== purchase.currency) return await review("amount_mismatch", "Valor ou moeda diferentes do pedido: o pedido foi para revisão e nada foi ativado.");
+    await ensurePlanTables(db);
+    await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(purchase.email, new Date(now).toISOString()).run();
+    const row = await db.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(purchase.email).first();
+    const active = resolvePlan(row, now);
+    const samePlan = active.plan === purchase.plan && active.paidUntil && Date.parse(active.paidUntil) > now;
+    const otherPaid = PAID_PLANS.indexOf(active.plan) !== -1 && active.plan !== purchase.plan;
+    if (otherPaid && mode !== "replace") return await review("plan_change", "A conta tem outro plano pago vigente. Confirme com mode \"replace\" para começar agora, ou trate a troca manualmente.");
+    // pagar o mesmo plano antes do vencimento acumula: nunca encurta dias já pagos
+    const start = samePlan ? Date.parse(active.paidUntil) : now;
+    const end = shakAddMonths(start, 12);
+    try {
+      await db.prepare("INSERT INTO shak_payments (provider, tx_id, purchase_id, email, plan, amount_cents, currency, confirmed_at, confirmed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(provider, txId, purchase.id, purchase.email, purchase.plan, purchase.price_cents, purchase.currency, new Date(now).toISOString(), admin).run();
+    } catch (error) {
+      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada." }, 409);
+      throw error;
+    }
+    try {
+      await db.prepare("INSERT INTO shak_periods (email, plan, starts_at, ends_at, purchase_id, source) VALUES (?, ?, ?, ?, ?, 'payment')").bind(purchase.email, purchase.plan, new Date(start).toISOString(), new Date(end).toISOString(), purchase.id).run();
+    } catch (error) {
+      // outro administrador confirmou o mesmo pedido ao mesmo tempo com outra transação: desfaz esta e não duplica o período
+      await db.prepare("DELETE FROM shak_payments WHERE provider = ? AND tx_id = ?").bind(provider, txId).run();
+      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado." }, 409);
+      throw error;
+    }
+    await db.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(purchase.plan, new Date(end).toISOString(), purchase.email).run();
+    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("confirmed", null, new Date(now).toISOString(), txId, null, purchase.id).run();
+    await shakAudit(db, now, admin, "purchase.confirm", { id: purchase.id, plan: purchase.plan, txId, endsAt: new Date(end).toISOString() });
+    return planJson({ ok: true, plan: purchase.plan, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() });
 }
 
 /** Rotas do administrador (só o dono chega aqui): painel, ofertas, confirmação e revisão de pedidos. */
@@ -463,13 +553,14 @@ async function shakBillingAdmin(db, admin, path, req, now) {
     const plan = String(body.plan || "");
     const cents = Number(body.priceCents);
     const currency = String(body.currency || "BRL").toUpperCase();
-    let url;
-    try { url = new URL(String(body.checkoutUrl || "")); } catch { url = null; }
+    const rawUrl = String(body.checkoutUrl || "").trim();
+    let url = null;
+    if (rawUrl) { try { url = new URL(rawUrl); } catch { url = null; } }
     if (PAID_PLANS.indexOf(plan) === -1) return planJson({ error: "invalid_plan" }, 400);
     if (!Number.isInteger(cents) || cents <= 0 || cents > 100000000) return planJson({ error: "invalid_price" }, 400);
     if (currency !== "BRL") return planJson({ error: "invalid_currency" }, 400);
-    if (!url || url.protocol !== "https:" || !/(^|\.)ton\.com\.br$/.test(url.hostname)) return planJson({ error: "invalid_url", message: "O link de pagamento deve ser https e do domínio da Ton." }, 400);
-    await db.prepare("INSERT INTO shak_offers (plan, price_cents, currency, checkout_url, version, updated_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(plan) DO UPDATE SET price_cents = excluded.price_cents, currency = excluded.currency, checkout_url = excluded.checkout_url, version = shak_offers.version + 1, updated_at = excluded.updated_at").bind(plan, cents, currency, url.toString(), new Date(now).toISOString()).run();
+    if (rawUrl && (!url || url.protocol !== "https:" || !/(^|\.)ton\.com\.br$/.test(url.hostname))) return planJson({ error: "invalid_url", message: "O link de pagamento deve ser https e do domínio da Ton." }, 400);
+    await db.prepare("INSERT INTO shak_offers (plan, price_cents, currency, checkout_url, version, updated_at) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(plan) DO UPDATE SET price_cents = excluded.price_cents, currency = excluded.currency, checkout_url = excluded.checkout_url, version = shak_offers.version + 1, updated_at = excluded.updated_at").bind(plan, cents, currency, url ? url.toString() : "", new Date(now).toISOString()).run();
     await shakAudit(db, now, admin, "offer.set", { plan, cents, currency });
     return planJson({ ok: true, offer: shakOfferView(await db.prepare("SELECT * FROM shak_offers WHERE plan = ?").bind(plan).first(), true) });
   }
@@ -490,49 +581,7 @@ async function shakBillingAdmin(db, admin, path, req, now) {
     if (!purchase) return planJson({ error: "not_found" }, 404);
     const txId = String(body.txId || "").trim();
     if (!/^[A-Za-z0-9._:-]{4,100}$/.test(txId)) return planJson({ error: "invalid_tx", message: "Informe o ID único da transação da Ton." }, 400);
-    const periodOf = async () => await db.prepare("SELECT * FROM shak_periods WHERE purchase_id = ?").bind(purchase.id).first();
-    const existing = await db.prepare("SELECT * FROM shak_payments WHERE provider = ? AND tx_id = ?").bind("ton", txId).first();
-    if (existing) {
-      // a mesma confirmação repetida é inofensiva; a mesma transação em outro pedido nunca libera um segundo período
-      if (existing.purchase_id === purchase.id) { const period = await periodOf(); return planJson({ ok: true, idempotent: true, endsAt: period?.ends_at || null }); }
-      return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada em outro pedido." }, 409);
-    }
-    if (purchase.status === "confirmed") return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado com outra transação." }, 409);
-    if (["canceled", "rejected"].indexOf(purchase.status) !== -1) return planJson({ error: "invalid_state", status: purchase.status }, 409);
-    const review = async (error, message) => {
-      await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("needs_review", null, new Date(now).toISOString(), null, error, purchase.id).run();
-      await shakAudit(db, now, admin, "purchase.needs_review", { id: purchase.id, reason: error });
-      return planJson({ error, message, status: "needs_review" }, 409);
-    };
-    if (Number(body.amountCents) !== purchase.price_cents || String(body.currency || "").toUpperCase() !== purchase.currency) return await review("amount_mismatch", "Valor ou moeda diferentes do pedido: o pedido foi para revisão e nada foi ativado.");
-    await ensurePlanTables(db);
-    await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(purchase.email, new Date(now).toISOString()).run();
-    const row = await db.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(purchase.email).first();
-    const active = resolvePlan(row, now);
-    const samePlan = active.plan === purchase.plan && active.paidUntil && Date.parse(active.paidUntil) > now;
-    const otherPaid = PAID_PLANS.indexOf(active.plan) !== -1 && active.plan !== purchase.plan;
-    if (otherPaid && body.mode !== "replace") return await review("plan_change", "A conta tem outro plano pago vigente. Confirme com mode \"replace\" para começar agora, ou trate a troca manualmente.");
-    // pagar o mesmo plano antes do vencimento acumula: nunca encurta dias já pagos
-    const start = samePlan ? Date.parse(active.paidUntil) : now;
-    const end = shakAddMonths(start, 12);
-    try {
-      await db.prepare("INSERT INTO shak_payments (provider, tx_id, purchase_id, email, plan, amount_cents, currency, confirmed_at, confirmed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("ton", txId, purchase.id, purchase.email, purchase.plan, purchase.price_cents, purchase.currency, new Date(now).toISOString(), admin).run();
-    } catch (error) {
-      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "duplicate_transaction", message: "Esta transação já foi usada." }, 409);
-      throw error;
-    }
-    try {
-      await db.prepare("INSERT INTO shak_periods (email, plan, starts_at, ends_at, purchase_id, source) VALUES (?, ?, ?, ?, ?, 'payment')").bind(purchase.email, purchase.plan, new Date(start).toISOString(), new Date(end).toISOString(), purchase.id).run();
-    } catch (error) {
-      // outro administrador confirmou o mesmo pedido ao mesmo tempo com outra transação: desfaz esta e não duplica o período
-      await db.prepare("DELETE FROM shak_payments WHERE provider = ? AND tx_id = ?").bind("ton", txId).run();
-      if (/UNIQUE|constraint/i.test(String(error && error.message))) return planJson({ error: "already_confirmed", message: "Este pedido já foi confirmado." }, 409);
-      throw error;
-    }
-    await db.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(purchase.plan, new Date(end).toISOString(), purchase.email).run();
-    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("confirmed", null, new Date(now).toISOString(), txId, null, purchase.id).run();
-    await shakAudit(db, now, admin, "purchase.confirm", { id: purchase.id, plan: purchase.plan, txId, endsAt: new Date(end).toISOString() });
-    return planJson({ ok: true, plan: purchase.plan, startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() });
+    return await shakConfirmPurchase(db, admin, purchase, txId, Number(body.amountCents), String(body.currency || "").toUpperCase(), body.mode, now);
   }
   return planJson({ error: "not_found" }, 404);
 }
@@ -613,16 +662,69 @@ export function withGemini(env, fetchFn) {
   return { ...env, AI: wrapped };
 }
 
-/** Ofertas vigentes (preço e link Ton) para o diálogo "Ver planos". O link de checkout já é público no catálogo; só sai o que for plano pago com link da Ton. */
-async function shakPublicPlans(db) {
+/** Ofertas vigentes para o diálogo "Ver planos": preço e, se houver, o link da Ton; "stripe" diz se o pagamento online está ligado. */
+async function shakPublicPlans(db, env = {}) {
   await shakEnsureBilling(db);
-  const rows = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1 && /^https:\/\/payment-link-v3\.ton\.com\.br\//.test(String(row.checkout_url)));
-  return planJson({ offers: rows.map(row => ({ plan: row.plan, priceCents: row.price_cents, checkoutUrl: row.checkout_url })) });
+  const rows = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1);
+  const ton = url => /^https:\/\/payment-link-v3\.ton\.com\.br\//.test(String(url));
+  return planJson({ stripe: Boolean(env.STRIPE_SECRET_KEY), offers: rows.map(row => ({ plan: row.plan, priceCents: row.price_cents, ...(ton(row.checkout_url) ? { checkoutUrl: row.checkout_url } : {}) })) });
+}
+
+const shakTimingEqual = (a, b) => { let diff = 0; for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i); return diff === 0; };
+
+/** Confere a assinatura do webhook da Stripe: HMAC-SHA256 de "<t>.<corpo cru>" com o segredo do endpoint, em até 5 minutos. */
+async function shakStripeVerify(raw, header, secret, nowSec, tolerance = 300) {
+  const parts = String(header || "").split(",").map(item => item.trim().split("="));
+  const t = (parts.find(item => item[0] === "t") || [])[1];
+  const sigs = parts.filter(item => item[0] === "v1").map(item => item[1] || "");
+  if (!secret || !t || !/^\d+$/.test(t) || !sigs.length || Math.abs(nowSec - Number(t)) > tolerance) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(t + "." + raw)));
+  const expected = Array.from(mac).map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return sigs.some(sig => sig.length === expected.length && shakTimingEqual(sig, expected));
+}
+
+/** Webhook da Stripe: só pagamento confirmado (payment_status "paid") ativa o plano, com valor e moeda iguais aos do pedido. Responde 200 para tudo que não deve ser reenviado. */
+async function shakStripeWebhook(req, env, now) {
+  if (!env.STRIPE_WEBHOOK_SECRET) return planJson({ error: "not_configured" }, 503);
+  const raw = await req.text();
+  if (!(await shakStripeVerify(raw, req.headers.get("stripe-signature"), env.STRIPE_WEBHOOK_SECRET, Math.floor(now / 1000)))) return planJson({ error: "bad_signature" }, 400);
+  let event;
+  try { event = JSON.parse(raw); } catch { return planJson({ error: "invalid" }, 400); }
+  const type = String(event && event.type || "");
+  const session = event && event.data && event.data.object;
+  if (!session || session.object !== "checkout.session") return planJson({ received: true, ignored: true });
+  const db = env.DB;
+  await shakEnsureBilling(db);
+  const purchase = await db.prepare("SELECT * FROM shak_purchases WHERE id = ?").bind(String(session.client_reference_id || "")).first();
+  if (type === "checkout.session.async_payment_failed") {
+    await shakAudit(db, now, "stripe", "stripe.payment_failed", { event: event.id, id: purchase ? purchase.id : null });
+    return planJson({ received: true });
+  }
+  if (type !== "checkout.session.completed" && type !== "checkout.session.async_payment_succeeded") return planJson({ received: true, ignored: true });
+  if (session.payment_status !== "paid") return planJson({ received: true, pending: true });
+  if (!purchase) {
+    await shakAudit(db, now, "stripe", "stripe.unmatched", { event: event.id, session: session.id, amount: session.amount_total });
+    return planJson({ received: true, unmatched: true });
+  }
+  if (purchase.status === "canceled" || purchase.status === "rejected") {
+    // pagou depois de cancelar/recusar: não ativa sozinho; vai para a fila do administrador com o motivo
+    await db.prepare("UPDATE shak_purchases SET status = ?, claimed_at = COALESCE(?, claimed_at), reviewed_at = COALESCE(?, reviewed_at), tx_id = COALESCE(?, tx_id), note = COALESCE(?, note) WHERE id = ?").bind("needs_review", null, new Date(now).toISOString(), null, "stripe_paid_after_" + purchase.status, purchase.id).run();
+    await shakAudit(db, now, "stripe", "stripe.paid_after_" + purchase.status, { event: event.id, id: purchase.id });
+    return planJson({ received: true, review: true });
+  }
+  const txId = String(session.payment_intent || session.id || "");
+  const result = await shakConfirmPurchase(db, "stripe", purchase, txId, Number(session.amount_total), String(session.currency || "").toUpperCase(), undefined, now, "stripe");
+  await shakAudit(db, now, "stripe", "stripe.event", { event: event.id, id: purchase.id, status: result.status });
+  return planJson({ received: true, status: result.status });
 }
 
 export async function shakGate(req, env, u, options = {}) {
   if (u.pathname === "/api/public/plans" && req.method === "GET") {
-    try { return { response: await shakPublicPlans(env.DB) }; } catch { return { response: planJson({ offers: [] }) }; }
+    try { return { response: await shakPublicPlans(env.DB, env) }; } catch { return { response: planJson({ offers: [] }) }; }
+  }
+  if (u.pathname === "/api/public/stripe-webhook" && req.method === "POST") {
+    try { return { response: await shakStripeWebhook(req, env, options.now ?? Date.now()) }; } catch { return { response: planJson({ error: "server" }, 500) }; }
   }
   const result = await shakGateCore(req, env, u, options);
   if (result.response || !env.GEMINI_API_KEY) return result;
