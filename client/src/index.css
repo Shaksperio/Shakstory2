@@ -414,21 +414,14 @@ h1, h2, h3, .font-serif { font-feature-settings: "ss01"; letter-spacing: -0.01em
 /* Cowila lateral: abre espaço à direita em telas largas */
 @media (min-width: 640px) { body.cowila-open .sk-app { padding-right: 380px; } }
 
-/* Mobile viewport containment: prevent one oversized child from widening the
-   GitHub Pages contingency app and forcing pinch-to-fit on phones. */
+/* Ajuste exclusivo da contingência; não afeta o Worker principal. */
 @media (max-width: 639px) {
-  html, body, #root { width: 100%; max-width: 100%; min-width: 0; }
-  .sk-app, .sk-main, .library-view, .library-intro {
-    box-sizing: border-box;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-  }
-  .sk-app { overflow-x: clip; }
-  .library-intro > div { min-width: 0; max-width: 100%; }
-  .library-intro h1, .library-intro p { overflow-wrap: anywhere; }
-  .sk-hero { min-width: 0; max-width: 100%; }
-  .sk-hero > div { min-width: 0; max-width: 100%; }
-  .sk-topbar > div { min-width: 0; max-width: 100%; }
-  .sk-topbar button, .sk-nav button { flex-shrink: 0; }
+  .sk-app.sk-contingency { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow-x: clip; }
+  .sk-contingency .sk-main, .sk-contingency .library-view,
+  .sk-contingency .library-intro { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+  .sk-contingency .library-intro > div, .sk-contingency .sk-hero,
+  .sk-contingency .sk-hero > div { min-width: 0; max-width: 100%; }
+  .sk-contingency .library-intro h1, .sk-contingency .library-intro p { overflow-wrap: anywhere; }
+  .sk-contingency .sk-topbar > div { min-width: 0; max-width: 100%; }
+  .sk-contingency .sk-topbar .sk-mobile-logout { display: none; }
 }
