@@ -1,13 +1,39 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
-import { daysUntil, formatBRL } from "@/lib/billing";
+import { daysUntil, formatBRL, startStripeCheckout } from "@/lib/billing";
 import { readPublicPlanOffers, type PublicPlanOffer } from "@/lib/mirror/firebase";
 import { PlanPurchase } from "./PlanPurchase";
 import { BillingAdmin } from "./BillingAdmin";
-import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
+import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, refreshPlan, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
-export function PlanBanner() {
+type ShownOffer = { plan: PublicPlanOffer["plan"]; priceCents: number; checkoutUrl?: string };
+
+/** Volta do pagamento na Stripe: o plano só muda quando o webhook confirma; aqui o app consulta o servidor por alguns instantes. */
+function PaymentReturn() {
+  const info = usePlan();
+  const [state, setState] = useState<"" | "ok" | "cancelado">("");
+  useEffect(() => {
+    let query: string | null = null;
+    try { query = new URLSearchParams(window.location.search).get("pagamento"); } catch { query = null; }
+    if (query !== "ok" && query !== "cancelado") return;
+    setState(query);
+    try { const url = new URL(window.location.href); url.searchParams.delete("pagamento"); window.history.replaceState(null, "", url.toString()); } catch { /* sem histórico */ }
+    if (query !== "ok") return;
+    let tries = 0;
+    void refreshPlan();
+    const timer = window.setInterval(() => { tries += 1; void refreshPlan(); if (tries >= 12) window.clearInterval(timer); }, 4000);
+    return () => window.clearInterval(timer);
+  }, []);
+  if (!state) return null;
+  const active = ["economico", "premium", "vip"].includes(info.plan);
+  const text = state === "cancelado" ? "Pagamento não concluído. Nada foi cobrado." : active ? `Pagamento confirmado. Seu plano ${info.label} está ativo.` : "Pagamento recebido: estamos confirmando com a Stripe. O plano é ativado automaticamente em instantes.";
+  return <div className="border-b border-primary/20 bg-primary/5"><p role="status" className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-5 py-1.5 text-xs"><span>{text}</span><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setState("")}>Fechar</Button></p></div>;
+}
+
+export function PlanBanner() { return <><PaymentReturn /><PlanBannerBase /></>; }
+
+function PlanBannerBase() {
   const info = usePlan();
 
   if (info.plan === "trial") {
@@ -27,20 +53,31 @@ export function PlanBanner() {
       <span>Seu plano {info.label} vence em {left === 1 ? "1 dia" : `${left} dias`}. A renovação é feita por novo pagamento.</span>
       <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openPlans}>Renovar</Button></p></div>;
   }
-  return <div className="border-b border-border/60 bg-background"><div className="mx-auto flex max-w-7xl justify-end px-5 py-1"><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={openPlans}>Ver planos e links Ton</Button></div></div>;
+  return <div className="border-b border-border/60 bg-background"><div className="mx-auto flex max-w-7xl justify-end px-5 py-1"><Button size="sm" variant="ghost" className="h-7 text-xs" onClick={openPlans}>Ver planos</Button></div></div>;
 }
 
 export function PlansDialog() {
   const state = usePlansDialog();
   const info = usePlan();
-  const [publicOffers, setPublicOffers] = useState<PublicPlanOffer[]>([]);
+  const [publicOffers, setPublicOffers] = useState<ShownOffer[]>([]);
   const [catalogError, setCatalogError] = useState(false);
-  useEffect(() => { if (!state.open) return; const fromServer = fetch("/api/public/plans", { headers: { accept: "application/json" } }).then(r => (r.ok ? r.json() : null)).then((d: { offers?: PublicPlanOffer[] } | null) => (Array.isArray(d?.offers) ? d!.offers! : [])).catch(() => [] as PublicPlanOffer[]);
-    const fromFirebase = readPublicPlanOffers().then(list => ({ list, failed: false })).catch(() => ({ list: [] as PublicPlanOffer[], failed: true }));
+  const [stripeOn, setStripeOn] = useState(false);
+  const [paying, setPaying] = useState("");
+  const [payError, setPayError] = useState("");
+  useEffect(() => {
+    if (!state.open) return;
+    const fromServer = fetch("/api/public/plans", { headers: { accept: "application/json" } }).then(r => (r.ok ? r.json() : null)).then((d: { offers?: ShownOffer[]; stripe?: boolean } | null) => ({ list: Array.isArray(d?.offers) ? d!.offers! : [], stripe: d?.stripe === true })).catch(() => ({ list: [] as ShownOffer[], stripe: false }));
+    const fromFirebase = readPublicPlanOffers().then(list => ({ list: list as ShownOffer[], failed: false })).catch(() => ({ list: [] as ShownOffer[], failed: true }));
     void Promise.all([fromServer, fromFirebase]).then(([server, firebase]) => {
-      const merged = [...server, ...firebase.list.filter(item => !server.some(other => other.plan === item.plan))];
-      setPublicOffers(merged); setCatalogError(firebase.failed && merged.length === 0);
-    }); }, [state.open]);
+      const merged = [...server.list, ...firebase.list.filter(item => !server.list.some(other => other.plan === item.plan))];
+      setPublicOffers(merged); setStripeOn(server.stripe); setCatalogError(firebase.failed && merged.length === 0);
+    });
+  }, [state.open]);
+  const pay = async (plan: string) => {
+    setPaying(plan); setPayError("");
+    try { const { url } = await startStripeCheckout(plan); window.location.assign(url); }
+    catch (error) { setPayError(error instanceof Error ? error.message : "Não foi possível abrir o pagamento."); setPaying(""); }
+  };
   if (!state.open) return null;
   const subject = encodeURIComponent("Plano do Shakstory");
   const body = encodeURIComponent(`Olá! Quero ativar o plano ______ no Shakstory.\nMeu e-mail de acesso: ${info.email ?? ""}`);
@@ -56,11 +93,13 @@ export function PlansDialog() {
           <h3 className="font-semibold">{card.label}</h3>
           <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : "Preço a confirmar"}</p>
           <ul className="mt-3 flex-1 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
-          {offer ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Link Ton ainda não cadastrado</span>}
+          {offer && stripeOn && !info.owner ? <Button className="mt-4 min-h-10" disabled={paying !== ""} onClick={() => void pay(card.id)}>{paying === card.id ? "Abrindo pagamento…" : "Pagar (cartão ou Pix)"}</Button>
+            : offer?.checkoutUrl ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">{offer ? "Pagamento online indisponível no momento" : "Plano ainda não disponível"}</span>}
         </section>;
       })}</div>
+      {payError && <p role="alert" className="mt-2 text-xs text-destructive">{payError}</p>}
       {catalogError && <p role="status" className="mt-2 text-xs text-muted-foreground">Não foi possível consultar o catálogo no Firebase. Confira sua conexão.</p>}
-      <p className="mt-3 text-xs text-muted-foreground">O pagamento é externo, feito na Ton. Pagar não ativa o plano automaticamente: a administração precisa conferir a transação. Não há acesso a funções administrativas nesta tela.</p>
+      <p className="mt-3 text-xs text-muted-foreground">O pagamento é feito na página segura da Stripe (cartão ou Pix) e vale 12 meses. O plano é ativado automaticamente quando a Stripe confirma o pagamento; voltar do checkout, por si só, não ativa nada.</p>
       <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
     </div></div>;

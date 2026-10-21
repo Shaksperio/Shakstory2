@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import { fakeBillingDb } from "./fake-billing-d1";
 
 const load = async () => (await import(/* @vite-ignore */ new URL("../cloudflare-worker/plans.js", import.meta.url).href)) as any;
@@ -238,5 +239,103 @@ describe("catálogo público do Worker", () => {
     const body = await out.response.json();
     expect(body.offers.map((o: any) => o.plan).sort()).toEqual(["economico", "premium", "vip"]);
     expect(body.offers.find((o: any) => o.plan === "premium")).toEqual({ plan: "premium", priceCents: PRICE.premium, checkoutUrl: URLS.premium });
+  });
+});
+
+describe("Stripe: checkout e webhook assinado", () => {
+  const SECRET = "whsec_test_segredo";
+  const sign = (raw: string, t: number, secret = SECRET) => `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${raw}`).digest("hex")}`;
+  const env = (db: any, extra: any = {}) => ({ DB: db, STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: SECRET, ...extra });
+  const checkout = async (mod: any, db: any, email: string, plan: string, fetchFn: any, now = Date.now(), e: any = env(db)) => {
+    const r = new Request("https://app.example/api/billing/stripe/checkout", { method: "POST", headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json" }, body: JSON.stringify({ plan }) });
+    const out = await mod.shakGate(r, e, new URL(r.url), { verify: async () => email, now, fetch: fetchFn });
+    return { status: out.response.status, json: await out.response.json() };
+  };
+  const hook = async (mod: any, db: any, event: any, opts: { now?: number; header?: string; secret?: string } = {}) => {
+    const raw = JSON.stringify(event); const now = opts.now ?? Date.now();
+    const r = new Request("https://app.example/api/public/stripe-webhook", { method: "POST", headers: { "stripe-signature": opts.header ?? sign(raw, Math.floor(now / 1000), opts.secret) }, body: raw });
+    const out = await mod.shakGate(r, env(db), new URL(r.url), { now });
+    return { status: out.response.status, json: await out.response.json() };
+  };
+  const paid = (purchaseId: string, extra: any = {}) => ({ id: "evt_" + Math.random().toString(36).slice(2), type: "checkout.session.completed", data: { object: { object: "checkout.session", id: "cs_test_1", client_reference_id: purchaseId, payment_status: "paid", payment_intent: "pi_test_123", amount_total: PRICE.premium, currency: "brl", ...extra } } });
+  const setup = async () => { const mod = await load(); const db = fakeBillingDb(); await setOffers(mod, db); return { mod, db }; };
+
+  it("cria a sessão com o preço do servidor (cartão e Pix), sem ativar nada", async () => {
+    const { mod, db } = await setup();
+    let sent: URLSearchParams | null = null; let headers: any = null;
+    const fetchFn = async (_url: string, init: any) => { sent = new URLSearchParams(init.body); headers = init.headers; return new Response(JSON.stringify({ id: "cs_test_1", url: "https://checkout.stripe.com/c/pay/cs_test_1" }), { status: 200, headers: { "content-type": "application/json" } }); };
+    const out = await checkout(mod, db, "ana@example.com", "premium", fetchFn);
+    expect(out.status).toBe(200);
+    expect(out.json.url).toBe("https://checkout.stripe.com/c/pay/cs_test_1");
+    expect(sent!.get("line_items[0][price_data][unit_amount]")).toBe(String(PRICE.premium));
+    expect(sent!.get("line_items[0][price_data][currency]")).toBe("brl");
+    expect(sent!.get("payment_method_types[1]")).toBe("pix");
+    expect(sent!.get("client_reference_id")).toBe(out.json.purchase.id);
+    expect(sent!.get("success_url")).toBe("https://app.example/?pagamento=ok");
+    expect(headers.authorization).toBe("Bearer sk_test_x");
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("trial");
+  });
+
+  it("sem chave da Stripe o checkout responde 503; falha da Stripe vira 502 sem vazar detalhe", async () => {
+    const { mod, db } = await setup();
+    expect((await checkout(mod, db, "ana@example.com", "premium", async () => new Response("{}"), Date.now(), { DB: db })).status).toBe(503);
+    const bad = await checkout(mod, db, "ana@example.com", "premium", async () => new Response(JSON.stringify({ error: { code: "x", message: "segredo interno" } }), { status: 400, headers: { "content-type": "application/json" } }));
+    expect(bad.status).toBe(502);
+    expect(JSON.stringify(bad.json)).not.toContain("segredo interno");
+  });
+
+  it("webhook assinado e pago ativa 12 meses; repetir o evento não soma outro período", async () => {
+    const { mod, db } = await setup();
+    const buyer = await buy(mod, db, "ana@example.com", "premium");
+    const first = await hook(mod, db, paid(buyer.purchase.id));
+    expect(first.status).toBe(200);
+    const plan = await me(mod, db, "ana@example.com");
+    expect(plan.plan).toBe("premium");
+    const until = plan.paidUntil;
+    expect((await hook(mod, db, paid(buyer.purchase.id))).status).toBe(200);
+    expect((await me(mod, db, "ana@example.com")).paidUntil).toBe(until);
+    const admin = (await send(mod, db, OWNER, "/api/admin/billing")).json;
+    expect(admin.payments.filter((p: any) => p.provider === "stripe").length).toBe(1);
+  });
+
+  it("assinatura inválida, segredo errado ou carimbo velho: 400 e nada é ativado", async () => {
+    const { mod, db } = await setup();
+    const buyer = await buy(mod, db, "ana@example.com", "premium");
+    const ev = paid(buyer.purchase.id);
+    expect((await hook(mod, db, ev, { header: "t=1,v1=abc" })).status).toBe(400);
+    expect((await hook(mod, db, ev, { secret: "whsec_outro" })).status).toBe(400);
+    const now = Date.now();
+    expect((await hook(mod, db, ev, { now, header: sign(JSON.stringify(ev), Math.floor(now / 1000) - 3600) })).status).toBe(400);
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("trial");
+  });
+
+  it("não ativa quando o pagamento ainda não foi confirmado, quando o valor difere ou quando o pedido não existe", async () => {
+    const { mod, db } = await setup();
+    const buyer = await buy(mod, db, "ana@example.com", "premium");
+    expect((await hook(mod, db, paid(buyer.purchase.id, { payment_status: "unpaid" }))).json.pending).toBe(true);
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("trial");
+    await hook(mod, db, paid(buyer.purchase.id, { amount_total: 100 }));
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("trial");
+    const admin = (await send(mod, db, OWNER, "/api/admin/billing")).json;
+    expect(admin.open.find((p: any) => p.id === buyer.purchase.id).status).toBe("needs_review");
+    expect((await hook(mod, db, paid("nao-existe"))).json.unmatched).toBe(true);
+  });
+
+  it("pagamento depois de cancelar o pedido vai para revisão, não ativa sozinho", async () => {
+    const { mod, db } = await setup();
+    const buyer = await buy(mod, db, "ana@example.com", "premium");
+    await send(mod, db, "ana@example.com", "/api/billing/cancel", "POST", { id: buyer.purchase.id });
+    expect((await hook(mod, db, paid(buyer.purchase.id))).json.review).toBe(true);
+    expect((await me(mod, db, "ana@example.com")).plan).toBe("trial");
+  });
+
+  it("oferta pode ser salva só com preço (sem link da Ton) e a rota pública informa se o Stripe está ligado", async () => {
+    const { mod, db } = await setup();
+    expect((await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan: "vip", priceCents: 100795, currency: "BRL", checkoutUrl: "" })).status).toBe(200);
+    const r = new Request("https://x/api/public/plans");
+    const out = await mod.shakGate(r, env(db), new URL(r.url), {});
+    const body = await out.response.json();
+    expect(body.stripe).toBe(true);
+    expect(body.offers.find((o: any) => o.plan === "vip")).toEqual({ plan: "vip", priceCents: 100795 });
   });
 });
