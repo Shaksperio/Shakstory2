@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { savePublicPlanOffer } from "@/lib/mirror/firebase";
 import { usePlan, workerStatus, EXPECTED_WORKER_VERSION } from "@/lib/plans";
-import { STATUS_LABEL, confirmPurchase, fetchAdminBilling, formatBRL, parseBRL, saveOffer, setPurchaseStatus, type AdminBilling } from "@/lib/billing";
+import { STATUS_LABEL, confirmPurchase, fetchAdminBilling, formatBRL, parseBRL, saveOffer, adminStripeLink, setPurchaseStatus, type AdminBilling } from "@/lib/billing";
 
 const PAID = [["economico", "Econômico"], ["premium", "Premium"], ["vip", "VIP"]] as const;
 
@@ -17,6 +17,9 @@ export function BillingAdmin() {
   const [offerPlan, setOfferPlan] = useState("premium");
   const [price, setPrice] = useState("");
   const [url, setUrl] = useState("");
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linkPlan, setLinkPlan] = useState("premium");
+  const [payLink, setPayLink] = useState("");
   const [tx, setTx] = useState<Record<string, string>>({});
   const [amount, setAmount] = useState<Record<string, string>>({});
   const [replace, setReplace] = useState<Record<string, boolean>>({});
@@ -40,6 +43,16 @@ if (!link) return "Oferta salva no servidor (preço para o pagamento online).";
 if (!/^https:\/\/payment-link-v3\.ton\.com\.br\//.test(link)) return "Oferta salva no servidor, mas o link não é do padrão payment-link-v3.ton.com.br e não foi publicado no catálogo.";
 try { await savePublicPlanOffer({ plan: offerPlan as "economico" | "premium" | "vip", priceCents: cents, checkoutUrl: link }); return "Oferta salva no servidor e publicada em “Ver planos e links Ton”."; }
 catch (error) { return "Oferta salva no servidor, mas NÃO publicada em “Ver planos e links Ton”: " + (error instanceof Error ? error.message : "falha no Firebase") + " (confira se as regras do Firestore foram publicadas e se você entrou como administrador)."; } })}>{busy ? "Salvando…" : "Salvar oferta"}</Button>
+    </div>
+    <div className="mt-3 rounded-xl border border-border p-3">
+      <p className="text-sm font-medium">Gerar link de pagamento (Stripe)</p>
+      <p className="mt-1 text-xs text-muted-foreground">Cria um pedido para o e-mail informado e devolve o link do checkout (cartão ou Pix). Serve para testar e para enviar a um cliente. O plano só é ativado quando a Stripe confirma o pagamento.</p>
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-end">
+        <label className="text-xs">E-mail da conta<input className="mt-1 block h-10 w-full min-w-0 rounded-lg border bg-background px-3 text-sm" value={linkEmail} onChange={e => setLinkEmail(e.target.value)} placeholder="cliente@email.com" /></label>
+        <label className="text-xs">Plano<select className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={linkPlan} onChange={e => setLinkPlan(e.target.value)}>{PAID.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+        <Button size="sm" className="h-10" disabled={busy || !linkEmail.includes("@")} onClick={() => void run(async () => { const { url: link } = await adminStripeLink(linkEmail.trim().toLowerCase(), linkPlan); setPayLink(link); return "Link gerado. Abra ou copie abaixo."; })}>Gerar link</Button>
+      </div>
+      {payLink && <p className="mt-3 break-all text-xs"><a className="font-medium text-primary underline" href={payLink} target="_blank" rel="noopener noreferrer">Abrir checkout da Stripe</a> · <button type="button" className="underline" onClick={() => void navigator.clipboard?.writeText(payLink)}>Copiar link</button></p>}
     </div>
     <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
       <p className="text-sm font-medium">Catálogo público da contingência</p>
