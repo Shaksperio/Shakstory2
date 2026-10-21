@@ -10,9 +10,15 @@ import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, ad
 export function PlanBanner() {
   const info = usePlan();
   const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    if (!info.owner || !info.email || CONTINGENCY) return;
+    const open = () => setAdmin(true);
+    window.addEventListener("shakstory:open-admin-plans", open);
+    return () => window.removeEventListener("shakstory:open-admin-plans", open);
+  }, [info.owner, info.email]);
   if (info.owner) {
     if (!info.email || CONTINGENCY) return null; // o painel de contas fica no endereço principal
-    return <><div className="border-b border-border/50"><p className="mx-auto flex max-w-7xl items-center justify-end gap-3 px-5 py-1 text-xs text-muted-foreground">Administrador<Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => setAdmin(true)}>Contas e planos</Button></p></div>{admin && <AdminPanel onClose={() => setAdmin(false)} />}</>;
+    return <>{admin && <AdminPanel onClose={() => setAdmin(false)} />}</>;
   }
   if (info.plan === "trial") {
     return <div className="border-b border-primary/20 bg-primary/5"><p role="status" className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-5 py-1.5 text-xs">
