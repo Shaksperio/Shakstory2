@@ -244,33 +244,14 @@ describe("WriterStudio integrated literary assistance", () => {
     expect(screen.getByText("Amostra 3 · Mais subtexto")).toBeTruthy();
     expect(editor.textContent).toBe("A noite caiu.");
     expect(harness.coauthorMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({
-      bookId: "book-1",
-      sceneId: "chapter-1",
-      text: "A noite caiu.",
-      intent: "Aumentar a tensão sem revelar o segredo.",
-      targetWords: 180,
-      alternativeCount: 3,
-      styleSample: "A noite caiu.",
+      bookId: "book-1", sceneId: "chapter-1", text: "A noite caiu.",
+      intent: expect.stringContaining("Aumentar a tensão sem revelar o segredo."),
+      targetWords: 180, alternativeCount: 3, styleSample: "A noite caiu.",
     }));
-
-    const chooseButtons = screen.getAllByRole("button", { name: "Escolher este caminho" });
-    fireEvent.click(chooseButtons[0]);
-
-    await waitFor(() => expect(screen.getByText("Continuação expandida")).toBeTruthy());
-    expect(editor.textContent).toBe("A noite caiu.");
-    expect(harness.expandCoauthorMutation.mutate).toHaveBeenCalledWith(expect.objectContaining({
-      bookId: "book-1",
-      sceneId: "chapter-1",
-      text: "A noite caiu.",
-      selectedAlternative: expect.objectContaining({ id: "faithful-1", text: "Uma sombra atravessou a janela." }),
-      intent: "Aumentar a tensão sem revelar o segredo.",
-      styleSample: "A noite caiu.",
-    }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Aplicar ao manuscrito" }));
-    await waitFor(() => expect(editor.textContent).toContain("A sombra atravessou a janela e desapareceu"));
+    fireEvent.click(screen.getAllByRole("button", { name: "Adicionar ao manuscrito" })[0]);
+    await waitFor(() => expect(editor.textContent).toContain("Uma sombra atravessou a janela."));
     expect(editor.textContent).toContain("A noite caiu.");
-    expect(editor.textContent).not.toContain("Uma sombra atravessou a janela.");
+    expect(harness.expandCoauthorMutation.mutate).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Desfazer última aplicação" }));
     await waitFor(() => expect(editor.textContent).toBe("A noite caiu."));
