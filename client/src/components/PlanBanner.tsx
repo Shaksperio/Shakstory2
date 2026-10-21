@@ -72,19 +72,19 @@ function AdminPanel({ onClose }: { onClose: () => void }) {
     catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao aplicar."); }
   };
   return <div className="fixed inset-0 z-[70] grid place-items-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Contas e planos">
-    <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-background p-5 shadow-xl">
-      <div className="flex items-center justify-between"><h2 className="font-serif text-2xl">Contas e planos</h2><Button size="sm" variant="ghost" aria-label="Fechar painel" onClick={onClose}>✕</Button></div>
-      <div className="mt-4 flex flex-wrap items-end gap-2">
-        <label className="text-xs">E-mail<input className="mt-1 block h-9 w-56 rounded border bg-background px-2 text-sm" value={email} onChange={e => setEmail(e.target.value)} placeholder="pessoa@email.com" /></label>
-        <label className="text-xs">Plano<select className="mt-1 block h-9 rounded border bg-background px-2 text-sm" value={plan} onChange={e => setPlan(e.target.value)}><option value="economico">Econômico</option><option value="premium">Premium</option><option value="vip">VIP</option><option value="trial">Reiniciar teste de 7 dias</option><option value="expirado">Encerrar teste</option></select></label>
-        <label className="text-xs">Dias<input type="number" min={1} max={3650} className="mt-1 block h-9 w-20 rounded border bg-background px-2 text-sm" value={days} onChange={e => setDays(Number(e.target.value) || 30)} /></label>
+    <div className="max-h-[90dvh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-border bg-background p-4 shadow-2xl sm:p-7">
+      <div className="flex items-center justify-between gap-3 border-b border-border pb-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Administração</p><h2 className="mt-1 font-serif text-3xl">Contas e planos</h2><p className="mt-1 text-xs text-muted-foreground">Gerencie assinaturas e confira pagamentos com segurança.</p></div><Button size="sm" variant="ghost" aria-label="Fechar painel" onClick={onClose}>✕</Button></div>
+      <section className="mt-5 rounded-2xl border border-border bg-card p-4 sm:p-5"><h3 className="mb-3 text-sm font-semibold">Gerenciar assinatura</h3><div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,0.75fr)_auto]">
+        <label className="text-xs">E-mail<input className="mt-1 block h-10 w-full min-w-0 rounded-lg border bg-background px-3 text-sm" value={email} onChange={e => setEmail(e.target.value)} placeholder="pessoa@email.com" /></label>
+        <label className="text-xs">Plano<select className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={plan} onChange={e => setPlan(e.target.value)}><option value="economico">Econômico</option><option value="premium">Premium</option><option value="vip">VIP</option><option value="trial">Reiniciar teste de 7 dias</option><option value="expirado">Encerrar teste</option></select></label>
+        <label className="text-xs">Dias<input type="number" min={1} max={3650} className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={days} onChange={e => setDays(Number(e.target.value) || 30)} /></label>
         <Button size="sm" disabled={!email.includes("@")} onClick={() => void apply(email.trim().toLowerCase(), plan)}>Aplicar</Button>
       </div>
       {message && <p role="status" className="mt-2 text-xs">{message}</p>}
-      <ul className="mt-4 divide-y divide-border text-sm">{users.map(user => <li key={user.email} className="flex flex-wrap items-center justify-between gap-2 py-2">
+      </section><section className="mt-4 rounded-2xl border border-border bg-card p-4 sm:p-5"><h3 className="text-sm font-semibold">Usuários cadastrados</h3><ul className="mt-3 divide-y divide-border text-sm">{users.map(user => <li key={user.email} className="flex flex-wrap items-center justify-between gap-2 py-2">
         <span><strong>{user.email}</strong><br /><span className="text-xs text-muted-foreground">{user.label}{user.daysLeft !== null && user.plan === "trial" ? ` · ${user.daysLeft} dia(s)` : ""}{user.paidUntil && user.plan !== "trial" && user.plan !== "expirado" ? ` · até ${new Date(user.paidUntil).toLocaleDateString("pt-BR")}` : ""} · desde {new Date(user.createdAt).toLocaleDateString("pt-BR")}</span></span>
         <span className="flex gap-1">{(["economico", "premium", "vip"] as const).map(id => <Button key={id} size="sm" variant={user.plan === id ? "default" : "outline"} className="h-7 text-xs" onClick={() => void apply(user.email, id)}>{id === "economico" ? "Econ." : id === "premium" ? "Prem." : "VIP"}</Button>)}</span></li>)}
-        {users.length === 0 && <li className="py-3 text-xs text-muted-foreground">Nenhuma conta de usuário ainda.</li>}</ul>
+        {users.length === 0 && <li className="py-3 text-xs text-muted-foreground">Nenhuma conta de usuário encontrada neste serviço.</li>}</ul></section>
       <BillingAdmin />
     </div></div>;
 }
