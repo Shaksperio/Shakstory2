@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { CONTINGENCY } from "@/lib/contingency";
-import { daysUntil } from "@/lib/billing";
+import { daysUntil, formatBRL } from "@/lib/billing";
+import { readPublicPlanOffers, type PublicPlanOffer } from "@/lib/mirror/firebase";
 import { PlanPurchase } from "./PlanPurchase";
 import { BillingAdmin } from "./BillingAdmin";
 import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, PLAN_PRICES, adminSetPlan, adminUsers, closePlans, openPlans, usePlan, usePlansDialog } from "@/lib/plans";
@@ -36,6 +37,9 @@ export function PlanBanner() {
 export function PlansDialog() {
   const state = usePlansDialog();
   const info = usePlan();
+  const [publicOffers, setPublicOffers] = useState<PublicPlanOffer[]>([]);
+  const [catalogError, setCatalogError] = useState(false);
+  useEffect(() => { if (!state.open) return; readPublicPlanOffers().then(offers => { setPublicOffers(offers); setCatalogError(false); }).catch(() => setCatalogError(true)); }, [state.open]);
   if (!state.open) return null;
   const subject = encodeURIComponent("Plano do Shakstory");
   const body = encodeURIComponent(`Olá! Quero ativar o plano ______ no Shakstory.\nMeu e-mail de acesso: ${info.email ?? ""}`);
@@ -45,8 +49,17 @@ export function PlansDialog() {
         <h2 className="font-serif text-2xl">Planos do Shakstory</h2>
         <p className="mt-1 text-sm text-muted-foreground">{state.reason ? `${FEATURE_LABEL[state.reason]} não está incluído no seu plano atual (${info.label}).` : `Seu plano atual: ${info.label}.`}</p></div>
         <Button size="sm" variant="ghost" aria-label="Fechar planos" onClick={closePlans}>✕</Button></div>
-      {CONTINGENCY || info.owner ? <><div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => <section key={card.id} className="rounded-xl border border-border p-3 text-sm"><h3 className="font-semibold">{card.label}</h3><p className="text-xs">{PLAN_PRICES[card.id] ? `${PLAN_PRICES[card.id]} / mês` : "Valor: consulte o administrador"}</p><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(f => <li key={f}>{f}</li>)}</ul></section>)}</div></> : <PlanPurchase />}
-      {CONTINGENCY && <p className="mt-3 text-xs text-muted-foreground">A assinatura é feita pelo endereço principal do Shakstory.</p>}
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">{PLAN_CARDS.map(card => {
+        const offer = publicOffers.find(item => item.plan === card.id);
+        return <section key={card.id} className="flex flex-col rounded-xl border border-border bg-card p-4 text-sm">
+          <h3 className="font-semibold">{card.label}</h3>
+          <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : PLAN_PRICES[card.id] ?? "Preço indisponível"}</p>
+          <ul className="mt-3 flex-1 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
+          {offer ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Link Ton ainda não cadastrado</span>}
+        </section>;
+      })}</div>
+      {catalogError && <p role="status" className="mt-2 text-xs text-muted-foreground">Não foi possível consultar o catálogo no Firebase. Confira sua conexão.</p>}
+      <p className="mt-3 text-xs text-muted-foreground">O pagamento é externo, feito na Ton. Pagar não ativa o plano automaticamente: a administração precisa conferir a transação. Não há acesso a funções administrativas nesta tela.</p>
       <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
       <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
     </div></div>;
