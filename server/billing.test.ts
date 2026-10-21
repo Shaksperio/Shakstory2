@@ -227,3 +227,16 @@ describe("meses de calendário e cortesias", () => {
     expect(db.audit.some((a: any) => a.action === "plan.courtesy")).toBe(true);
   });
 });
+
+describe("catálogo público do Worker", () => {
+  it("/api/public/plans devolve as ofertas salvas (preço e link Ton), mesmo sem login", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const r = new Request("https://x/api/public/plans");
+    const out = await mod.shakGate(r, { DB: db }, new URL(r.url), {});
+    expect(out.response.status).toBe(200);
+    const body = await out.response.json();
+    expect(body.offers.map((o: any) => o.plan).sort()).toEqual(["economico", "premium", "vip"]);
+    expect(body.offers.find((o: any) => o.plan === "premium")).toEqual({ plan: "premium", priceCents: PRICE.premium, checkoutUrl: URLS.premium });
+  });
+});

@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.1";
+export const SHAK_WORKER_VERSION = "2026-10-21.2";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -613,7 +613,17 @@ export function withGemini(env, fetchFn) {
   return { ...env, AI: wrapped };
 }
 
+/** Ofertas vigentes (preço e link Ton) para o diálogo "Ver planos". O link de checkout já é público no catálogo; só sai o que for plano pago com link da Ton. */
+async function shakPublicPlans(db) {
+  await shakEnsureBilling(db);
+  const rows = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1 && /^https:\/\/payment-link-v3\.ton\.com\.br\//.test(String(row.checkout_url)));
+  return planJson({ offers: rows.map(row => ({ plan: row.plan, priceCents: row.price_cents, checkoutUrl: row.checkout_url })) });
+}
+
 export async function shakGate(req, env, u, options = {}) {
+  if (u.pathname === "/api/public/plans" && req.method === "GET") {
+    try { return { response: await shakPublicPlans(env.DB) }; } catch { return { response: planJson({ offers: [] }) }; }
+  }
   const result = await shakGateCore(req, env, u, options);
   if (result.response || !env.GEMINI_API_KEY) return result;
   return { ...result, env: withGemini(result.env || env, options.fetch) };
