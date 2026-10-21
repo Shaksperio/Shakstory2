@@ -170,7 +170,7 @@ export function BookReader({ book: sourceBook, activeId, onClose, closeLabel = "
         <div className="relative">
           <button type="button" className={`${btn} ${activeTarget !== "original" ? active : ""}`} aria-haspopup="dialog" aria-expanded={langOpen} aria-label="Traduzir" onClick={() => setLangOpen(open => !open)}>🌐 {targetInfo ? targetInfo.label : "Traduzir"}</button>
           {langOpen && (
-            <div role="dialog" aria-label="Tradutor" className={`absolute right-0 top-full z-30 mt-1 flex max-h-[70vh] w-64 flex-col gap-0.5 overflow-y-auto rounded-lg border p-3 shadow-lg ${panel}`}>
+            <div role="dialog" aria-label="Tradutor" className={`fixed inset-x-3 top-[max(5rem,env(safe-area-inset-top))] z-[90] flex max-h-[min(70dvh,32rem)] w-auto min-w-0 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-lg border p-3 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-1 sm:w-64 ${panel}`}>
               <h3 className="mb-1 text-sm font-semibold">Traduzir</h3>
               <p className="mb-1 text-xs opacity-70">Selecione o idioma</p>
               <button type="button" aria-pressed={language.mode === "auto"} className={`${btn} justify-start ${language.mode === "auto" ? active : ""}`} onClick={() => chooseLanguage("auto", "original")}>🌐 Automático</button>
