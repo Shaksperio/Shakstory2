@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
+import { savePublicPlanOffer } from "@/lib/mirror/firebase";
 import { STATUS_LABEL, confirmPurchase, fetchAdminBilling, formatBRL, parseBRL, saveOffer, setPurchaseStatus, type AdminBilling } from "@/lib/billing";
 
 const PAID = [["economico", "Econômico"], ["premium", "Premium"], ["vip", "VIP"]] as const;
@@ -30,6 +31,11 @@ export function BillingAdmin() {
       <label className="text-xs">Preço (R$)<input className="mt-1 block h-10 w-full rounded-lg border bg-background px-3 text-sm" value={price} onChange={e => setPrice(e.target.value)} placeholder="349,49" inputMode="decimal" /></label>
       <label className="text-xs">Link de pagamento<input className="mt-1 block h-10 w-full min-w-0 rounded-lg border bg-background px-3 text-sm" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://payment-link-v3.ton.com.br/…" /></label>
       <Button size="sm" className="h-10 w-full sm:self-end" disabled={busy || available !== true || parseBRL(price) === null || !url.trim().startsWith("https://")} onClick={() => void run(async () => { await saveOffer(offerPlan, parseBRL(price)!, url.trim()); return "Oferta salva e confirmada pelo servidor."; })}>{busy ? "Salvando…" : "Salvar oferta"}</Button>
+    </div>
+    <div className="mt-3 rounded-xl border border-primary/20 bg-primary/5 p-3">
+      <p className="text-sm font-medium">Catálogo público da contingência</p>
+      <p className="mt-1 text-xs text-muted-foreground">Publique o preço e o link oficial Ton no Firebase, para consulta por todos os usuários nos dois modos. Não ativa assinaturas nem registra pagamentos no D1.</p>
+      <Button size="sm" variant="outline" className="mt-3" disabled={busy || parseBRL(price) === null || !/^https:\/\/payment-link-v3\.ton\.com\.br\//.test(url.trim())} onClick={() => void run(async () => { await savePublicPlanOffer({ plan: offerPlan as "economico" | "premium" | "vip", priceCents: parseBRL(price)!, checkoutUrl: url.trim() }); return "Catálogo público atualizado no Firebase."; })}>Publicar link Ton para todos</Button>
     </div>
     <h4 className="mt-5 text-sm font-semibold">Ofertas cadastradas</h4><ul className="mt-2 space-y-2 text-xs break-all">{data?.offers.map(offer => <li key={offer.plan}>{offer.label}: {formatBRL(offer.priceCents)} · versão {offer.version} · {offer.checkoutUrl}</li>)}{data && data.offers.length === 0 && <li className="text-muted-foreground">Nenhuma oferta configurada: nenhum plano pode ser comprado ainda.</li>}</ul>
     <h4 className="mt-4 text-sm font-semibold">Pedidos em aberto</h4>
