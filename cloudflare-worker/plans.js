@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.5";
+export const SHAK_WORKER_VERSION = "2026-10-21.6";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -324,8 +324,10 @@ async function shakGateCore(req, env, u, options = {}) {
         // cortesia/ajuste do administrador: se o mesmo plano ainda está vigente, os dias somam ao vencimento atual (nunca encurtam o que já foi pago)
         const before = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(target).first();
         const current = resolvePlan(before, now);
-        const base = current.plan === plan && current.paidUntil && Date.parse(current.paidUntil) > now ? Date.parse(current.paidUntil) : now;
-        await env.DB.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(plan, new Date(base + days * DAY_MS).toISOString(), target).run();
+        // período pago vigente (de qualquer plano) nunca é encurtado: mesmo plano soma os dias; outro plano fica com o que for maior entre o vencimento atual e hoje + dias
+        const keep = PAID_PLANS.indexOf(current.plan) !== -1 && current.paidUntil && Date.parse(current.paidUntil) > now ? Date.parse(current.paidUntil) : 0;
+        const until = current.plan === plan && keep ? keep + days * DAY_MS : Math.max(keep, now + days * DAY_MS);
+        await env.DB.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(plan, new Date(until).toISOString(), target).run();
         await shakEnsureBilling(env.DB); await shakAudit(env.DB, now, email, "plan.courtesy", { target, plan, days });
       }
       else if (plan === "trial") await env.DB.prepare("UPDATE shak_users SET plan = NULL, paid_until = NULL, created_at = ? WHERE email = ?").bind(stamp, target).run();

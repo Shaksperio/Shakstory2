@@ -378,4 +378,22 @@ describe("Stripe: checkout e webhook assinado", () => {
     expect((await adminLink("ana@example.com", "cliente@example.com")).status).toBe(403);
     expect((await adminLink(OWNER, "sem-arroba")).status).toBe(400);
   });
+
+  it("cortesia do administrador em outro plano não encurta um período pago vigente", async () => {
+    const mod = await load(); const db = fakeBillingDb(); const now = Date.now();
+    await setOffers(mod, db, now);
+    const buyer = await buy(mod, db, "ana@example.com", "premium", now);
+    expect((await confirm(mod, db, buyer.purchase.id, "tx-cortesia-1", { amountCents: PRICE.premium }, now)).status).toBe(200);
+    const paidUntil = (await me(mod, db, "ana@example.com", now)).paidUntil;
+    const give = (plan: string, days = 30) => send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "ana@example.com", plan, days }, now);
+    expect((await give("economico")).status).toBe(200);
+    const after = await me(mod, db, "ana@example.com", now);
+    expect(after.plan).toBe("economico");
+    expect(after.paidUntil).toBe(paidUntil);
+    expect((await give("economico", 10)).status).toBe(200);
+    expect((await me(mod, db, "ana@example.com", now)).paidUntil).toBe(new Date(Date.parse(paidUntil) + 10 * DAY).toISOString());
+    const fresh = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "bia@example.com", plan: "vip", days: 30 }, now);
+    expect(fresh.status).toBe(200);
+    expect((await me(mod, db, "bia@example.com", now)).paidUntil).toBe(new Date(now + 30 * DAY).toISOString());
+  });
 });
