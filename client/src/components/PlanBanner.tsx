@@ -93,15 +93,22 @@ export function PlansDialog() {
           <h3 className="font-semibold">{card.label}</h3>
           <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : "Preço a confirmar"}</p>
           <ul className="mt-3 flex-1 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
-          {offer && stripeOn && offer.available !== false && !info.owner ? <Button className="mt-4 min-h-10" disabled={paying !== ""} onClick={() => void pay(card.id)}>{paying === card.id ? "Abrindo pagamento…" : "Pagar (cartão ou Pix)"}</Button>
-            : offer?.checkoutUrl ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">{offer ? "Pagamento online indisponível no momento" : "Plano ainda não disponível"}</span>}
+          {!offer ? <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Plano ainda não disponível</span>
+            : stripeOn ? (info.owner ? <Button className="mt-4 min-h-10" disabled title="Administrador não compra para si">Pagar (cartão ou Pix)</Button>
+              : offer.available !== false ? <Button className="mt-4 min-h-10" disabled={paying !== ""} onClick={() => void pay(card.id)}>{paying === card.id ? "Abrindo pagamento…" : "Pagar (cartão ou Pix)"}</Button>
+              : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Pagamento online indisponível no momento</span>)
+            : offer.checkoutUrl ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a>
+            : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">Pagamento online indisponível no momento</span>}
         </section>;
       })}</div>
       {payError && <p role="alert" className="mt-2 text-xs text-destructive">{payError}</p>}
       {catalogError && <p role="status" className="mt-2 text-xs text-muted-foreground">Não foi possível consultar o catálogo no Firebase. Confira sua conexão.</p>}
-      <p className="mt-3 text-xs text-muted-foreground">O pagamento é feito na página segura da Stripe (cartão ou Pix) e vale 12 meses. O plano é ativado automaticamente quando a Stripe confirma o pagamento; voltar do checkout, por si só, não ativa nada.</p>
-      <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano. A ativação é feita pelo administrador depois da conferência do pagamento.</p>
-      <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Pedir ativação por e-mail</a>
+      {stripeOn
+        ? <p className="mt-3 text-xs text-muted-foreground">O pagamento é feito na página segura da Stripe (cartão ou Pix) e vale 12 meses. O plano é ativado automaticamente quando a Stripe confirma o pagamento; voltar do checkout, por si só, não ativa nada.</p>
+        : <p className="mt-3 text-xs text-muted-foreground">O pagamento é externo, feito na Ton. Pagar não ativa o plano automaticamente: a administração precisa conferir a transação.</p>}
+      {stripeOn && info.owner && <p role="status" className="mt-2 rounded-md border border-primary/20 bg-primary/5 p-2 text-xs">Você é administrador e já tem acesso total, por isso o pagamento fica desativado aqui. Para testar a compra, use <strong>Gerar link de pagamento</strong> em Contas e planos.</p>}
+      <p className="mt-4 text-xs text-muted-foreground">Seus textos continuam seus: você pode escrever, abrir os livros e baixar o backup mesmo sem plano.</p>
+      <a className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" href={`mailto:${ADMIN_CONTACT}?subject=${subject}&body=${body}`}>Falar com o administrador</a>
     </div></div>;
 }
 
