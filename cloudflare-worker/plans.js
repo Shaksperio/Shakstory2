@@ -289,8 +289,13 @@ async function shakGateCore(req, env, u, options = {}) {
     if (path.indexOf("/api/security/antivirus") === 0) return { response: await avRoute(req, env, u, "legacy-owner", now) };
     return {};
   }
-  const email = await (options.verify || verifyAccessJwt)(jwt, options.jwt);
-  if (!email) return { response: planJson({ error: "unauthorized" }, 401) };
+  // O e-mail do Access é a identidade da conta: canonicalizar antes de consultar/criar a conta
+  // impede que variações de maiúsculas/espaços gerem registros distintos. Não confiamos em e-mail vindo do corpo.
+  const verifiedEmail = await (options.verify || verifyAccessJwt)(jwt, options.jwt);
+  const email = typeof verifiedEmail === "string" ? verifiedEmail.trim().toLowerCase() : "";
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { response: planJson({ error: "unauthorized" }, 401) };
+  }
   const owner = owners.indexOf(email) !== -1;
 
   if (path.indexOf("/api/security/antivirus") === 0) {
