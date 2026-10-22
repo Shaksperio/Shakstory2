@@ -61,7 +61,7 @@ describe("planos e teste de 7 dias", () => {
     expect(db.docs[5].args[0]).not.toBe(db.docs[0].args[0]);
   });
 
-  it("depois do teste: Cowila e compartilhar dão 402, escrever continua liberado", async () => {
+  it("normaliza o e-mail verificado para não criar contas duplicadas por maiúsculas ou espaços", async () => {\n    const mod = await load(); const db = fakeDb();\n    await gate(mod, db, "Ana@Example.com", "/api/me");\n    await gate(mod, db, " ana@example.com ", "/api/me");\n    expect(db.users.size).toBe(1);\n    expect(db.users.has("ana@example.com")).toBe(true);\n  });\n\n  it("depois do teste: Cowila e compartilhar dão 402, escrever continua liberado", async () => {
     const mod = await load(); const db = fakeDb();
     await gate(mod, db, "ana@example.com", "/api/me");
     const later = Date.now() + 8 * DAY;
