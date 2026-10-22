@@ -7,7 +7,7 @@ import { BillingAdmin } from "./BillingAdmin";
 import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, refreshPlan, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
-type ShownOffer = { plan: PublicPlanOffer["plan"]; priceCents: number; checkoutUrl?: string };
+type ShownOffer = { plan: PublicPlanOffer["plan"]; priceCents: number; checkoutUrl?: string; available?: boolean };
 
 /** Volta do pagamento na Stripe: o plano só muda quando o webhook confirma; aqui o app consulta o servidor por alguns instantes. */
 function PaymentReturn() {
@@ -66,7 +66,7 @@ export function PlansDialog() {
   const [payError, setPayError] = useState("");
   useEffect(() => {
     if (!state.open) return;
-    const fromServer = fetch("/api/public/plans", { headers: { accept: "application/json" } }).then(r => (r.ok ? r.json() : null)).then((d: { offers?: ShownOffer[]; stripe?: boolean } | null) => ({ list: Array.isArray(d?.offers) ? d!.offers! : [], stripe: d?.stripe === true })).catch(() => ({ list: [] as ShownOffer[], stripe: false }));
+    const fromServer = fetch("/api/public/plans", { headers: { accept: "application/json" } }).then(r => (r.ok ? r.json() : null)).then((d: { offers?: ShownOffer[]; stripe?: boolean } | null) => ({ list: (Array.isArray(d?.offers) ? d!.offers! : []).filter(o => typeof o.priceCents === "number" && o.priceCents > 0), stripe: d?.stripe === true })).catch(() => ({ list: [] as ShownOffer[], stripe: false }));
     const fromFirebase = readPublicPlanOffers().then(list => ({ list: list as ShownOffer[], failed: false })).catch(() => ({ list: [] as ShownOffer[], failed: true }));
     void Promise.all([fromServer, fromFirebase]).then(([server, firebase]) => {
       const merged = [...server.list, ...firebase.list.filter(item => !server.list.some(other => other.plan === item.plan))];
@@ -93,7 +93,7 @@ export function PlansDialog() {
           <h3 className="font-semibold">{card.label}</h3>
           <p className="mt-1 text-base font-medium">{offer ? formatBRL(offer.priceCents) : "Preço a confirmar"}</p>
           <ul className="mt-3 flex-1 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{card.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
-          {offer && stripeOn && !info.owner ? <Button className="mt-4 min-h-10" disabled={paying !== ""} onClick={() => void pay(card.id)}>{paying === card.id ? "Abrindo pagamento…" : "Pagar (cartão ou Pix)"}</Button>
+          {offer && stripeOn && offer.available !== false && !info.owner ? <Button className="mt-4 min-h-10" disabled={paying !== ""} onClick={() => void pay(card.id)}>{paying === card.id ? "Abrindo pagamento…" : "Pagar (cartão ou Pix)"}</Button>
             : offer?.checkoutUrl ? <a className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-3 text-center text-sm font-medium text-primary-foreground" href={offer.checkoutUrl} target="_blank" rel="noopener noreferrer">Pagar com Ton</a> : <span className="mt-4 rounded-md border p-2 text-center text-xs text-muted-foreground">{offer ? "Pagamento online indisponível no momento" : "Plano ainda não disponível"}</span>}
         </section>;
       })}</div>

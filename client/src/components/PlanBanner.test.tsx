@@ -46,4 +46,21 @@ describe("planos no app", () => {
     await refreshPlan();
     expect(guard("cowila")).toBe(true);
   });
+
+  it("Ver planos: plano sem oferta mostra indisponível (nunca NaN) e só plano disponível oferece pagar", async () => {
+    setPlanForTest(trial);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/api/public/plans")
+      ? new Response(JSON.stringify({ stripe: true, offers: [
+        { plan: "economico", label: "Econômico", available: false },
+        { plan: "premium", label: "Premium", available: true, priceCents: 65340, currency: "BRL" },
+        { plan: "vip", label: "VIP", available: false },
+      ] }), { status: 200 })
+      : new Response("{}", { status: 404 })));
+    render(<><PlanBanner /><PlansDialog /></>);
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: /Ver planos/ })[0]); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(document.body.textContent).not.toMatch(/NaN/);
+    expect(screen.getAllByText("Plano ainda não disponível").length).toBe(2);
+    expect(screen.getAllByRole("button", { name: /Pagar \(cartão ou Pix\)/ }).length).toBe(1);
+  });
 });
