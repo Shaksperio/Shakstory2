@@ -217,14 +217,14 @@ describe("meses de calendário e cortesias", () => {
     expect(iso(mod.shakAddMonths(Date.parse("2026-11-30T00:00:00Z"), 3))).toBe("2027-02-28");
   });
 
-  it("cortesia do administrador no mesmo plano soma ao vencimento e não encurta o que foi pago", async () => {
+  it("cortesia do administrador no mesmo plano mantém o vencimento original", async () => {
     const mod = await load(); const db = fakeBillingDb(); const t0 = Date.now();
     await setOffers(mod, db, t0);
     const { purchase } = await buy(mod, db, "ana@example.com", "premium", t0);
     const paid = await confirm(mod, db, purchase.id, "TON-0001", { amountCents: 65340 }, t0);
     const courtesy = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "ana@example.com", plan: "premium", days: 30 }, t0);
     expect(courtesy.status).toBe(200);
-    expect(Date.parse(courtesy.json.user.paidUntil)).toBe(Date.parse(paid.json.endsAt) + 30 * DAY);
+    expect(Date.parse(courtesy.json.user.paidUntil)).toBe(Date.parse(paid.json.endsAt));
     expect(db.audit.some((a: any) => a.action === "plan.courtesy")).toBe(true);
   });
 });
@@ -391,7 +391,7 @@ describe("Stripe: checkout e webhook assinado", () => {
     expect(after.plan).toBe("economico");
     expect(after.paidUntil).toBe(paidUntil);
     expect((await give("economico", 10)).status).toBe(200);
-    expect((await me(mod, db, "ana@example.com", now)).paidUntil).toBe(new Date(Date.parse(paidUntil) + 10 * DAY).toISOString());
+    expect((await me(mod, db, "ana@example.com", now)).paidUntil).toBe(paidUntil);
     const fresh = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "bia@example.com", plan: "vip", days: 30 }, now);
     expect(fresh.status).toBe(200);
     expect((await me(mod, db, "bia@example.com", now)).paidUntil).toBe(new Date(now + 30 * DAY).toISOString());
