@@ -238,7 +238,7 @@ describe("catálogo público do Worker", () => {
     expect(out.response.status).toBe(200);
     const body = await out.response.json();
     expect(body.offers.map((o: any) => o.plan).sort()).toEqual(["economico", "premium", "vip"]);
-    expect(body.offers.find((o: any) => o.plan === "premium")).toEqual({ plan: "premium", priceCents: PRICE.premium, checkoutUrl: URLS.premium });
+    expect(body.offers.find((o: any) => o.plan === "premium")).toMatchObject({ plan: "premium", priceCents: PRICE.premium, checkoutUrl: URLS.premium });
   });
 });
 
@@ -336,7 +336,29 @@ describe("Stripe: checkout e webhook assinado", () => {
     const out = await mod.shakGate(r, env(db), new URL(r.url), {});
     const body = await out.response.json();
     expect(body.stripe).toBe(true);
-    expect(body.offers.find((o: any) => o.plan === "vip")).toEqual({ plan: "vip", priceCents: 100795 });
+    expect(body.offers.find((o: any) => o.plan === "vip")).toEqual({ plan: "vip", label: "VIP", available: true, priceCents: 100795, currency: "BRL" });
+  });
+
+  it("catálogo público: lista os três planos; sem oferta fica indisponível e sem preço", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan: "premium", priceCents: PRICE.premium, currency: "BRL", checkoutUrl: "" });
+    const r = new Request("https://x/api/public/plans");
+    const body = await (await mod.shakGate(r, env(db), new URL(r.url), {})).response.json();
+    expect(body.offers.map((o: any) => o.plan)).toEqual(["economico", "premium", "vip"]);
+    expect(body.offers.find((o: any) => o.plan === "premium")).toMatchObject({ available: true, priceCents: PRICE.premium });
+    const eco = body.offers.find((o: any) => o.plan === "economico");
+    expect(eco.available).toBe(false);
+    expect("priceCents" in eco).toBe(false);
+  });
+
+  it("catálogo público: com a Stripe desligada nada fica disponível, mas preço e link da Ton são preservados", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await setOffers(mod, db);
+    const r = new Request("https://x/api/public/plans");
+    const body = await (await mod.shakGate(r, { DB: db }, new URL(r.url), {})).response.json();
+    expect(body.stripe).toBe(false);
+    expect(body.offers.every((o: any) => o.available === false)).toBe(true);
+    expect(body.offers.find((o: any) => o.plan === "vip")).toMatchObject({ priceCents: PRICE.vip, checkoutUrl: URLS.vip });
   });
 
   it("o administrador gera o link de pagamento de uma conta; usuário comum não pode; o plano só ativa pelo webhook", async () => {
