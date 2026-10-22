@@ -4,15 +4,17 @@ export function fakeDb() {
   const usage = new Map<string, number>();
   const av: any[] = [];
   const meter = new Map<string, { writes: number; write_bytes: number; ai: number }>();
+  const trialAttempts = new Map<string, { ip_hash: string; email_hash: string; created_at: string }>();
   const files = new Map<string, string>();
   const enc = new TextEncoder();
   const docs: Array<{ sql: string; args: unknown[] }> = [];
   const db: any = {
-    users, usage, docs, av, meter, files, stored: 0, failMeter: false,
+    users, usage, docs, av, meter, files, trialAttempts, stored: 0, failMeter: false,
     prepare(sql: string) {
       const make = (args: unknown[]) => ({
         async first() {
           if (/FROM shak_users WHERE email/.test(sql)) return users.get(args[0] as string) ?? null;
+          if (/COUNT\(DISTINCT email_hash\).*shak_trial_ip_attempts/.test(sql)) { const cutoff = String(args[1]); return { count: Array.from(trialAttempts.values()).filter(r => r.ip_hash === args[0] && r.created_at >= cutoff).map(r => r.email_hash).filter((v, i, a) => a.indexOf(v) === i).length }; }
           // Bytes só se o SQL pedir CAST(... AS BLOB); sem isso o SQLite devolveria caracteres (é isso que os testes de Unicode provam).
           const size = (text: string) => (/CAST\(data_json AS BLOB\)/.test(sql) ? enc.encode(text).length : Array.from(text).length);
           if (/SUM\(LENGTH/.test(sql)) { let n = (db as any).stored ?? 0; files.forEach((text, key) => { if (key.startsWith(String(args[0]).replace(/%$/, ""))) n += size(text); }); return { n }; }
@@ -34,6 +36,7 @@ export function fakeDb() {
           if (/UPDATE shak_av_sessions SET last_used_at/.test(sql)) { Object.assign(av.find(r => r.id === args[2])!, { last_used_at: args[0], base_url: args[1] }); return {}; }
           if (/UPDATE shak_av_sessions SET status = 'revoked', revoked_at = \? WHERE email/.test(sql)) { av.filter(r => r.email === args[1] && r.status === "active").forEach(r => Object.assign(r, { status: "revoked", revoked_at: args[0] })); return {}; }
           if (/UPDATE shak_av_sessions SET status = 'revoked', revoked_at = \? WHERE id/.test(sql)) { av.filter(r => r.id === args[1] && r.email === args[2]).forEach(r => Object.assign(r, { status: "revoked", revoked_at: args[0] })); return {}; }
+          if (/INSERT OR IGNORE INTO shak_trial_ip_attempts/.test(sql)) { const k = String(args[0]) + "|" + String(args[1]); if (!trialAttempts.has(k)) trialAttempts.set(k, { ip_hash: String(args[0]), email_hash: String(args[1]), created_at: String(args[2]) }); return {}; }
           if (/INSERT OR IGNORE INTO shak_users/.test(sql)) { if (!users.has(args[0] as string)) users.set(args[0] as string, { email: args[0], created_at: args[1], plan: null, paid_until: null }); return {}; }
           if (/UPDATE shak_users SET plan = \?, paid_until = \?/.test(sql)) { Object.assign(users.get(args[2] as string), { plan: args[0], paid_until: args[1] }); return {}; }
           if (/UPDATE shak_users SET plan = NULL/.test(sql)) { Object.assign(users.get(args[1] as string), { plan: null, paid_until: null, created_at: args[0] }); return {}; }

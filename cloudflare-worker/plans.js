@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.7";
+export const SHAK_WORKER_VERSION = "2026-10-22.2";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -99,6 +99,30 @@ async function ensurePlanTables(db) {
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_users (email TEXT PRIMARY KEY, created_at TEXT NOT NULL, plan TEXT, paid_until TEXT)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_usage (email TEXT NOT NULL, day TEXT NOT NULL, cowila INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (email, day))").run();
   plansReady = true;
+}
+
+// Sinal inicial de abuso: contas novas por IP em janela móvel. O IP vem somente do
+// cabeçalho preenchido pela Cloudflare; X-Forwarded-For não é confiável aqui.
+async function shakTrialIpRisk(db, ip, email, now, env) {
+  if (!ip || ip.length > 128) return { observed: false, count: null, limited: false };
+  try {
+    await db.prepare("CREATE TABLE IF NOT EXISTS shak_trial_ip_attempts (ip_hash TEXT NOT NULL, email_hash TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (ip_hash, email_hash))").run();
+    const hash = async value => {
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("shak-trial-v1:" + value));
+      return Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, "0")).join("");
+    };
+    const ipHash = await hash(ip);
+    const emailHash = await hash(email);
+    const cutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    await db.prepare("INSERT OR IGNORE INTO shak_trial_ip_attempts (ip_hash, email_hash, created_at) VALUES (?, ?, ?)").bind(ipHash, emailHash, new Date(now).toISOString()).run();
+    const row = await db.prepare("SELECT COUNT(DISTINCT email_hash) AS count FROM shak_trial_ip_attempts WHERE ip_hash = ? AND created_at >= ?").bind(ipHash, cutoff).first();
+    const count = Number(row?.count || 0);
+    const max = Math.max(2, Math.min(100, Math.floor(Number(env.TRIAL_IP_MAX_NEW_ACCOUNTS) || 20)));
+    return { observed: true, count, limited: env.TRIAL_IP_ENFORCE === "true" && count > max, max };
+  } catch {
+    // Falha do banco/telemetria não deve bloquear cadastros legítimos.
+    return { observed: false, count: null, limited: false };
+  }
 }
 
 async function userKey(email) {
@@ -289,8 +313,13 @@ async function shakGateCore(req, env, u, options = {}) {
     if (path.indexOf("/api/security/antivirus") === 0) return { response: await avRoute(req, env, u, "legacy-owner", now) };
     return {};
   }
-  const email = await (options.verify || verifyAccessJwt)(jwt, options.jwt);
-  if (!email) return { response: planJson({ error: "unauthorized" }, 401) };
+  // O e-mail do Access é a identidade da conta: canonicalizar antes de consultar/criar a conta
+  // impede que variações de maiúsculas/espaços gerem registros distintos. Não confiamos em e-mail vindo do corpo.
+  const verifiedEmail = await (options.verify || verifyAccessJwt)(jwt, options.jwt);
+  const email = typeof verifiedEmail === "string" ? verifiedEmail.trim().toLowerCase() : "";
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { response: planJson({ error: "unauthorized" }, 401) };
+  }
   const owner = owners.indexOf(email) !== -1;
 
   if (path.indexOf("/api/security/antivirus") === 0) {
@@ -337,8 +366,16 @@ async function shakGateCore(req, env, u, options = {}) {
     return {};
   }
 
-  // Conta comum: cria no primeiro acesso e isola os dados.
+  // Conta comum: só aplica o sinal de frequência a identidades ainda não cadastradas.
+  // A primeira fase é observacional; o bloqueio só é ativado explicitamente por configuração.
   const db = env.DB;
+  await ensurePlanTables(db);
+  const existing = await db.prepare("SELECT email FROM shak_users WHERE email = ?").bind(email).first();
+  if (!existing) {
+    const ip = req.headers.get("CF-Connecting-IP") || "";
+    const risk = await shakTrialIpRisk(db, ip, email, now, env);
+    if (risk.limited) return { response: planJson({ error: "trial_signup_limited", message: "Não foi possível concluir este cadastro agora. Tente novamente mais tarde ou contate o suporte.", retryable: true }, 429) };
+  }
   const account = await loadAccount(db, email, now);
   const info = account.info;
 
