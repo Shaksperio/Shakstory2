@@ -7,7 +7,6 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
-import PublicPlans from "./pages/PublicPlans";
 import { LoadRecovery } from "./components/LoadRecovery";
 import { PwaPrompts } from "./components/PwaPrompts";
 import { ContingencyGate } from "./components/ContingencyGate";
@@ -18,7 +17,6 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
-      <Route path={"/planos"} component={PublicPlans} />
       <Route path={"/ler/:token"} component={ReaderPage} />
       <Route path={"/preview/editorial"} component={EditorialPreview} />
       <Route path={"/404"} component={NotFound} />
