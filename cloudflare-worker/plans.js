@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.6";
+export const SHAK_WORKER_VERSION = "2026-10-21.7";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -321,14 +321,13 @@ async function shakGateCore(req, env, u, options = {}) {
       const stamp = new Date(now).toISOString();
       await env.DB.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(target, stamp).run();
       if (PAID_PLANS.indexOf(plan) !== -1) {
-        // cortesia/ajuste do administrador: se o mesmo plano ainda está vigente, os dias somam ao vencimento atual (nunca encurtam o que já foi pago)
+        // cortesia/ajuste do administrador: um período pago vigente mantém SEMPRE o vencimento original (nunca encurta nem prorroga); só sem período vigente os dias valem a partir de hoje
         const before = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users WHERE email = ?").bind(target).first();
         const current = resolvePlan(before, now);
-        // período pago vigente (de qualquer plano) nunca é encurtado: mesmo plano soma os dias; outro plano fica com o que for maior entre o vencimento atual e hoje + dias
         const keep = PAID_PLANS.indexOf(current.plan) !== -1 && current.paidUntil && Date.parse(current.paidUntil) > now ? Date.parse(current.paidUntil) : 0;
-        const until = current.plan === plan && keep ? keep + days * DAY_MS : Math.max(keep, now + days * DAY_MS);
+        const until = keep || now + days * DAY_MS;
         await env.DB.prepare("UPDATE shak_users SET plan = ?, paid_until = ? WHERE email = ?").bind(plan, new Date(until).toISOString(), target).run();
-        await shakEnsureBilling(env.DB); await shakAudit(env.DB, now, email, "plan.courtesy", { target, plan, days });
+        await shakEnsureBilling(env.DB); await shakAudit(env.DB, now, email, "plan.courtesy", { target, plan, days: keep ? 0 : days, keptOriginalExpiry: !!keep });
       }
       else if (plan === "trial") await env.DB.prepare("UPDATE shak_users SET plan = NULL, paid_until = NULL, created_at = ? WHERE email = ?").bind(stamp, target).run();
       else await env.DB.prepare("UPDATE shak_users SET plan = NULL, paid_until = NULL, created_at = ? WHERE email = ?").bind(new Date(now - (TRIAL_DAYS + 1) * DAY_MS).toISOString(), target).run();
