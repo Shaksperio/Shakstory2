@@ -749,7 +749,7 @@ export async function shakGate(req, env, u, options = {}) {
       if (!body) return { response: planJson({ error: "invalid" }, 400) };
       const email = String(body.email || "").trim().toLowerCase();
       const plan = String(body.plan || "");
-      if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { response: planJson({ error: "invalid_email" }, 400) };
+      if (email.length > 200 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return { response: planJson({ error: "invalid_email" }, 400) };
       if (PAID_PLANS.indexOf(plan) === -1) return { response: planJson({ error: "invalid_plan" }, 400) };
       return { response: await shakStripeCheckout(env.DB, email, plan, req, env, options.fetch, options.now ?? Date.now()) };
     } catch { return { response: planJson({ error: "checkout_unavailable" }, 503) }; }
