@@ -4,7 +4,7 @@ import { daysUntil, formatBRL, startStripeCheckout } from "@/lib/billing";
 import { readPublicPlanOffers, type PublicPlanOffer } from "@/lib/mirror/firebase";
 import { PlanPurchase } from "./PlanPurchase";
 import { BillingAdmin } from "./BillingAdmin";
-import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminUsers, closePlans, openPlans, refreshPlan, usePlan, usePlansDialog } from "@/lib/plans";
+import { ADMIN_CONTACT, FEATURE_LABEL, PLAN_CARDS, adminSetPlan, adminSignups, adminUsers, closePlans, openPlans, refreshPlan, usePlan, usePlansDialog } from "@/lib/plans";
 
 /** Faixa no topo: dias do teste, teste encerrado e acesso ao painel do administrador. Para plano pago não mostra nada. */
 type ShownOffer = { plan: PublicPlanOffer["plan"]; priceCents: number; checkoutUrl?: string; available?: boolean };
@@ -43,7 +43,7 @@ function PlanBannerBase() {
   }
   if (info.plan === "expirado") {
     return <div className="border-b border-destructive/30 bg-destructive/10"><p role="status" className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-5 py-1.5 text-xs">
-      <span>Seu teste de 7 dias terminou. Você ainda pode escrever e baixar o backup, mas exportação e Cowila estão bloqueados.</span>
+      <span>{info.trialDenied ? `O teste grátis não foi liberado para esta conta (${info.trialDenied.reasons.join('; ')}). Se for um engano, fale com o administrador.` : 'Seu teste de 7 dias terminou.'} Você ainda pode escrever e baixar o backup, mas exportação e Cowila estão bloqueados.</span>
       <Button size="sm" className="h-7 text-xs" onClick={openPlans}>Ativar um plano</Button></p></div>;
   }
   // Plano pago perto do fim: aviso dentro do app aos 30, 7 e 1 dia (renovação é manual).
@@ -118,7 +118,8 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
   const [plan, setPlan] = useState("premium");
   const [days, setDays] = useState(30);
   const [message, setMessage] = useState("");
-  const load = () => adminUsers().then(setUsers).catch(error => setMessage(error.message));
+  const [flags, setFlags] = useState<Record<string, string[]>>({});
+  const load = () => { void adminSignups().then(list => setFlags(Object.fromEntries(list.filter(item => !item.trialGranted).map(item => [item.email, item.reasons])))); return adminUsers().then(setUsers).catch(error => setMessage(error.message)); };
   useEffect(() => { void load(); }, []);
   const apply = async (target: string, nextPlan: string) => {
     try { await adminSetPlan(target, nextPlan, days); setMessage(`${target}: plano ${nextPlan} aplicado.`); await load(); }
@@ -135,7 +136,7 @@ export function AdminPanel({ onClose }: { onClose: () => void }) {
       </div>
       {message && <p role="status" className="mt-2 text-xs">{message}</p>}
       </section><section className="mt-4 rounded-2xl border border-border bg-card p-4 sm:p-5"><h3 className="text-sm font-semibold">Usuários cadastrados</h3><ul className="mt-3 divide-y divide-border text-sm">{users.map(user => <li key={user.email} className="flex flex-wrap items-center justify-between gap-2 py-2">
-        <span><strong>{user.email}</strong><br /><span className="text-xs text-muted-foreground">{user.label}{user.daysLeft !== null && user.plan === "trial" ? ` · ${user.daysLeft} dia(s)` : ""}{user.paidUntil && user.plan !== "trial" && user.plan !== "expirado" ? ` · até ${new Date(user.paidUntil).toLocaleDateString("pt-BR")}` : ""} · desde {new Date(user.createdAt).toLocaleDateString("pt-BR")}</span></span>
+        <span><strong>{user.email}</strong><br /><span className="text-xs text-muted-foreground">{user.label}{user.daysLeft !== null && user.plan === "trial" ? ` · ${user.daysLeft} dia(s)` : ""}{user.paidUntil && user.plan !== "trial" && user.plan !== "expirado" ? ` · até ${new Date(user.paidUntil).toLocaleDateString("pt-BR")}` : ""} · desde {new Date(user.createdAt).toLocaleDateString("pt-BR")}</span>{flags[user.email] && <><br /><span className="text-xs text-amber-700">Sem teste grátis: {flags[user.email].join(", ")}. Para liberar, aplique "Reiniciar teste de 7 dias".</span></>}</span>
         <span className="flex gap-1">{(["economico", "premium", "vip"] as const).map(id => <Button key={id} size="sm" variant={user.plan === id ? "default" : "outline"} className="h-7 text-xs" onClick={() => void apply(user.email, id)}>{id === "economico" ? "Econ." : id === "premium" ? "Prem." : "VIP"}</Button>)}</span></li>)}
         {users.length === 0 && <li className="py-3 text-xs text-muted-foreground">Nenhuma conta de usuário encontrada neste serviço.</li>}</ul></section>
       <BillingAdmin />

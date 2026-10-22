@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-21.7";
+export const SHAK_WORKER_VERSION = "2026-10-22.1";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -271,6 +271,123 @@ async function avRoute(req, env, u, email, now) {
   return planJson(result.body, result.status);
 }
 
+// ── Proteção do teste grátis: um teste por pessoa ─────────────────────────────
+// Roda só no primeiro acesso de um e-mail (conta nova). Sinais: e-mail normalizado (gmail sem pontos/+tag), cookie do aparelho,
+// IP (guardado só como hash), rede de VPN/hospedagem/Tor (heurística pelo nome da rede, não é infalível), domínio descartável e
+// domínio sem servidor de e-mail (consulta DNS). Se qualquer um acusar, a conta é criada SEM os 7 dias de teste e o administrador pode liberar.
+// Falha aberta: erro técnico na checagem nunca impede alguém de entrar.
+const SHAK_DISPOSABLE = ["mailinator.com", "guerrillamail.com", "guerrillamail.net", "10minutemail.com", "10minutemail.net", "tempmail.com", "temp-mail.org", "temp-mail.io", "yopmail.com", "yopmail.net", "trashmail.com", "throwawaymail.com", "getnada.com", "nada.email", "sharklasers.com", "maildrop.cc", "dispostable.com", "fakeinbox.com", "mintemail.com", "mohmal.com", "emailondeck.com", "tempail.com", "burnermail.io", "spamgourmet.com", "mytemp.email", "moakt.com", "tmpmail.org", "tmpmail.net", "mailnesia.com", "inboxkitten.com", "discard.email", "anonaddy.me", "tempinbox.com", "33mail.com", "gmailnet.com", "emltmp.com", "tmail.ws"];
+const SHAK_VPN_ORG = /\b(vpn|proxy|tor)\b|m247|datacamp|choopa|vultr|digitalocean|\bovh|hetzner|linode|akamai connected|leaseweb|contabo|amazon|\baws\b|google llc|google cloud|microsoft|azure|oracle|tefincom|nordvpn|proton|mullvad|surfshark|expressvpn|private internet|cyberghost|ipvanish|packethub|quadranet|colocrossing|hostinger|datapacket|cdn77|zenlayer|servers\.com|performive|clouvider|tzulo|psychz|frantech|buyvm|ionos|scaleway|upcloud|kamatera/i;
+const SHAK_TRIAL_IP_MEDIUM = 2;   // contas com teste por IP em 30 dias que já levantam suspeita (redes compartilhadas: família, escritório)
+const SHAK_TRIAL_IP_STRONG = 4;   // a partir daqui só a rede já basta para negar
+const SHAK_TRIAL_DEVICE_MAX = 1;  // contas com teste por aparelho (cookie) em 1 ano
+// Sinais fortes negam sozinhos; sinais médios (VPN/hospedagem, rede repetida) só negam em conjunto com outro sinal.
+const SHAK_STRONG = ["email_descartavel", "email_duplicado", "dominio_sem_email", "aparelho_repetido", "ip_excessivo"];
+
+export function shakCanonicalEmail(email) {
+  const [local0, domain0] = String(email || "").toLowerCase().split("@");
+  if (!domain0) return String(email || "").toLowerCase();
+  let domain = domain0, local = local0.split("+")[0];
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replace(/\./g, "");
+  return local + "@" + domain;
+}
+
+let signupsReady = false;
+async function ensureSignups(db) {
+  if (signupsReady) return;
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_signups (email TEXT PRIMARY KEY, canon TEXT NOT NULL, device TEXT, ip_hash TEXT, asn TEXT, org TEXT, country TEXT, created_at TEXT NOT NULL, trial_granted INTEGER NOT NULL, reasons TEXT NOT NULL)").run();
+  signupsReady = true;
+}
+
+async function shakHash(text) {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(bytes)).slice(0, 16).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+const shakCookie = (req, name) => {
+  const m = ("; " + (req.headers.get("cookie") || "")).match(new RegExp("; " + name + "=([A-Za-z0-9_-]{16,64})"));
+  return m ? m[1] : null;
+};
+const shakNewDeviceId = () => Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b => b.toString(16).padStart(2, "0")).join("");
+export const shakDeviceCookie = id => "shak_dev=" + id + "; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax";
+
+/** O domínio do e-mail tem servidor de e-mail? "ok" | "invalid" | "unknown" (falha de rede: não pune ninguém). */
+async function shakMailDomain(domain, doFetch) {
+  const ask = async type => {
+    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 2500);
+    try {
+      const r = await doFetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(domain) + "&type=" + type, { headers: { accept: "application/dns-json" }, signal: ctl.signal });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; } finally { clearTimeout(timer); }
+  };
+  const mx = await ask("MX");
+  if (!mx) return "unknown";
+  if (mx.Status === 3) return "invalid";
+  const hasMx = (mx.Answer || []).some(a => a.type === 15 && String(a.data || "").trim() !== "0 .");
+  if (hasMx) return "ok";
+  const a = await ask("A");
+  if (!a) return "unknown";
+  return (a.Answer || []).some(x => x.type === 1) ? "ok" : "invalid";
+}
+
+/** Avalia um e-mail novo. Devolve { createdAt, deviceId, reasons } e registra o cadastro; nunca lança erro. */
+export async function shakSignupGuard(db, env, req, email, now, doFetch) {
+  const result = { createdAt: new Date(now).toISOString(), deviceId: shakCookie(req, "shak_dev"), setCookie: false, reasons: [] };
+  if (!result.deviceId) { result.deviceId = shakNewDeviceId(); result.setCookie = true; }
+  try {
+    await ensureSignups(db);
+    const known = await db.prepare("SELECT email FROM shak_users WHERE email = ?").bind(email).first();
+    if (known) return { ...result, skipped: true };
+    const canon = shakCanonicalEmail(email);
+    const domain = canon.split("@")[1] || "";
+    const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "";
+    const ipHash = ip ? await shakHash(ip + "|" + (env.TURNSTILE_SECRET_KEY || "shak-signup")) : null;
+    const cf = req.cf || {};
+    const org = String(cf.asOrganization || "");
+    const reasons = result.reasons;
+    if (SHAK_DISPOSABLE.indexOf(domain) !== -1) reasons.push("email_descartavel");
+    if (SHAK_VPN_ORG.test(org) || req.headers.get("Cf-Ipcountry") === "T1") reasons.push("vpn_ou_hospedagem");
+    const rows = (await db.prepare("SELECT email, canon, device, ip_hash, trial_granted, created_at FROM shak_signups WHERE created_at >= ?").bind(new Date(now - 365 * DAY_MS).toISOString()).all()).results || [];
+    if (rows.some(r => r.canon === canon && r.email !== email)) reasons.push("email_duplicado");
+    if (result.deviceId && !result.setCookie && rows.filter(r => r.device === result.deviceId && r.trial_granted).length >= SHAK_TRIAL_DEVICE_MAX) reasons.push("aparelho_repetido");
+    const monthAgo = new Date(now - 30 * DAY_MS).toISOString();
+    const sameIp = ipHash ? rows.filter(r => r.ip_hash === ipHash && r.trial_granted && r.created_at >= monthAgo).length : 0;
+    if (sameIp >= SHAK_TRIAL_IP_STRONG) reasons.push("ip_excessivo");
+    else if (sameIp >= SHAK_TRIAL_IP_MEDIUM) reasons.push("ip_repetido");
+    if (reasons.indexOf("email_descartavel") === -1) {
+      const mail = await shakMailDomain(domain, doFetch || fetch);
+      if (mail === "invalid") reasons.push("dominio_sem_email");
+    }
+    const granted = !(reasons.some(code => SHAK_STRONG.indexOf(code) !== -1) || reasons.length >= 2);
+    if (!granted) result.createdAt = new Date(now - (TRIAL_DAYS + 1) * DAY_MS).toISOString();
+    await db.prepare("INSERT OR IGNORE INTO shak_users (email, created_at, plan, paid_until) VALUES (?, ?, NULL, NULL)").bind(email, result.createdAt).run();
+    await db.prepare("INSERT OR IGNORE INTO shak_signups (email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(email, canon, result.deviceId, ipHash, String(cf.asn || ""), org.slice(0, 80), String(cf.country || req.headers.get("Cf-Ipcountry") || ""), new Date(now).toISOString(), granted ? 1 : 0, reasons.join(",")).run();
+    if (!granted) { await shakEnsureBilling(db); await shakAudit(db, now, "sistema", "signup.trial_denied", { email, reasons }); }
+    else if (reasons.length) { await shakEnsureBilling(db); await shakAudit(db, now, "sistema", "signup.signal", { email, reasons }); }
+  } catch (error) { result.error = String(error && error.message || error).slice(0, 120); result.createdAt = new Date(now).toISOString(); }
+  return result;
+}
+
+const SHAK_REASON_TEXT = {
+  email_descartavel: "o e-mail é de um serviço descartável",
+  vpn_ou_hospedagem: "o acesso veio de VPN, proxy ou servidor de hospedagem",
+  email_duplicado: "já existe uma conta com este mesmo e-mail (variações com ponto ou +)",
+  aparelho_repetido: "este aparelho já usou o teste grátis",
+  ip_repetido: "esta rede já criou várias contas de teste",
+  ip_excessivo: "esta rede já criou contas de teste demais",
+  dominio_sem_email: "o domínio do e-mail não tem servidor de e-mail",
+};
+async function shakTrialDenied(db, email) {
+  try {
+    await ensureSignups(db);
+    const row = await db.prepare("SELECT trial_granted, reasons FROM shak_signups WHERE email = ?").bind(email).first();
+    if (!row || row.trial_granted) return null;
+    return { reasons: String(row.reasons || "").split(",").filter(Boolean).map(code => SHAK_REASON_TEXT[code] || code) };
+  } catch { return null; }
+}
+
 async function shakGateCore(req, env, u, options = {}) {
   const path = u.pathname;
   if (path === "/health" || path === "/self-test" || path === "/api/mirror-token" || path === "/api/share/login" || path.indexOf("/api/public/") === 0) return {};
@@ -309,6 +426,11 @@ async function shakGateCore(req, env, u, options = {}) {
       const rows = await env.DB.prepare("SELECT email, created_at, plan, paid_until FROM shak_users ORDER BY created_at DESC LIMIT 500").all();
       return { response: planJson({ users: (rows.results || []).map(row => ({ email: row.email, createdAt: row.created_at, ...resolvePlan(row, now) })) }) };
     }
+    if (path === "/api/admin/signups" && req.method === "GET") {
+      await ensureSignups(env.DB);
+      const rows = await env.DB.prepare("SELECT email, org, country, created_at, trial_granted, reasons FROM shak_signups ORDER BY created_at DESC LIMIT 100").all();
+      return { response: planJson({ signups: (rows.results || []).map(r => ({ email: r.email, org: r.org, country: r.country, createdAt: r.created_at, trialGranted: !!r.trial_granted, reasons: String(r.reasons || "").split(",").filter(Boolean) })) }) };
+    }
     if (path === "/api/admin/plan" && req.method === "POST") {
       let body;
       try { body = await req.json(); } catch { return { response: planJson({ error: "invalid" }, 400) }; }
@@ -339,10 +461,16 @@ async function shakGateCore(req, env, u, options = {}) {
 
   // Conta comum: cria no primeiro acesso e isola os dados.
   const db = env.DB;
+  await ensurePlanTables(db);
+  const guard = await shakSignupGuard(db, env, req, email, now, options.dnsFetch);
   const account = await loadAccount(db, email, now);
   const info = account.info;
 
-  if (path === "/api/me") return { response: planJson({ email, owner: false, ...info, workerVersion: SHAK_WORKER_VERSION, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now) }) };
+  if (path === "/api/me") {
+    const response = planJson({ email, owner: false, ...info, workerVersion: SHAK_WORKER_VERSION, cowilaUsedToday: account.used, protection: await shakReadProtection(db, env, now), trialDenied: info.plan === "expirado" ? await shakTrialDenied(db, email) : null });
+    if (guard.setCookie) response.headers.append("set-cookie", shakDeviceCookie(guard.deviceId));
+    return { response };
+  }
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
   if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now, env, options.fetch) };
 

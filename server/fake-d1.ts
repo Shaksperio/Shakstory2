@@ -12,6 +12,7 @@ export function fakeDb() {
     prepare(sql: string) {
       const make = (args: unknown[]) => ({
         async first() {
+          if (/FROM shak_signups/.test(sql)) return null;
           if (/FROM shak_users WHERE email/.test(sql)) return users.get(args[0] as string) ?? null;
           // Bytes só se o SQL pedir CAST(... AS BLOB); sem isso o SQLite devolveria caracteres (é isso que os testes de Unicode provam).
           const size = (text: string) => (/CAST\(data_json AS BLOB\)/.test(sql) ? enc.encode(text).length : Array.from(text).length);
@@ -22,6 +23,7 @@ export function fakeDb() {
           docs.push({ sql, args }); return null;
         },
         async all() {
+          if (/FROM shak_signups/.test(sql)) return { results: [] };
           if (/FROM shak_av_sessions WHERE email = \? AND status = 'active'/.test(sql)) return { results: av.filter(r => r.email === args[0] && r.status === "active").sort((a, b) => b.id - a.id).slice(0, 1) };
           if (/FROM shak_av_sessions WHERE email = \? ORDER/.test(sql)) return { results: av.filter(r => r.email === args[0]).sort((a, b) => b.id - a.id) };
           if (/SELECT id FROM shak_av_sessions/.test(sql)) return { results: av.filter(r => r.id === args[0] && r.email === args[1] && r.status === "active") };
@@ -29,7 +31,7 @@ export function fakeDb() {
           docs.push({ sql, args }); return { results: [] };
         },
         async run() {
-          if (/^CREATE/.test(sql)) return {};
+          if (/^CREATE/.test(sql) || /INTO shak_signups/.test(sql)) return {};
           if (/INSERT INTO shak_av_sessions/.test(sql)) { av.push({ id: av.length + 1, email: args[0], token_hash: args[1], token_prefix: args[2], base_url: args[3], status: "active", created_at: args[4], last_used_at: args[5], revoked_at: null }); return {}; }
           if (/UPDATE shak_av_sessions SET last_used_at/.test(sql)) { Object.assign(av.find(r => r.id === args[2])!, { last_used_at: args[0], base_url: args[1] }); return {}; }
           if (/UPDATE shak_av_sessions SET status = 'revoked', revoked_at = \? WHERE email/.test(sql)) { av.filter(r => r.email === args[1] && r.status === "active").forEach(r => Object.assign(r, { status: "revoked", revoked_at: args[0] })); return {}; }
