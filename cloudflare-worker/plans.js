@@ -741,19 +741,6 @@ async function shakStripeWebhook(req, env, now) {
 }
 
 export async function shakGate(req, env, u, options = {}) {
-  // Checkout público: o comprador informa o próprio e-mail e escolhe um plano; o webhook assinado continua sendo a única via de ativação.
-  if (u.pathname === "/api/public/stripe/checkout" && req.method === "POST") {
-    try {
-      if (!env.STRIPE_SECRET_KEY) return { response: planJson({ error: "stripe_not_configured" }, 503) };
-      const body = await shakBody(req);
-      if (!body) return { response: planJson({ error: "invalid" }, 400) };
-      const email = String(body.email || "").trim().toLowerCase();
-      const plan = String(body.plan || "");
-      if (email.length > 200 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return { response: planJson({ error: "invalid_email" }, 400) };
-      if (PAID_PLANS.indexOf(plan) === -1) return { response: planJson({ error: "invalid_plan" }, 400) };
-      return { response: await shakStripeCheckout(env.DB, email, plan, req, env, options.fetch, options.now ?? Date.now()) };
-    } catch { return { response: planJson({ error: "checkout_unavailable" }, 503) }; }
-  }
   if (u.pathname === "/api/public/plans" && req.method === "GET") {
     try { return { response: await shakPublicPlans(env.DB, env) }; } catch { return { response: planJson({ offers: [] }) }; }
   }
