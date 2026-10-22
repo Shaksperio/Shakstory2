@@ -69,6 +69,31 @@ describe("planos e teste de 7 dias", () => {
     expect(db.users.has("ana@example.com")).toBe(true);
   });
 
+  it("observa cadastros novos por IP e só limita quando explicitamente ativado", async () => {
+    const mod = await load(); const db = fakeDb();
+    const call = async (email: string, enforce: boolean) => {
+      const r = new Request("https://x/api/me", { headers: { "Cf-Access-Jwt-Assertion": "jwt", "CF-Connecting-IP": "203.0.113.10" } });
+      return mod.shakGate(r, { DB: db, TRIAL_IP_ENFORCE: String(enforce), TRIAL_IP_MAX_NEW_ACCOUNTS: "2" }, new URL(r.url), { verify: async () => email, now: Date.parse("2026-10-22T12:00:00Z") });
+    };
+    expect((await call("a@example.com", false)).response.status).toBe(200);
+    expect((await call("b@example.com", false)).response.status).toBe(200);
+    expect((await call("c@example.com", false)).response.status).toBe(200);
+    expect(db.trialAttempts.size).toBe(3);
+  });
+
+  it("limita novos e-mails por IP apenas com enforcement configurado", async () => {
+    const mod = await load(); const db = fakeDb();
+    const call = async (email: string) => {
+      const r = new Request("https://x/api/me", { headers: { "Cf-Access-Jwt-Assertion": "jwt", "CF-Connecting-IP": "203.0.113.11" } });
+      return mod.shakGate(r, { DB: db, TRIAL_IP_ENFORCE: "true", TRIAL_IP_MAX_NEW_ACCOUNTS: "2" }, new URL(r.url), { verify: async () => email, now: Date.parse("2026-10-22T12:00:00Z") });
+    };
+    expect((await call("a@example.com")).response.status).toBe(200);
+    expect((await call("b@example.com")).response.status).toBe(200);
+    const blocked = await call("c@example.com");
+    expect(blocked.response.status).toBe(429);
+    expect(db.users.has("c@example.com")).toBe(false);
+  });
+
   it("depois do teste: Cowila e compartilhar dão 402, escrever continua liberado", async () => {
     const mod = await load(); const db = fakeDb();
     await gate(mod, db, "ana@example.com", "/api/me");
