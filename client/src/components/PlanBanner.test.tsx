@@ -63,4 +63,22 @@ describe("planos no app", () => {
     expect(screen.getAllByText("Plano ainda não disponível").length).toBe(2);
     expect(screen.getAllByRole("button", { name: /Pagar \(cartão ou Pix\)/ }).length).toBe(1);
   });
+
+  it("Ver planos com Stripe ligada: administrador vê o pagamento desativado e nenhum link da Ton; Stripe desligada mantém a Ton", async () => {
+    const owner: PlanInfo = { email: "adm@x.com", owner: true, plan: "owner", label: "Administrador", features: { export: true, cowila: true, share: true } };
+    const offers = (stripe: boolean) => ({ stripe, offers: ["economico", "premium", "vip"].map(plan => ({ plan, label: plan, available: stripe, priceCents: 10000, currency: "BRL", checkoutUrl: "https://payment-link-v3.ton.com.br/pl_ABCDEFGH" })) });
+    const open = async () => { render(<><PlanBanner /><PlansDialog /></>); await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: /Ver planos/ })[0]); }); await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); };
+    setPlanForTest(owner);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/api/public/plans") ? new Response(JSON.stringify(offers(true)), { status: 200 }) : new Response("{}", { status: 404 })));
+    await open();
+    expect(screen.queryByText("Pagar com Ton")).toBeNull();
+    const buttons = screen.getAllByRole("button", { name: /Pagar \(cartão ou Pix\)/ });
+    expect(buttons.length).toBe(3);
+    expect(buttons.every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByText(/Gerar link de pagamento/)).toBeTruthy();
+    cleanup(); vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => String(url).includes("/api/public/plans") ? new Response(JSON.stringify(offers(false)), { status: 200 }) : new Response("{}", { status: 404 })));
+    await open();
+    expect(screen.getAllByText("Pagar com Ton").length).toBe(3);
+  });
 });
