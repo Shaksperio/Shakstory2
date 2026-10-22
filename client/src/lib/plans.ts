@@ -13,6 +13,8 @@ export type PlanInfo = {
   daysLeft?: number | null;
   trialEndsAt?: string;
   paidUntil?: string | null;
+  /** Conta criada sem os 7 dias de teste pela proteção contra contas repetidas (motivos em português). */
+  trialDenied?: { reasons: string[] } | null;
   features: Record<Feature, boolean>;
   /** Direitos do catálogo do servidor (chave estável -> liberado). Ausente em servidores antigos. */
   entitlements?: Record<string, boolean>;
@@ -26,7 +28,7 @@ export type PlanInfo = {
 };
 
 /** Versão que o Worker em produção deve informar em /api/me. Igual a SHAK_WORKER_VERSION em cloudflare-worker/plans.js (um teste confere). */
-export const EXPECTED_WORKER_VERSION = "2026-10-21.7";
+export const EXPECTED_WORKER_VERSION = "2026-10-22.1";
 /** "outdated": o servidor respondeu, mas o Worker não tem (ou tem outra versão do) código de contas e pagamentos; as rotas /api/admin/* e /api/billing/* podem dar 404. */
 export function workerStatus(plan: PlanInfo): "ok" | "outdated" | "unknown" {
   if (!plan.serverChecked) return "unknown";
@@ -103,6 +105,11 @@ export async function adminUsers(): Promise<Array<{ email: string; plan: string;
   const response = await fetch("/api/admin/users");
   if (!response.ok) throw new Error(response.status === 404 ? "A rota de contas não está instalada no Worker principal (HTTP 404). Atualize o Worker antes de administrar assinaturas." : response.status === 401 || response.status === 403 ? "A sessão não tem autorização para listar contas. Verifique o acesso de administrador." : `Não foi possível listar as contas (HTTP ${response.status}).`);
   return ((await response.json()) as { users: never[] }).users;
+}
+export async function adminSignups(): Promise<Array<{ email: string; trialGranted: boolean; reasons: string[]; org: string; country: string }>> {
+  const response = await fetch("/api/admin/signups");
+  if (!response.ok) return [];
+  return ((await response.json()) as { signups: never[] }).signups;
 }
 export async function adminSetPlan(email: string, plan: string, days: number): Promise<void> {
   const response = await fetch("/api/admin/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, plan, days }) });

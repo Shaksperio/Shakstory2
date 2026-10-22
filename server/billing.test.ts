@@ -8,9 +8,10 @@ const DAY = 86400000;
 const URLS = { economico: "https://payment-link-v3.ton.com.br/pl_ECO", premium: "https://payment-link-v3.ton.com.br/pl_PRE", vip: "https://payment-link-v3.ton.com.br/pl_VIP" };
 const PRICE = { economico: 34949, premium: 65340, vip: 100795 };
 
-async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now()) {
-  const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const out = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => email, now });
+const dnsOk = async (url: string) => { const type = new URL(url).searchParams.get("type"); return new Response(JSON.stringify({ Status: 0, Answer: type === "MX" ? [{ type: 15, data: "10 mx.example.com." }] : [] })); };
+async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now(), extra: { headers?: Record<string, string>; dnsFetch?: any } = {}) {
+  const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json", ...(extra.headers || {}) }, body: body ? JSON.stringify(body) : undefined });
+  const out = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => email, now, dnsFetch: extra.dnsFetch ?? dnsOk });
   return { out, status: out.response?.status ?? 200, json: out.response ? await out.response.json() : null };
 }
 const setOffers = async (mod: any, db: any, now = Date.now()) => { for (const plan of ["economico", "premium", "vip"] as const) expect((await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan, priceCents: PRICE[plan], currency: "BRL", checkoutUrl: URLS[plan] }, now)).status).toBe(200); };
@@ -395,5 +396,79 @@ describe("Stripe: checkout e webhook assinado", () => {
     const fresh = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "bia@example.com", plan: "vip", days: 30 }, now);
     expect(fresh.status).toBe(200);
     expect((await me(mod, db, "bia@example.com", now)).paidUntil).toBe(new Date(now + 30 * DAY).toISOString());
+  });
+});
+
+describe("proteção do teste grátis", () => {
+  const T0 = Date.UTC(2026, 9, 22, 12);
+  const login = (mod: any, db: any, email: string, extra: any = {}, now = T0) => send(mod, db, email, "/api/me", "GET", undefined, now, extra);
+  const cookieOf = (out: any) => /shak_dev=([A-Za-z0-9_-]+)/.exec(out.out.response.headers.get("set-cookie") || "")?.[1];
+  const ip = (n: string) => ({ headers: { "CF-Connecting-IP": n } });
+
+  it("conta nova normal recebe o teste e o cookie do aparelho", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const r = await login(mod, db, "ana@example.com", ip("203.0.113.1"));
+    expect(r.json.plan).toBe("trial"); expect(r.json.trialDenied).toBeNull();
+    expect(cookieOf(r)).toBeTruthy();
+    expect(db.signups[0].ip_hash).not.toContain("203.0.113");
+  });
+
+  it("e-mail com ponto ou +tag do mesmo gmail não ganha outro teste", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await login(mod, db, "ana.silva@gmail.com", ip("203.0.113.1"));
+    const r = await login(mod, db, "anasilva+teste@gmail.com", ip("203.0.113.9"));
+    expect(r.json.plan).toBe("expirado");
+    expect(r.json.trialDenied.reasons.join(" ")).toContain("mesmo e-mail");
+    expect(db.audit.some((a: any) => a.action === "signup.trial_denied")).toBe(true);
+  });
+
+  it("mesmo aparelho (cookie) ou rede repetida perdem o teste a partir da conta seguinte", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const a = await login(mod, db, "um@example.com", ip("198.51.100.5"));
+    const dev = cookieOf(a);
+    const b = await login(mod, db, "dois@example.com", { headers: { "CF-Connecting-IP": "198.51.100.77", cookie: "shak_dev=" + dev } });
+    expect(b.json.plan).toBe("expirado");
+    expect(b.json.trialDenied.reasons.join(" ")).toContain("aparelho");
+    // rede compartilhada: sozinha, só nega a partir da 5ª conta (4 já com teste) de teste em 30 dias
+    for (const n of ["tres", "quatro", "cinco"]) expect((await login(mod, db, n + "@example.com", ip("198.51.100.5"))).json.plan).toBe("trial");
+    const d = await login(mod, db, "seis@example.com", ip("198.51.100.5"));
+    expect(d.json.plan).toBe("expirado");
+    expect(d.json.trialDenied.reasons.join(" ")).toContain("rede");
+  });
+
+  it("VPN sozinha só é registrada; VPN somada a outro sinal tira o teste; descartável e domínio sem e-mail negam", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const viaVpn = async (email: string, headers: Record<string, string> = {}) => {
+      const vpn = new Request("https://x/api/me", { headers: { "Cf-Access-Jwt-Assertion": "jwt", ...headers } });
+      Object.defineProperty(vpn, "cf", { value: { asOrganization: "M247 Europe SRL", asn: 9009 } });
+      const out = await mod.shakGate(vpn, { DB: db }, new URL(vpn.url), { verify: async () => email, now: T0, dnsFetch: dnsOk });
+      return out.response.json();
+    };
+    expect((await viaVpn("vpn@example.com", { "CF-Connecting-IP": "192.0.2.10" })).plan).toBe("trial");
+    expect(db.signups.find((r: any) => r.email === "vpn@example.com").reasons).toBe("vpn_ou_hospedagem");
+    expect(db.audit.some((a: any) => a.action === "signup.signal")).toBe(true);
+    await viaVpn("vpn2@example.com", { "CF-Connecting-IP": "192.0.2.10" });
+    expect((await viaVpn("vpn3@example.com", { "CF-Connecting-IP": "192.0.2.10" })).plan).toBe("expirado"); // VPN + rede repetida
+    expect((await login(mod, db, "x@mailinator.com")).json.plan).toBe("expirado");
+    const nx = async () => new Response(JSON.stringify({ Status: 3 }));
+    const r = await login(mod, db, "y@naoexiste.example", { dnsFetch: nx });
+    expect(r.json.plan).toBe("expirado"); expect(r.json.trialDenied.reasons.join(" ")).toContain("servidor de e-mail");
+  });
+
+  it("falha de rede na consulta DNS não pune: o teste é concedido", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const boom = async () => { throw new Error("rede"); };
+    expect((await login(mod, db, "ok@example.com", { dnsFetch: boom })).json.plan).toBe("trial");
+  });
+
+  it("o administrador vê os cadastros e libera o teste; dono e conta já existente não passam pela checagem", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    await login(mod, db, "a@mailinator.com");
+    expect((await send(mod, db, "ana@example.com", "/api/admin/signups")).status).toBe(403);
+    const list = (await send(mod, db, OWNER, "/api/admin/signups")).json;
+    expect(list.signups.find((x: any) => x.email === "a@mailinator.com")).toMatchObject({ trialGranted: false });
+    const rel = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "a@mailinator.com", plan: "trial" }, T0);
+    expect(rel.json.user.plan).toBe("trial");
+    expect(db.signups.some((r: any) => r.email === OWNER)).toBe(false);
   });
 });

@@ -8,7 +8,8 @@ export function fakeBillingDb() {
   const payments: any[] = [];
   const periods: any[] = [];
   const audit: any[] = [];
-  const db: any = { ...base, offers, purchases, payments, periods, audit };
+  const signups: any[] = [];
+  const db: any = { ...base, offers, purchases, payments, periods, audit, signups };
   const unique = (what: string) => { const e: any = new Error("UNIQUE constraint failed: " + what); return e; };
   const sortDesc = (rows: any[], key: string) => [...rows].sort((a, b) => String(b[key]).localeCompare(String(a[key])));
   db.prepare = (sql: string) => {
@@ -56,6 +57,14 @@ export function fakeBillingDb() {
           periods.push({ id: periods.length + 1, email, plan, starts_at, ends_at, purchase_id, source: "payment" });
           return {};
         }
+        if (/^INSERT OR IGNORE INTO shak_signups/.test(sql)) {
+          const [email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons] = args;
+          if (!signups.some(r => r.email === email)) signups.push({ email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons });
+          return {};
+        }
+        if (/FROM shak_signups WHERE created_at >= \?/.test(sql)) return { results: signups.filter(r => r.created_at >= args[0]) };
+        if (/FROM shak_signups WHERE email = \?/.test(sql)) return signups.find(r => r.email === args[0]) ?? null;
+        if (/FROM shak_signups ORDER BY/.test(sql)) return { results: sortDesc(signups, "created_at").slice(0, 100) };
         if (/^INSERT INTO shak_audit/.test(sql)) { audit.push({ at: args[0], actor: args[1], action: args[2], detail: JSON.parse(args[3]) }); return {}; }
         return undefined;
       };
