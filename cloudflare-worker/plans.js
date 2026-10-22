@@ -675,7 +675,20 @@ async function shakPublicPlans(db, env = {}) {
   await shakEnsureBilling(db);
   const rows = ((await db.prepare("SELECT * FROM shak_offers").all()).results || []).filter(row => PAID_PLANS.indexOf(row.plan) !== -1);
   const ton = url => /^https:\/\/payment-link-v3\.ton\.com\.br\//.test(String(url));
-  return planJson({ stripe: Boolean(env.STRIPE_SECRET_KEY), offers: rows.map(row => ({ plan: row.plan, priceCents: row.price_cents, ...(ton(row.checkout_url) ? { checkoutUrl: row.checkout_url } : {}) })) });
+  const stripeAvailable = Boolean(env.STRIPE_SECRET_KEY);
+  return planJson({
+    stripe: stripeAvailable,
+    offers: PAID_PLANS.map(plan => {
+      const row = rows.find(item => item.plan === plan);
+      return {
+        plan,
+        label: PLAN_DEFS[plan].label,
+        available: Boolean(row && stripeAvailable && Number.isInteger(row.price_cents) && row.price_cents > 0 && row.currency === "BRL"),
+        ...(row ? { priceCents: row.price_cents, currency: row.currency } : {}),
+        ...(row && ton(row.checkout_url) ? { checkoutUrl: row.checkout_url } : {}),
+      };
+    }),
+  });
 }
 
 const shakTimingEqual = (a, b) => { let diff = 0; for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i); return diff === 0; };
