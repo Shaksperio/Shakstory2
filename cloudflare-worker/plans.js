@@ -101,6 +101,30 @@ async function ensurePlanTables(db) {
   plansReady = true;
 }
 
+// Sinal inicial de abuso: contas novas por IP em janela móvel. O IP vem somente do
+// cabeçalho preenchido pela Cloudflare; X-Forwarded-For não é confiável aqui.
+async function shakTrialIpRisk(db, ip, email, now, env) {
+  if (!ip || ip.length > 128) return { observed: false, count: null, limited: false };
+  try {
+    await db.prepare("CREATE TABLE IF NOT EXISTS shak_trial_ip_attempts (ip_hash TEXT NOT NULL, email_hash TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (ip_hash, email_hash))").run();
+    const hash = async value => {
+      const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("shak-trial-v1:" + value));
+      return Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, "0")).join("");
+    };
+    const ipHash = await hash(ip);
+    const emailHash = await hash(email);
+    const cutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    await db.prepare("INSERT OR IGNORE INTO shak_trial_ip_attempts (ip_hash, email_hash, created_at) VALUES (?, ?, ?)").bind(ipHash, emailHash, new Date(now).toISOString()).run();
+    const row = await db.prepare("SELECT COUNT(DISTINCT email_hash) AS count FROM shak_trial_ip_attempts WHERE ip_hash = ? AND created_at >= ?").bind(ipHash, cutoff).first();
+    const count = Number(row?.count || 0);
+    const max = Math.max(2, Math.min(100, Math.floor(Number(env.TRIAL_IP_MAX_NEW_ACCOUNTS) || 20)));
+    return { observed: true, count, limited: env.TRIAL_IP_ENFORCE === "true" && count > max, max };
+  } catch {
+    // Falha do banco/telemetria não deve bloquear cadastros legítimos.
+    return { observed: false, count: null, limited: false };
+  }
+}
+
 async function userKey(email) {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
   return Array.from(new Uint8Array(bytes)).slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -342,8 +366,16 @@ async function shakGateCore(req, env, u, options = {}) {
     return {};
   }
 
-  // Conta comum: cria no primeiro acesso e isola os dados.
+  // Conta comum: só aplica o sinal de frequência a identidades ainda não cadastradas.
+  // A primeira fase é observacional; o bloqueio só é ativado explicitamente por configuração.
   const db = env.DB;
+  await ensurePlanTables(db);
+  const existing = await db.prepare("SELECT email FROM shak_users WHERE email = ?").bind(email).first();
+  if (!existing) {
+    const ip = req.headers.get("CF-Connecting-IP") || "";
+    const risk = await shakTrialIpRisk(db, ip, email, now, env);
+    if (risk.limited) return { response: planJson({ error: "trial_signup_limited", message: "Não foi possível concluir este cadastro agora. Tente novamente mais tarde ou contate o suporte.", retryable: true }, 429) };
+  }
   const account = await loadAccount(db, email, now);
   const info = account.info;
 
