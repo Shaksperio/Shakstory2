@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
 import XuriPassportVerify from "./pages/XuriPassportVerify";
+import AuthorshipGuide from "./pages/AuthorshipGuide";
 import { LoadRecovery } from "./components/LoadRecovery";
 import { PwaPrompts } from "./components/PwaPrompts";
 import { ContingencyGate } from "./components/ContingencyGate";
@@ -27,8 +28,10 @@ function Router() {
 
 function AppContent() {
   const [isPassportVerifier] = useRoute("/verificar/xuri");
+  const [isAuthorshipGuide] = useRoute("/autoria");
   // A verificação de um dossiê é local e pública; não exige login nem autenticação do espelho.
   if (isPassportVerifier) return <XuriPassportVerify />;
+  if (isAuthorshipGuide) return <AuthorshipGuide />;
   return CONTINGENCY ? <ContingencyGate><Router /></ContingencyGate> : <Router />;
 }
 
