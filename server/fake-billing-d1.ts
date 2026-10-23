@@ -9,7 +9,11 @@ export function fakeBillingDb() {
   const periods: any[] = [];
   const audit: any[] = [];
   const signups: any[] = [];
-  const db: any = { ...base, offers, purchases, payments, periods, audit, signups };
+  const documents = new Map<string, string>();
+  const auths = new Map<string, any>();
+  const works: any[] = [];
+  const versions: any[] = [];
+  const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions };
   const unique = (what: string) => { const e: any = new Error("UNIQUE constraint failed: " + what); return e; };
   const sortDesc = (rows: any[], key: string) => [...rows].sort((a, b) => String(b[key]).localeCompare(String(a[key])));
   db.prepare = (sql: string) => {
@@ -56,6 +60,19 @@ export function fakeBillingDb() {
           const [email, plan, starts_at, ends_at, purchase_id] = args;
           periods.push({ id: periods.length + 1, email, plan, starts_at, ends_at, purchase_id, source: "payment" });
           return {};
+        }
+        if (/FROM editorial_documents WHERE document_path = \?$/.test(sql.trim()) && /^SELECT data_json/.test(sql)) { const t = documents.get(args[0]); return t === undefined ? null : { data_json: t }; }
+        if (/FROM shak_authenticators WHERE email/.test(sql)) return auths.get(args[0]) ?? null;
+        if (/^INSERT OR REPLACE INTO shak_authenticators/.test(sql)) { const [email, secret_enc, created_at] = args; auths.set(email, { email, secret_enc, confirmed: 0, last_step: 0, fails: 0, fail_start: 0, unlock_until: 0, recovery: "[]", created_at }); return {}; }
+        if (/^UPDATE shak_authenticators/.test(sql)) { const [confirmed, last_step, fails, fail_start, unlock_until, recovery, email] = args; Object.assign(auths.get(email), { confirmed, last_step, fails, fail_start, unlock_until, recovery }); return {}; }
+        if (/^DELETE FROM shak_authenticators/.test(sql)) { auths.delete(args[0]); return {}; }
+        if (/FROM shak_works WHERE email = \? AND book_id = \?/.test(sql)) return works.find(w => w.email === args[0] && w.book_id === args[1]) ?? null;
+        if (/^INSERT OR IGNORE INTO shak_works/.test(sql)) { const [id, email, book_id, title, created_at] = args; if (!works.some(w => w.email === email && w.book_id === book_id)) works.push({ id, email, book_id, title, created_at }); return {}; }
+        if (/FROM shak_versions WHERE work_id/.test(sql)) return { results: versions.filter(v => v.work_id === args[0]).sort((a, b) => a.seq - b.seq) };
+        if (/^INSERT INTO shak_versions/.test(sql)) {
+          const [id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at] = args;
+          if (versions.some(v => v.work_id === work_id && v.seq === seq)) throw unique("shak_versions.work_id, shak_versions.seq");
+          versions.push({ id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at }); return {};
         }
         if (/^INSERT OR IGNORE INTO shak_signups/.test(sql)) {
           const [email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons] = args;

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { CONTINGENCY } from "@/lib/contingency";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { AuthorshipDialog } from "@/components/AuthorshipDialog";
 
 export type AccountBook = {
   id: string;
@@ -350,6 +351,7 @@ function AccountView({
 }) {
   const [error, setError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const [authorBook, setAuthorBook] = useState<AccountBook | null>(null);
   const active = books.filter(book => !book.archived);
   const totalWords = active.reduce((sum, book) => sum + wordsOf(book), 0);
   const completed = active.filter(book => book.status === "completed").length;
@@ -441,12 +443,13 @@ function AccountView({
                     <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" aria-hidden="true" />{new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(book.lastOpenedAt ?? book.updatedAt)}</span>
                   </div>
                 </div>
-                <Button size="sm" variant="outline" aria-label={`Abrir ${book.title} na conta`} onClick={() => onOpen(book)}>Abrir</Button>
+                <div className="flex flex-col gap-1"><Button size="sm" variant="outline" aria-label={`Abrir ${book.title} na conta`} onClick={() => onOpen(book)}>Abrir</Button><Button size="sm" variant="ghost" className="h-7 text-xs" aria-label={`Autoria de ${book.title}`} onClick={() => setAuthorBook(book)}>Autoria</Button></div>
               </li>
             );
           })}
         </ul>
       )}
+      {authorBook && <AuthorshipDialog bookId={authorBook.id} title={authorBook.title} onClose={() => setAuthorBook(null)} />}
     </div>
   );
 }
