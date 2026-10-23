@@ -636,7 +636,6 @@ function xuriTsGranted(bytes) {
   if (!statusInfo || statusInfo.tag !== 0x30) return false;
   const status = xuriDerTlv(bytes, statusInfo.start, statusInfo.end);
   if (!status || status.tag !== 0x02 || status.end - status.start !== 1 || bytes[status.start] > 1) return false;
-  if (status.next >= statusInfo.end) return false;
   // Optional statusString / failInfo may follow the INTEGER, but every TLV must remain inside statusInfo.
   let cursor = status.next;
   while (cursor < statusInfo.end) {
