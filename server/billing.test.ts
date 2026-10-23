@@ -9,7 +9,7 @@ const URLS = { economico: "https://payment-link-v3.ton.com.br/pl_ECO", premium: 
 const PRICE = { economico: 34949, premium: 65340, vip: 100795 };
 
 const dnsOk = async (url: string) => { const type = new URL(url).searchParams.get("type"); return new Response(JSON.stringify({ Status: 0, Answer: type === "MX" ? [{ type: 15, data: "10 mx.example.com." }] : [] })); };
-const tsGranted = new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00, 0x30, 0x40, ...new Array(64).fill(7)]);
+const tsGranted = new Uint8Array([0x30, 0x19, 0x30, 0x03, 0x02, 0x01, 0x00, 0x30, 0x12, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02, 0xa0, 0x05, 0x30, 0x03, 0x02, 0x01, 0x00]);
 const tsaOk = async () => new Response(tsGranted);
 async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now(), extra: { headers?: Record<string, string>; dnsFetch?: any; tsaFetch?: any } = {}) {
   const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json", ...(extra.headers || {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -636,6 +636,32 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     expect((await api(mod, db, OWNER, "key/revoke", {})).status).toBe(200);
     expect((await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 2000)).json).toMatchObject({ ok: true, seq: 2, signed: false });
     expect((await api(mod, db, OWNER, "dossier?bookId=b1")).json.keys[0].revokedAt).toBeTruthy();
+  });
+
+  it("não aceita resposta RFC 3161 truncada nem a apresenta como carimbo recebido", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
+    await setup(mod, db);
+    const badTsa = async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00]));
+    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa })).status).toBe(200);
+    const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa });
+    expect(stamped.json).toMatchObject({ stamped: 0, pending: 1 });
+    const dossier = (await api(mod, db, OWNER, "dossier?bookId=tsa-book")).json;
+    expect(dossier.versions[0].timestamp).toBeNull();
+  });
+
+  it("guarda resposta RFC 3161 estruturalmente reconhecida como não verificada criptograficamente", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
+    await setup(mod, db);
+    const badTsa = async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00]));
+    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa })).status).toBe(200);
+    const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: tsaOk });
+    expect(stamped.json).toMatchObject({ stamped: 1, pending: 0 });
+    const dossier = (await api(mod, db, OWNER, "dossier?bookId=tsa-book")).json;
+    expect(dossier.versions[0].timestamp.protocol).toBe("rfc3161-sha256");
+    expect(dossier.versions[0].timestamp.token).toBeTruthy();
+    // A resposta mockada é só um fixture DER estrutural, não um token de carimbo criptograficamente válido.
   });
 
   it("conta comum registra só o próprio livro e não enxerga o de outra conta", async () => {
