@@ -2,7 +2,7 @@
 
 **Por que existe:** publicar o frontend (GitHub Pages ou a branch `cloudflare-dist-v2`) **não** atualiza o código do Worker. As rotas `/api/admin/billing`, `/api/admin/offer`, `/api/admin/users`, `/api/admin/plan` e `/api/billing/*` só existem no Worker depois de aplicar `cloudflare-worker/plans.js` nele. Sem isso elas respondem 404, mesmo com o frontend novo.
 
-O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em produção está desatualizado" quando `/api/me` não informa a versão esperada (`workerVersion`, hoje `2026-10-23.3`).
+O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em produção está desatualizado" quando `/api/me` não informa a versão esperada (`workerVersion`, hoje `2026-10-23.4`).
 
 ## Atualizar o Worker `shakstory`
 
@@ -31,4 +31,4 @@ Republique o `worker-atual.js` guardado no passo 1 (ou use Deployments → vers�
 
 ## Ao mudar `plans.js`
 
-Troque `SHAK_WORKER_VERSION` em `cloudflare-worker/plans.js` e `EXPECTED_WORKER_VERSION` em `client/src/lib/plans.ts` para o mesmo valor (um teste confere). Assim o app passa a avisar até o Worker ser atualizado.
+Troque `SHAK_WORKER_VERSION` em `cloudflare-worker/plans.js` e `EXPECTED_WORKER_VERSION` em `client/src/lib/plans.ts` para o mesmo valor (um teste confere). Assim o app passa a avisar até o Worker ser atualizado. A versão `2026-10-23.4` inclui também a validação estrutural mais estrita da resposta RFC 3161; ela não substitui a validação criptográfica externa do token.
