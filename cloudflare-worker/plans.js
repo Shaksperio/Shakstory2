@@ -610,12 +610,50 @@ function xuriTsQuery(hashHex) {
   const head = [0x30, 0x39, 0x02, 0x01, 0x01, 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20];
   return new Uint8Array([...head, ...hash, 0x01, 0x01, 0xff]);
 }
-/** Confere só o essencial da resposta RFC 3161: SEQUENCE { SEQUENCE { INTEGER status 0|1 }, token }. O token inteiro é guardado para verificação externa. */
+/** Lê um TLV DER com limites estritos; rejeita comprimento indefinido, truncamento e bytes fora do elemento. */
+function xuriDerTlv(bytes, offset, limit = bytes.length) {
+  if (offset + 2 > limit) return null;
+  const tag = bytes[offset++];
+  let length = bytes[offset++];
+  if (length & 0x80) {
+    const count = length & 0x7f;
+    if (count === 0 || count > 4 || offset + count > limit || bytes[offset] === 0) return null;
+    length = 0;
+    for (let i = 0; i < count; i++) length = length * 256 + bytes[offset++];
+    if (length < 128) return null; // DER requires short form for lengths below 128.
+  }
+  const end = offset + length;
+  if (end > limit) return null;
+  return { tag, start: offset, end, next: end };
+}
+/** Valida a estrutura externa de TimeStampResp e exige status concedido e ContentInfo SignedData.
+ * Isto é apenas validação estrutural: não verifica assinatura, cadeia de certificados nem TSTInfo.
+ */
 function xuriTsGranted(bytes) {
-  let at = 0;
-  const header = () => { if (bytes[at] !== 0x30) return -1; at += 1; let len = bytes[at++]; if (len & 0x80) { const n = len & 0x7f; len = 0; for (let k = 0; k < n; k++) len = len * 256 + bytes[at++]; } return len; };
-  if (header() < 0 || header() < 0) return false;
-  return bytes[at] === 0x02 && bytes[at + 1] === 0x01 && bytes[at + 2] <= 1 && bytes.length > 64;
+  const outer = xuriDerTlv(bytes, 0);
+  if (!outer || outer.tag !== 0x30 || outer.end !== bytes.length) return false;
+  const statusInfo = xuriDerTlv(bytes, outer.start, outer.end);
+  if (!statusInfo || statusInfo.tag !== 0x30) return false;
+  const status = xuriDerTlv(bytes, statusInfo.start, statusInfo.end);
+  if (!status || status.tag !== 0x02 || status.end - status.start !== 1 || bytes[status.start] > 1) return false;
+  if (status.next >= statusInfo.end) return false;
+  // Optional statusString / failInfo may follow the INTEGER, but every TLV must remain inside statusInfo.
+  let cursor = status.next;
+  while (cursor < statusInfo.end) {
+    const optional = xuriDerTlv(bytes, cursor, statusInfo.end);
+    if (!optional) return false;
+    cursor = optional.next;
+  }
+  const token = xuriDerTlv(bytes, statusInfo.next, outer.end);
+  if (!token || token.tag !== 0x30 || token.end !== outer.end || bytes[status.start] > 1) return false;
+  const oid = xuriDerTlv(bytes, token.start, token.end);
+  if (!oid || oid.tag !== 0x06) return false;
+  const signedDataOid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02];
+  if (oid.end - oid.start !== signedDataOid.length || signedDataOid.some((byte, i) => bytes[oid.start + i] !== byte)) return false;
+  const content = xuriDerTlv(bytes, oid.next, token.end);
+  if (!content || content.tag !== 0xa0 || content.end !== token.end) return false;
+  const signedData = xuriDerTlv(bytes, content.start, content.end);
+  return !!signedData && signedData.tag === 0x30 && signedData.end === content.end;
 }
 const xuriB64 = bytes => { let text = ""; for (const b of bytes) text += String.fromCharCode(b); return btoa(text); };
 /** Carimbo de tempo externo (autoridade RFC 3161). Melhor esforço: falha não impede o registro; dá para repetir depois. */
