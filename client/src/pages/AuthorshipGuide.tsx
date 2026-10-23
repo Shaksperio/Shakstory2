@@ -1,9 +1,9 @@
 import { Link } from "wouter";
 import { ArrowLeft, CheckCircle2, KeyRound, ShieldCheck, FileCheck2, AlertTriangle } from "lucide-react";
 
-export default function AuthorshipGuide() {
+export default function AuthorshipGuide({ onBack }: { onBack?: () => void }) {
   return <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
-    <Link href="/" className="inline-flex items-center gap-2 text-sm text-primary underline"><ArrowLeft className="h-4 w-4" /> Voltar ao Shakstory</Link>
+    {onBack ? <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm text-primary underline"><ArrowLeft className="h-4 w-4" /> Voltar ao Shakstory</button> : <Link href="/" className="inline-flex items-center gap-2 text-sm text-primary underline"><ArrowLeft className="h-4 w-4" /> Voltar ao Shakstory</Link>}
     <header className="mt-6">
       <p className="text-xs font-semibold uppercase tracking-[.2em] text-primary">Shakstory · X-URI</p>
       <h1 className="mt-2 font-serif text-3xl sm:text-4xl">Autoria e procedência, passo a passo</h1>
