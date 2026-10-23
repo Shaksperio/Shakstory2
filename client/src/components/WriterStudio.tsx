@@ -45,7 +45,7 @@ import { createCowilaRefiner, estimateRefineCalls, glossaryFromPlanning, languag
 import { CowilaTutorial } from "@/tutorial/CowilaTutorial";
 import { normalizeIsbn, publicationDates, type IsbnInfo } from "@/lib/isbn";
 import { type ExportBook, pdfSupportsLanguage, buildDocx, buildEpub, buildPdf, buildPrintHtml, buildText, chaptersFromNodes, TYPOGRAPHY_PRESETS, type TypographyPreset, TRIM_SIZES, CUSTOM_TRIM_LIMITS, type TrimSize, type CustomTrim } from "@shared/book-export";
-import { HelpCircle, LogOut, Eye, AlignCenter, AlignLeft, AlignRight, Bold, Eraser, Italic, Link2, List, ListOrdered, Minus, MoreHorizontal, Pilcrow, Quote, Redo2, Underline as UnderlineIcon, Undo2, ImagePlus, AlertCircle, BookOpen, BookMarked, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock3, CloudOff, Download, FileText, History, Lightbulb, Loader2, Menu, PanelLeft, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, ShieldCheck, Sparkles, Target, Trash2, UsersRound, WandSparkles, X } from "lucide-react";
+import { HelpCircle, LogOut, Eye, AlignCenter, AlignLeft, AlignRight, Bold, Eraser, Italic, Link2, List, ListOrdered, Minus, MoreHorizontal, Pilcrow, Quote, Redo2, Underline as UnderlineIcon, Undo2, ImagePlus, AlertCircle, BookOpen, BookMarked, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Clock3, CloudOff, Download, FileCheck2, FileText, History, Lightbulb, Loader2, Menu, PanelLeft, Pencil, Plus, RefreshCw, RotateCcw, Save, Search, ShieldCheck, Sparkles, Target, Trash2, UsersRound, WandSparkles, X } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { AntivirusSecurityView } from "./AntivirusSecurityView";
