@@ -595,6 +595,49 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     expect((await api(mod, db, OWNER, "dossier?bookId=outro")).status).toBe(404);
   });
 
+  it("assinatura do autor (Ed25519): cadastro exige a janela do TOTP; com chave, só vale registro assinado e verificável", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [{ id: "n", content: "um" }], updatedAt: 1 }]);
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
+    const raw = Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64");
+    const sign = async (text: string, key = pair.privateKey) => Buffer.from(await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(text))).toString("base64");
+    expect((await api(mod, db, OWNER, "key", { publicKey: raw })).status).toBe(428); // sem autenticador
+    await setup(mod, db);
+    expect((await api(mod, db, OWNER, "key", { publicKey: "curta" })).status).toBe(400);
+    expect((await api(mod, db, OWNER, "key", { publicKey: raw }, T0 + 20 * 60000)).status).toBe(423); // janela fechou
+    const keyId = (await api(mod, db, OWNER, "key", { publicKey: raw })).json.keyId;
+    expect((await api(mod, db, OWNER, "status")).json.signingKey.keyId).toBe(keyId);
+    // sem assinatura não registra
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1" })).status).toBe(428);
+    const prep = (await api(mod, db, OWNER, "prepare", { bookId: "b1" })).json;
+    expect(prep.keyId).toBe(keyId); expect(db.versions).toHaveLength(0); // preparar não grava versão
+    // assinatura de outra chave ou de outro texto é recusada
+    const other = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1", createdAt: prep.createdAt, signature: await sign(prep.entryPayload, other.privateKey) })).status).toBe(400);
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1", createdAt: prep.createdAt, signature: await sign(prep.entryPayload + " ") })).status).toBe(400);
+    // data muito antiga (retroativa) também é recusada
+    const old = new Date(T0 - 3600000).toISOString();
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1", createdAt: old, signature: await sign(prep.entryPayload) })).status).toBe(428);
+    const ok = await api(mod, db, OWNER, "register", { bookId: "b1", createdAt: prep.createdAt, signature: await sign(prep.entryPayload) });
+    expect(ok.status).toBe(200); expect(ok.json.signed).toBe(true);
+    // se o livro mudar depois do prepare, a assinatura antiga não serve
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [{ id: "n", content: "dois" }], updatedAt: 2 }]);
+    const stale = await api(mod, db, OWNER, "register", { bookId: "b1", createdAt: prep.createdAt, signature: await sign(prep.entryPayload) }, T0 + 1000);
+    expect(stale.status).toBe(400);
+    // dossiê verificável fora do Shakstory
+    const dossier = (await api(mod, db, OWNER, "dossier?bookId=b1")).json;
+    const v = dossier.versions[0];
+    expect(dossier.keys[0].publicKeySpkiBase64.startsWith("MCowBQYDK2VwAyEA")).toBe(true);
+    const spki = Buffer.from(dossier.keys[0].publicKeySpkiBase64, "base64");
+    const pub = await crypto.subtle.importKey("spki", spki, { name: "Ed25519" }, false, ["verify"]);
+    expect(await crypto.subtle.verify("Ed25519", pub, Buffer.from(v.signature.sig, "base64"), new TextEncoder().encode(v.entryPayload))).toBe(true);
+    expect((await api(mod, db, OWNER, "history?bookId=b1")).json.versions[0].signed).toBe(true);
+    // revogar a chave libera o registro sem assinatura (a versão antiga continua assinada)
+    expect((await api(mod, db, OWNER, "key/revoke", {})).status).toBe(200);
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 2000)).json).toMatchObject({ ok: true, seq: 2, signed: false });
+    expect((await api(mod, db, OWNER, "dossier?bookId=b1")).json.keys[0].revokedAt).toBeTruthy();
+  });
+
   it("conta comum registra só o próprio livro e não enxerga o de outra conta", async () => {
     const mod = await load(); const db = fakeBillingDb();
     putLibrary(db, "ana@example.com", [{ id: "b1", title: "Do Ana", nodes: [], updatedAt: 1 }]);

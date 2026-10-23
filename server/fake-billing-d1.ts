@@ -13,7 +13,8 @@ export function fakeBillingDb() {
   const auths = new Map<string, any>();
   const works: any[] = [];
   const versions: any[] = [];
-  const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions };
+  const keys: any[] = [];
+  const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions, keys };
   const unique = (what: string) => { const e: any = new Error("UNIQUE constraint failed: " + what); return e; };
   const sortDesc = (rows: any[], key: string) => [...rows].sort((a, b) => String(b[key]).localeCompare(String(a[key])));
   db.prepare = (sql: string) => {
@@ -71,10 +72,14 @@ export function fakeBillingDb() {
         if (/FROM shak_versions WHERE work_id/.test(sql)) return { results: versions.filter(v => v.work_id === args[0]).sort((a, b) => a.seq - b.seq) };
         if (/^UPDATE shak_versions SET ts_proof/.test(sql)) { const v = versions.find(x => x.id === args[1]); if (v) v.ts_proof = args[0]; return {}; }
         if (/^INSERT INTO shak_versions/.test(sql)) {
-          const [id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at] = args;
+          const [id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at, signature] = args;
           if (versions.some(v => v.work_id === work_id && v.seq === seq)) throw unique("shak_versions.work_id, shak_versions.seq");
-          versions.push({ id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at }); return {};
+          versions.push({ id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at, signature: signature ?? null }); return {};
         }
+        if (/FROM shak_keys WHERE email = \? AND revoked_at IS NULL/.test(sql)) return keys.find(k => k.email === args[0] && !k.revoked_at) ?? null;
+        if (/FROM shak_keys WHERE email = \? ORDER BY/.test(sql)) return { results: keys.filter(k => k.email === args[0]) };
+        if (/^UPDATE shak_keys SET revoked_at/.test(sql)) { keys.filter(k => k.email === args[1] && !k.revoked_at).forEach(k => { k.revoked_at = args[0]; }); return {}; }
+        if (/^INSERT INTO shak_keys/.test(sql)) { const [key_id, email, public_key, created_at] = args; keys.push({ key_id, email, public_key, created_at, revoked_at: null }); return {}; }
         if (/^INSERT OR IGNORE INTO shak_signups/.test(sql)) {
           const [email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons] = args;
           if (!signups.some(r => r.email === email)) signups.push({ email, canon, device, ip_hash, asn, org, country, created_at, trial_granted, reasons });
