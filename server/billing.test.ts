@@ -642,8 +642,9 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     const mod = await load(); const db = fakeBillingDb();
     putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
     await setup(mod, db);
-    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" })).status).toBe(200);
-    const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00])) });
+    const badTsa = async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00]));
+    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa })).status).toBe(200);
+    const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa });
     expect(stamped.json).toMatchObject({ stamped: 0, pending: 1 });
     const dossier = (await api(mod, db, OWNER, "dossier?bookId=tsa-book")).json;
     expect(dossier.versions[0].timestamp).toBeNull();
@@ -653,7 +654,8 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     const mod = await load(); const db = fakeBillingDb();
     putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
     await setup(mod, db);
-    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" })).status).toBe(200);
+    const badTsa = async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00]));
+    expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" }, T0, { tsaFetch: badTsa })).status).toBe(200);
     const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: tsaOk });
     expect(stamped.json).toMatchObject({ stamped: 1, pending: 0 });
     const dossier = (await api(mod, db, OWNER, "dossier?bookId=tsa-book")).json;
