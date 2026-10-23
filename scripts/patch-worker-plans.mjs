@@ -17,7 +17,11 @@ if (source.indexOf("async function verifyAccessJwt") === -1) { console.error("ap
 const helpers = readFileSync(new URL("../cloudflare-worker/plans.js", import.meta.url), "utf8")
   .replace(/^import .*$/gm, "")
   .replace(/^export /gm, "");
-const entry = "export default{async fetch(req,env){const u=new URL(req.url);\n";
+// Central de Contas e privacidade: fica logo depois do bloco de planos, antes da entrada do Worker.
+const accountCenter = readFileSync(new URL("../cloudflare-worker/account-center.js", import.meta.url), "utf8")
+  .replace(/^import .*$/gm, "")
+  .replace(/^export /gm, "");
+const entry = "export default{async fetch(req,env){const u=new URL(req.url);";
 const anchor = "if(u.pathname==='/api/mirror-token'&&req.method==='GET')return mirrorToken(req,env);\n";
 const gate = "{const g=await shakGate(req,env,u);if(g.response)return g.response;if(g.env)env=g.env;}\n";
 if (upgrade) {
@@ -27,10 +31,10 @@ if (upgrade) {
   const to = source.indexOf(entry);
   if (source.split(START).length !== 2 || source.split(entry).length !== 2 || from === -1 || to === -1 || from > to) { console.error("não achei o bloco instalado com segurança; nada foi alterado"); process.exit(6); }
   if (source.split("shakGate(req,env,u)").length !== 2) { console.error("o portão não está exatamente uma vez no Worker; nada foi alterado"); process.exit(7); }
-  source = source.slice(0, from) + helpers + "\n" + source.slice(to);
+  source = source.slice(0, from) + helpers + "\n" + accountCenter + "\n" + source.slice(to);
 } else {
   if (source.split(entry).length !== 2 || source.split(anchor).length !== 2) { console.error("formato inesperado do Worker; nada foi alterado"); process.exit(4); }
-  source = source.replace(entry, () => helpers + "\n" + entry).replace(anchor, () => gate + anchor);
+  source = source.replace(entry, () => helpers + "\n" + accountCenter + "\n" + entry).replace(anchor, () => gate + anchor);
 }
 writeFileSync(output, source);
 console.log("ok");
