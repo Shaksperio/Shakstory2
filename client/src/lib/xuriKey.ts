@@ -15,7 +15,9 @@ export async function ed25519Supported(): Promise<boolean> {
 
 async function wrapKey(passphrase: string, salt: Uint8Array) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: ITERATIONS, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  // Copy into an ArrayBuffer-backed view: newer TypeScript DOM types reject ArrayBufferLike/SharedArrayBuffer as BufferSource.
+  const saltBuffer = new Uint8Array(salt).buffer as ArrayBuffer;
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: saltBuffer, iterations: ITERATIONS, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 
 export function readStoredKey(): StoredKey | null {
