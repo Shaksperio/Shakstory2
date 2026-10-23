@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-23.1";
+export const SHAK_WORKER_VERSION = "2026-10-23.2";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -416,7 +416,7 @@ async function shakGateCore(req, env, u, options = {}) {
   }
   if (owner) {
     if (path.indexOf("/api/billing/") === 0) return { response: planJson({ error: "owner_has_full_access" }, 400) };
-    if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(env.DB, env, email, true, path, req, now) };
+    if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(env.DB, env, email, true, path, req, now, options.tsaFetch) };
     if (path === "/api/admin/billing" || path === "/api/admin/offer" || path === "/api/admin/stripe/link" || path.indexOf("/api/admin/purchase/") === 0) return { response: await shakBillingAdmin(env.DB, email, path, req, now, env, options.fetch) };
     // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
     if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
@@ -475,7 +475,7 @@ async function shakGateCore(req, env, u, options = {}) {
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
   if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now, env, options.fetch) };
 
-  if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(db, env, email, false, path, req, now) };
+  if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(db, env, email, false, path, req, now, options.tsaFetch) };
   if (path === "/api/assist" && req.method === "POST") {
     // Cowila é o único recurso acessório recusado pelo guardião; escrever e ler manuscritos nunca é.
     const protection = await shakReadProtection(db, env, now);
@@ -590,7 +590,7 @@ async function shakXuriCheck(db, env, email, auth, code, now, allowRecovery) {
   return { ok, usedRecovery, error: ok ? null : "invalid_code", state, save };
 }
 
-const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(shakStable({ protocol: "xuri-1", work: workId, seq, content: contentHash, prev: prevHash, at: createdAt }));
+const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(xuriPayload(workId, seq, contentHash, prevHash, createdAt));
 
 /** Verifica a cadeia: cada entrada recalculada e ligada à anterior. */
 async function xuriVerifyChain(workId, rows) {
@@ -603,7 +603,36 @@ async function xuriVerifyChain(workId, rows) {
   return { valid: true, brokenAt: null };
 }
 
-async function shakXuri(db, env, email, owner, path, req, now) {
+/** Pedido RFC 3161 (SHA-256) para o hash de uma entrada. */
+function xuriTsQuery(hashHex) {
+  const hash = new Uint8Array((hashHex.match(/../g) || []).map(h => parseInt(h, 16)));
+  const head = [0x30, 0x39, 0x02, 0x01, 0x01, 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20];
+  return new Uint8Array([...head, ...hash, 0x01, 0x01, 0xff]);
+}
+/** Confere só o essencial da resposta RFC 3161: SEQUENCE { SEQUENCE { INTEGER status 0|1 }, token }. O token inteiro é guardado para verificação externa. */
+function xuriTsGranted(bytes) {
+  let at = 0;
+  const header = () => { if (bytes[at] !== 0x30) return -1; at += 1; let len = bytes[at++]; if (len & 0x80) { const n = len & 0x7f; len = 0; for (let k = 0; k < n; k++) len = len * 256 + bytes[at++]; } return len; };
+  if (header() < 0 || header() < 0) return false;
+  return bytes[at] === 0x02 && bytes[at + 1] === 0x01 && bytes[at + 2] <= 1 && bytes.length > 64;
+}
+const xuriB64 = bytes => { let text = ""; for (const b of bytes) text += String.fromCharCode(b); return btoa(text); };
+/** Carimbo de tempo externo (autoridade RFC 3161). Melhor esforço: falha não impede o registro; dá para repetir depois. */
+async function xuriStamp(db, env, versionId, entryHash, doFetch) {
+  const url = env.XURI_TSA_URL || "https://freetsa.org/tsr";
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const r = await (doFetch || fetch)(url, { method: "POST", headers: { "content-type": "application/timestamp-query" }, body: xuriTsQuery(entryHash), signal: ctl.signal });
+    if (!r.ok) return false;
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (bytes.length > 20000 || !xuriTsGranted(bytes)) return false;
+    await db.prepare("UPDATE shak_versions SET ts_proof = ? WHERE id = ?").bind(JSON.stringify({ tsa: url, protocol: "rfc3161-sha256", token: xuriB64(bytes), at: new Date().toISOString() }), versionId).run();
+    return true;
+  } catch { return false; } finally { clearTimeout(timer); }
+}
+const xuriPayload = (workId, seq, contentHash, prevHash, createdAt) => shakStable({ protocol: "xuri-1", work: workId, seq, content: contentHash, prev: prevHash, at: createdAt });
+
+async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
   await ensureXuri(db);
   const json = (body, status = 200) => planJson(body, status);
   const auth = await db.prepare(XURI_AUTH_SQL).bind(email).first();
@@ -667,9 +696,22 @@ async function shakXuri(db, env, email, owner, path, req, now) {
 
   if (path === "/api/xuri/history" && req.method === "GET") {
     if (!work) return json({ registered: false, versions: [] });
-    const rows = (await db.prepare("SELECT seq, content_hash, prev_hash, entry_hash, bytes, note, created_at FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
+    const rows = (await db.prepare("SELECT id, seq, content_hash, prev_hash, entry_hash, bytes, note, created_at, ts_proof FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
     const current = await loadBook();
-    return json({ registered: true, workId: work.id, title: work.title, chain: await xuriVerifyChain(work.id, rows), matchesCurrent: !!(current && rows.length && rows[rows.length - 1].content_hash === current.hash), versions: rows.map(row => ({ seq: row.seq, contentHash: row.content_hash, entryHash: row.entry_hash, bytes: row.bytes, note: row.note, createdAt: row.created_at })) });
+    return json({ registered: true, workId: work.id, title: work.title, chain: await xuriVerifyChain(work.id, rows), matchesCurrent: !!(current && rows.length && rows[rows.length - 1].content_hash === current.hash), versions: rows.map(row => ({ seq: row.seq, contentHash: row.content_hash, entryHash: row.entry_hash, bytes: row.bytes, note: row.note, createdAt: row.created_at, stamped: !!row.ts_proof })) });
+  }
+  if (path === "/api/xuri/stamp" && req.method === "POST") {
+    if (!work) return json({ error: "not_registered" }, 404);
+    const rows = (await db.prepare("SELECT id, seq, content_hash, prev_hash, entry_hash, bytes, note, created_at, ts_proof FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
+    let done = 0, pending = 0;
+    for (const row of rows) { if (row.ts_proof) continue; if (await xuriStamp(db, env, row.id, row.entry_hash, doFetch)) done += 1; else pending += 1; }
+    return json({ ok: true, stamped: done, pending });
+  }
+  if (path === "/api/xuri/dossier" && req.method === "GET") {
+    if (!work) return json({ error: "not_registered" }, 404);
+    const rows = (await db.prepare("SELECT id, seq, content_hash, prev_hash, entry_hash, bytes, note, created_at, ts_proof FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
+    const chain = await xuriVerifyChain(work.id, rows);
+    return json({ protocol: "xuri-1", generatedAt: new Date(now).toISOString(), account: email, work: { id: work.id, bookId, title: work.title }, chain, howToVerify: ["1. Para cada versão, SHA-256 do texto de entryPayload deve ser igual a entryHash e prev deve ser o entryHash da versão anterior (a primeira usa 64 zeros).", "2. contentHash é o SHA-256 do livro em JSON com chaves ordenadas, como estava salvo no servidor naquele momento.", "3. Se houver timestamp, salve o token (base64) em um arquivo .tsr e confira com: openssl ts -verify -in arquivo.tsr -digest <entryHash> -sha256 -CAfile <certificado da autoridade>.", "Isto é evidência de que o conteúdo existia na data registrada; não prova quem o escreveu."], versions: rows.map(row => ({ seq: row.seq, createdAt: row.created_at, note: row.note, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null })) });
   }
   if (path === "/api/xuri/register" && req.method === "POST") {
     if (!auth || !auth.confirmed) return json({ error: "totp_required", message: "Ative o Google Authenticator para registrar versões." }, 428);
@@ -684,11 +726,13 @@ async function shakXuri(db, env, email, owner, path, req, now) {
     if (last && last.content_hash === current.hash) return json({ ok: true, unchanged: true, seq: last.seq, contentHash: last.content_hash, message: "Nada mudou desde a última versão registrada." });
     const seq = rows.length + 1, prev = last ? last.entry_hash : "0".repeat(64), createdAt = new Date(now).toISOString();
     const entry = await xuriEntryHash(real.id, seq, current.hash, prev, createdAt);
+    const versionId = "v_" + shakHex(crypto.getRandomValues(new Uint8Array(10)));
     try {
-      await db.prepare("INSERT INTO shak_versions (id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("v_" + shakHex(crypto.getRandomValues(new Uint8Array(10))), real.id, seq, current.hash, current.bytes, prev, entry, String(body.note || "").slice(0, 200) || null, createdAt).run();
+      await db.prepare("INSERT INTO shak_versions (id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(versionId, real.id, seq, current.hash, current.bytes, prev, entry, String(body.note || "").slice(0, 200) || null, createdAt).run();
     } catch { return json({ error: "conflict", message: "Outro registro foi feito ao mesmo tempo. Tente de novo." }, 409); }
     await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.register", { bookId, seq, contentHash: current.hash });
-    return json({ ok: true, workId: real.id, seq, contentHash: current.hash, entryHash: entry, createdAt });
+    const stamped = await xuriStamp(db, env, versionId, entry, doFetch);
+    return json({ ok: true, workId: real.id, seq, contentHash: current.hash, entryHash: entry, createdAt, stamped });
   }
   return json({ error: "not_found" }, 404);
 }

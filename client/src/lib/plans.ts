@@ -28,7 +28,7 @@ export type PlanInfo = {
 };
 
 /** Versão que o Worker em produção deve informar em /api/me. Igual a SHAK_WORKER_VERSION em cloudflare-worker/plans.js (um teste confere). */
-export const EXPECTED_WORKER_VERSION = "2026-10-23.1";
+export const EXPECTED_WORKER_VERSION = "2026-10-23.2";
 /** "outdated": o servidor respondeu, mas o Worker não tem (ou tem outra versão do) código de contas e pagamentos; as rotas /api/admin/* e /api/billing/* podem dar 404. */
 export function workerStatus(plan: PlanInfo): "ok" | "outdated" | "unknown" {
   if (!plan.serverChecked) return "unknown";
