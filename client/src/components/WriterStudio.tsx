@@ -809,7 +809,7 @@ export default function WriterStudio() {
 
   const navigate = (nextView: View) => {
     if(activeNode && (draft!==activeNode.content || draftHtml!==(activeNode.richContent??"")))updateBook({});
-    if (nextView === "library" || nextView === "security" || nextView === "account-center") {
+    if (nextView === "library" || nextView === "security" || nextView === "authorship" || nextView === "account-center") {
       setView(nextView);
       return;
     }
