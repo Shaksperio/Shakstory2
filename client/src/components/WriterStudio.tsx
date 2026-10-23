@@ -531,7 +531,8 @@ export default function WriterStudio() {
   const restoreFromMirror = async () => {
     if (!window.confirm("Restaurar da cópia na nuvem? Seu texto atual é mantido e mesclado com a cópia; nada é apagado.")) return;
     const mirrored = await mirror.restore();
-    if (!mirrored) { setNotice("A cópia na nuvem está vazia ou incompleta."); window.setTimeout(() => setNotice(null), 4000); return; }
+    if (!mirrored) { window.alert("Não foi possível ler uma cópia completa na nuvem. Nenhum dado local foi alterado. Verifique a conexão e tente novamente."); return; }
+    if (!Array.isArray(mirrored.books) || mirrored.books.length === 0) { window.alert("A cópia na nuvem está conectada, mas não contém livros para restaurar. Nenhum dado local foi alterado. O horário da última sincronização não significa que existam manuscritos no backup."); return; }
     void kv().put("snapshots", "antes-da-restauracao-" + Date.now(), library).catch(() => {});
     const { doc, report } = mergeLibraries(undefined, library as unknown as LibraryLike, mirrored);
     saveLibrary(doc as unknown as LibraryDocument);
