@@ -58,6 +58,7 @@ export default function XuriPassportVerify() {
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">X-URI · Passaporte v1</p>
       <h1 className="mt-2 font-serif text-3xl sm:text-4xl">Verificação de procedência</h1>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">Confira localmente a integridade da cadeia e as assinaturas Ed25519 de um dossiê exportado pelo Shakstory. O arquivo é processado neste navegador e não é enviado para um servidor.</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">Atenção: o dossiê exportado inclui o e-mail associado à conta. Antes de compartilhar o arquivo, confira os dados pessoais que ele contém.</p>
     </header>
     <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">
       <label className="block text-sm font-medium" htmlFor="passport-file">Arquivo de passaporte (.json)</label>
