@@ -2,7 +2,7 @@
 
 **Por que existe:** publicar o frontend (GitHub Pages ou a branch `cloudflare-dist-v2`) **não** atualiza o código do Worker. As rotas `/api/admin/billing`, `/api/admin/offer`, `/api/admin/users`, `/api/admin/plan` e `/api/billing/*` só existem no Worker depois de aplicar `cloudflare-worker/plans.js` nele. Sem isso elas respondem 404, mesmo com o frontend novo.
 
-O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em produção está desatualizado" quando `/api/me` não informa a versão esperada (`workerVersion`, hoje `2026-10-23.2`).
+O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em produção está desatualizado" quando `/api/me` não informa a versão esperada (`workerVersion`, hoje `2026-10-23.3`).
 
 ## Atualizar o Worker `shakstory`
 
@@ -20,7 +20,7 @@ O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em pr
 ## Conferir (cada item separado)
 
 - Abra o app como administrador: o painel **Pagamentos** não mostra o aviso de Worker desatualizado.
-- `GET /api/me` (logado como administrador) traz `"workerVersion": "2026-10-23.2"`.
+- `GET /api/me` (logado como administrador) traz `"workerVersion": "2026-10-23.3"`.
 - Painel **Pagamentos**: salvar uma oferta de teste, recarregar e ver que persistiu.
 - Conta comum: não consegue abrir `/api/admin/*` (recebe recusa do servidor, não 404).
 - Pagamento: o pedido só vira plano depois da confirmação com o ID da transação (nenhum link ativa plano sozinho).
