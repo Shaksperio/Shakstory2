@@ -9,7 +9,7 @@ import { RepositoryConflictError } from "../backend/src/repositories/types";
 import { analyzeLiteraryText, listLiteraryModels, literaryAnalysisInputSchema } from "./literary-analysis";
 import { getSyncSnapshot, markSyncConflict, markSyncFailed, markSyncStarted, markSyncSucceeded } from "./sync-state";
 import { storagePut } from "./storage";
-import { recordAntivirusScan } from "./db";
+import { recordAntivirusScan, updateUserDisplayName, createAccountRequest, listAccountRequests } from "./db";
 import { isSafeToPersist, scanWithLocalKicomAV } from "./antivirus";
 import { ENV } from "./_core/env";
 import { createProjectBaseUrl, ensureAntivirusSession, fingerprintSession, listAntivirusSessions, revokeAntivirusSession, rotateAntivirusSessions } from "./antivirus-sessions";
@@ -21,7 +21,7 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(async opts => {
-      if (opts.ctx.user) {
+      if (opts.ctx.user?.accountStatus === "active") {
         try {
           await ensureAntivirusSession({
             userId: opts.ctx.user.id,
@@ -32,12 +32,35 @@ export const appRouter = router({
           console.error("[Antivirus] Não foi possível registrar a sessão sem bloquear o login:", error);
         }
       }
-      return opts.ctx.user;
+      return opts.ctx.user?.accountStatus === "active" ? opts.ctx.user : null;
     }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
+    }),
+  }),
+  account: router({
+    requests: protectedProcedure.query(({ ctx }) => listAccountRequests(ctx.user.id)),
+    request: protectedProcedure.input(z.object({
+      kind: z.enum(["access", "correction", "export", "privacy", "plan_change", "cancel_plan", "deactivate", "delete"]),
+      details: z.string().trim().max(2000).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const id = await createAccountRequest(ctx.user.id, input.kind, input.details);
+      return { id, status: "pending" as const, executed: false };
+    }),
+    profile: protectedProcedure.query(({ ctx }) => ({
+      name: ctx.user.name,
+      email: ctx.user.email,
+      loginMethod: ctx.user.loginMethod,
+      createdAt: ctx.user.createdAt,
+    })),
+    updateProfile: protectedProcedure.input(z.object({
+      name: z.string().trim().min(1).max(120),
+    })).mutation(async ({ ctx, input }) => {
+      const updated = await updateUserDisplayName(ctx.user.id, input.name);
+      if (!updated) throw new TRPCError({ code: "CONFLICT", message: "Conta indisponível para alteração." });
+      return { updated: true } as const;
     }),
   }),
   security: router({

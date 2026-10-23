@@ -14,7 +14,7 @@ vi.mock("./data-access", () => ({
 
 const { appRouter } = await import("./routers");
 
-const context = { user: { id: 42 }, req: {}, res: {} } as TrpcContext;
+const context = { user: { id: 42, accountStatus: "active" }, req: {}, res: {} } as TrpcContext;
 
 describe("data repository procedures", () => {
   beforeEach(() => vi.clearAllMocks());

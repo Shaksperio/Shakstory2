@@ -16,6 +16,9 @@ const requireUser = t.middleware(async opts => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
+  if (ctx.user.accountStatus !== "active") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Conta indisponível. Entre em contato com o suporte para verificar seu estado." });
+  }
 
   return next({
     ctx: {
@@ -31,7 +34,7 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    if (!ctx.user || ctx.user.role !== 'admin' || ctx.user.accountStatus !== 'active') {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

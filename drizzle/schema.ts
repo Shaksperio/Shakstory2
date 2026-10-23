@@ -16,6 +16,10 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
+  accountStatus: mysqlEnum("accountStatus", ["active", "deactivated", "deletion_pending", "deleted"]).default("active").notNull(),
+  deactivatedAt: timestamp("deactivatedAt"),
+  deletionRequestedAt: timestamp("deletionRequestedAt"),
+  deletedAt: timestamp("deletedAt"),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -55,3 +59,13 @@ export const antivirusScans = mysqlTable("antivirus_scans", {
 
 export type AntivirusScan = typeof antivirusScans.$inferSelect;
 export type InsertAntivirusScan = typeof antivirusScans.$inferInsert;
+/** Solicitações LGPD e comerciais, sem executar mudanças destrutivas automaticamente. */
+export const accountRequests = mysqlTable("account_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  kind: mysqlEnum("kind", ["access", "correction", "export", "privacy", "plan_change", "cancel_plan", "deactivate", "delete"]).notNull(),
+  details: text("details"),
+  status: mysqlEnum("status", ["pending", "in_review", "resolved", "rejected"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});

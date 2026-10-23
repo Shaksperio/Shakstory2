@@ -5,6 +5,7 @@ import { Route, Router as WouterRouter, Switch, useRoute } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import AccountCenter from "./pages/AccountCenter";
 import EditorialPreview from "./pages/EditorialPreview";
 import ReaderPage from "./pages/ReaderPage";
 import XuriPassportVerify from "./pages/XuriPassportVerify";
@@ -17,6 +18,7 @@ function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/conta"} component={AccountCenter} />
       <Route path={"/ler/:token"} component={ReaderPage} />
       <Route path={"/preview/editorial"} component={EditorialPreview} />
       <Route path={"/404"} component={NotFound} />
