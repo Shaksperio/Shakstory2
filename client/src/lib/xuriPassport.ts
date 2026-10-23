@@ -70,7 +70,8 @@ export async function verifyPassport(passport: Passport): Promise<PassportResult
   if (passport.protocol !== "xuri-1" || !Array.isArray(passport.versions) || !passport.work?.id) {
     throw new Error("Este arquivo não parece um dossiê X-URI protocol xuri-1.");
   }
-  if (passport.versions.length === 0) {
+  const versions = passport.versions;
+  if (versions.length === 0) {
     throw new Error("O dossiê não contém versões para verificar.");
   }
 
@@ -78,8 +79,8 @@ export async function verifyPassport(passport: Passport): Promise<PassportResult
   const checks: VersionCheck[] = [];
   let previous = "0".repeat(64);
 
-  for (let index = 0; index < passport.versions.length; index++) {
-    const version = passport.versions[index];
+  for (let index = 0; index < versions.length; index++) {
+    const version = versions[index];
     const seq = Number.isSafeInteger(version.seq) && version.seq === index + 1;
     const hashesWellFormed = HASH_RE.test(version.contentHash) && HASH_RE.test(version.prevHash) && HASH_RE.test(version.entryHash);
     let payloadOK = false;
