@@ -1,6 +1,6 @@
 // Autoria e procedência: TOTP (Google Authenticator) + registro de versões com hash encadeado. Ver docs/AUTORIA.md.
 export type XuriStatus = { configured?: boolean; enrolled: boolean; confirmed: boolean; unlockedUntil: string | null; recoveryLeft: number; error?: string };
-export type XuriVersion = { seq: number; contentHash: string; entryHash: string; bytes: number; note: string | null; createdAt: string };
+export type XuriVersion = { seq: number; contentHash: string; entryHash: string; bytes: number; note: string | null; createdAt: string; stamped?: boolean };
 export type XuriHistory = { registered: boolean; title?: string; chain?: { valid: boolean; brokenAt: number | null }; matchesCurrent?: boolean; versions: XuriVersion[] };
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
@@ -16,4 +16,6 @@ export const xuriConfirm = (code: string) => call<{ recoveryCodes: string[]; unl
 export const xuriUnlock = (code: string) => call<{ unlockedUntil: string; recoveryLeft: number }>("unlock", { code });
 export const xuriRevoke = (code: string) => call<{ ok: true }>("totp/revoke", { code });
 export const xuriRegister = (bookId: string, note: string) => call<{ ok: true; seq: number; unchanged?: boolean; contentHash: string; message?: string }>("register", { bookId, note });
+export const xuriStamp = (bookId: string) => call<{ stamped: number; pending: number }>("stamp", { bookId });
+export const xuriDossier = (bookId: string) => call<Record<string, unknown>>("dossier?bookId=" + encodeURIComponent(bookId));
 export const xuriHistory = (bookId: string) => call<XuriHistory>("history?bookId=" + encodeURIComponent(bookId));

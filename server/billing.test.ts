@@ -9,9 +9,11 @@ const URLS = { economico: "https://payment-link-v3.ton.com.br/pl_ECO", premium: 
 const PRICE = { economico: 34949, premium: 65340, vip: 100795 };
 
 const dnsOk = async (url: string) => { const type = new URL(url).searchParams.get("type"); return new Response(JSON.stringify({ Status: 0, Answer: type === "MX" ? [{ type: 15, data: "10 mx.example.com." }] : [] })); };
-async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now(), extra: { headers?: Record<string, string>; dnsFetch?: any } = {}) {
+const tsGranted = new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x00, 0x30, 0x40, ...new Array(64).fill(7)]);
+const tsaOk = async () => new Response(tsGranted);
+async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now(), extra: { headers?: Record<string, string>; dnsFetch?: any; tsaFetch?: any } = {}) {
   const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json", ...(extra.headers || {}) }, body: body ? JSON.stringify(body) : undefined });
-  const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { verify: async () => email, now, dnsFetch: extra.dnsFetch ?? dnsOk });
+  const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { verify: async () => email, now, dnsFetch: extra.dnsFetch ?? dnsOk, tsaFetch: extra.tsaFetch ?? tsaOk });
   return { out, status: out.response?.status ?? 200, json: out.response ? await out.response.json() : null };
 }
 const setOffers = async (mod: any, db: any, now = Date.now()) => { for (const plan of ["economico", "premium", "vip"] as const) expect((await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan, priceCents: PRICE[plan], currency: "BRL", checkoutUrl: URLS[plan] }, now)).status).toBe(200); };
@@ -482,7 +484,7 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     const mac = createHmac("sha1", decode(secret)).update(msg).digest(); const o = mac[19] & 15;
     return String((((mac[o] & 127) << 24) | (mac[o + 1] << 16) | (mac[o + 2] << 8) | mac[o + 3]) % 1000000).padStart(6, "0");
   };
-  const api = (mod: any, db: any, email: string, path: string, body?: unknown, now = T0) => send(mod, db, email, "/api/xuri/" + path, body === undefined ? "GET" : "POST", body, now);
+  const api = (mod: any, db: any, email: string, path: string, body?: unknown, now = T0, extra: any = {}) => send(mod, db, email, "/api/xuri/" + path, body === undefined ? "GET" : "POST", body, now, extra);
   const setup = async (mod: any, db: any, email = OWNER, now = T0) => {
     const enrolled = (await api(mod, db, email, "totp/enroll", {}, now)).json;
     const confirmed = await api(mod, db, email, "totp/confirm", { code: code(enrolled.secret, now) }, now);
@@ -553,6 +555,44 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     db.versions[0].content_hash = "f".repeat(64);
     expect((await api(mod, db, OWNER, "history?bookId=b1")).json.chain).toEqual({ valid: false, brokenAt: 1 });
     expect(secret).toBeTruthy();
+  });
+
+  it("carimbo de tempo externo (RFC 3161): pedido correto, falha não impede o registro e dá para repetir", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
+    await setup(mod, db);
+    let sent: Uint8Array | null = null;
+    const spy = async (_url: string, init: any) => { sent = new Uint8Array(init.body); return new Response(tsGranted); };
+    const ok = (await api(mod, db, OWNER, "register", { bookId: "b1" }, T0, { tsaFetch: spy })).json;
+    expect(ok.stamped).toBe(true);
+    const hex = Buffer.from(sent!).toString("hex");
+    expect(hex.startsWith("3039020101303130" + "0d06096086480165030402010500" + "0420")).toBe(true);
+    expect(hex).toContain(ok.entryHash); expect(sent!.length).toBe(59);
+    // autoridade recusa (status 2) ou cai: registra mesmo assim, sem carimbo
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [{ id: "n", content: "texto 2" }], updatedAt: 2 }]);
+    const refused = async () => new Response(new Uint8Array([0x30, 0x47, 0x30, 0x03, 0x02, 0x01, 0x02, 0x30, 0x40, ...new Array(64).fill(7)]));
+    const second = (await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 1000, { tsaFetch: refused })).json;
+    expect(second).toMatchObject({ ok: true, seq: 2, stamped: false });
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [{ id: "n", content: "texto 3" }], updatedAt: 3 }]);
+    const down = async () => { throw new Error("fora do ar"); };
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 2000, { tsaFetch: down })).json).toMatchObject({ seq: 3, stamped: false });
+    const retry = (await api(mod, db, OWNER, "stamp", { bookId: "b1" }, T0 + 3000)).json;
+    expect(retry).toMatchObject({ stamped: 2, pending: 0 });
+    const history = (await api(mod, db, OWNER, "history?bookId=b1")).json;
+    expect(history.versions.every((v: any) => v.stamped)).toBe(true);
+  });
+
+  it("dossiê: entryPayload recalcula o entryHash e traz o token do carimbo", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "b1", title: "Livro", nodes: [], updatedAt: 1 }]);
+    await setup(mod, db);
+    await api(mod, db, OWNER, "register", { bookId: "b1", note: "v1" });
+    const dossier = (await api(mod, db, OWNER, "dossier?bookId=b1")).json;
+    expect(dossier.chain.valid).toBe(true); expect(dossier.howToVerify.length).toBeGreaterThan(2);
+    const v = dossier.versions[0];
+    expect(createHash("sha256").update(v.entryPayload).digest("hex")).toBe(v.entryHash);
+    expect(v.timestamp).toMatchObject({ protocol: "rfc3161-sha256" }); expect(v.timestamp.token.length).toBeGreaterThan(20);
+    expect((await api(mod, db, OWNER, "dossier?bookId=outro")).status).toBe(404);
   });
 
   it("conta comum registra só o próprio livro e não enxerga o de outra conta", async () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { xuriConfirm, xuriEnroll, xuriHistory, xuriRegister, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
+import { xuriConfirm, xuriEnroll, xuriDossier, xuriHistory, xuriRegister, xuriStamp, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const errorText = (error: unknown) => (error instanceof Error ? error.message : "Não foi possível concluir.");
@@ -26,6 +26,11 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
   useEffect(() => { void reload(); }, [reload]);
 
   const run = async (job: () => Promise<void>) => { setBusy(true); setMessage(""); try { await job(); } catch (error) { setMessage(errorText(error)); } finally { setBusy(false); setCode(""); } };
+  const download = () => run(async () => {
+    const dossier = await xuriDossier(bookId);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(dossier, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = `dossie-autoria-${bookId}.json`; link.click(); URL.revokeObjectURL(url);
+  });
   const unlocked = !!status?.unlockedUntil && Date.parse(status.unlockedUntil) > Date.now();
 
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Autoria e procedência">
@@ -65,7 +70,8 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
       {history?.registered && <section className="mt-5 border-t pt-3" aria-label="Histórico de registros">
         <h3 className="text-sm font-semibold">Histórico</h3>
         <p className="mt-1 text-xs">{history.chain?.valid ? "Cadeia íntegra." : `Cadeia quebrada na versão ${history.chain?.brokenAt}.`} {history.matchesCurrent ? "O livro atual é igual à última versão registrada." : "O livro mudou desde a última versão registrada."}</p>
-        <ol className="mt-2 space-y-1 text-xs">{[...history.versions].reverse().map(version => <li key={version.seq} className="rounded-md border p-2"><strong>Versão {version.seq}</strong> · {fmt(version.createdAt)}{version.note ? ` · ${version.note}` : ""}<br /><span className="break-all font-mono text-[10px] text-muted-foreground">{version.contentHash}</span></li>)}</ol>
+        <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void download()}>Baixar dossiê</Button>{history.versions.some(version => !version.stamped) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => { const done = await xuriStamp(bookId); setMessage(done.pending ? `${done.pending} registro(s) sem carimbo: a autoridade não respondeu. Tente mais tarde.` : "Carimbos de tempo obtidos."); await reload(); })}>Carimbar pendentes</Button>}</div>
+        <ol className="mt-2 space-y-1 text-xs">{[...history.versions].reverse().map(version => <li key={version.seq} className="rounded-md border p-2"><strong>Versão {version.seq}</strong> · {fmt(version.createdAt)}{version.note ? ` · ${version.note}` : ""} · {version.stamped ? "carimbo de tempo externo" : "sem carimbo externo"}<br /><span className="break-all font-mono text-[10px] text-muted-foreground">{version.contentHash}</span></li>)}</ol>
       </section>}
     </div></div>;
 }
