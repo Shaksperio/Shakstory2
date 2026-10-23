@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-22.1";
+export const SHAK_WORKER_VERSION = "2026-10-23.1";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -416,6 +416,7 @@ async function shakGateCore(req, env, u, options = {}) {
   }
   if (owner) {
     if (path.indexOf("/api/billing/") === 0) return { response: planJson({ error: "owner_has_full_access" }, 400) };
+    if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(env.DB, env, email, true, path, req, now) };
     if (path === "/api/admin/billing" || path === "/api/admin/offer" || path === "/api/admin/stripe/link" || path.indexOf("/api/admin/purchase/") === 0) return { response: await shakBillingAdmin(env.DB, email, path, req, now, env, options.fetch) };
     // Dono: nada é bloqueado. O contador só observa (falha em silêncio) para o nível de proteção refletir o consumo total.
     if (write) await shakBumpMeter(env.DB, now, { writes: 1, bytes: write.bytes });
@@ -474,6 +475,7 @@ async function shakGateCore(req, env, u, options = {}) {
   if (path.indexOf("/api/admin/") === 0) return { response: planJson({ error: "forbidden" }, 403) };
   if (path.indexOf("/api/billing/") === 0) return { response: await shakBilling(db, email, path, req, info, now, env, options.fetch) };
 
+  if (path.indexOf("/api/xuri/") === 0) return { response: await shakXuri(db, env, email, false, path, req, now) };
   if (path === "/api/assist" && req.method === "POST") {
     // Cowila é o único recurso acessório recusado pelo guardião; escrever e ler manuscritos nunca é.
     const protection = await shakReadProtection(db, env, now);
@@ -492,6 +494,203 @@ async function shakGateCore(req, env, u, options = {}) {
     await shakBumpMeter(db, now, { writes: 1, bytes: write.bytes });
   }
   return { env: { ...env, DB: scopeDb(db, prefix) } };
+}
+
+// ===== Autoria e procedência (X-URI, marco 1) =====
+// TOTP (Google Authenticator) como trava para REGISTRAR versões de uma obra; o registro grava o hash do livro como está no servidor,
+// encadeado ao registro anterior (cada entrada inclui o hash da anterior). Editar e salvar nunca é bloqueado.
+// Não é certidão de autoria: prova que este conteúdo foi registrado por esta conta, com o código do autenticador, nesta data (do servidor).
+// As colunas `signature` e `ts_proof` ficam reservadas para a assinatura do autor e o carimbo de tempo externo (marco 2).
+const XURI_UNLOCK_MS = 15 * 60 * 1000;
+const XURI_MAX_FAILS = 5;
+const XURI_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+function shakBase32(bytes) {
+  let bits = 0, value = 0, out = "";
+  for (const byte of bytes) { value = (value << 8) | byte; bits += 8; while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
+}
+function shakBase32Decode(text) {
+  let bits = 0, value = 0; const out = [];
+  for (const ch of String(text).replace(/=+$/, "")) { const i = B32.indexOf(ch); if (i < 0) continue; value = (value << 5) | i; bits += 5; if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; } }
+  return new Uint8Array(out);
+}
+const shakHex = bytes => Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, "0")).join("");
+const shakSha256Hex = async text => shakHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+/** JSON com chaves ordenadas (mesmo critério do cliente), para o hash do livro não depender da ordem das chaves. */
+function shakStable(value) {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(item => shakStable(item === undefined ? null : item)).join(",") + "]";
+  const keys = Object.keys(value).filter(key => value[key] !== undefined).sort();
+  return "{" + keys.map(key => JSON.stringify(key) + ":" + shakStable(value[key])).join(",") + "}";
+}
+
+/** Código TOTP de 6 dígitos (RFC 6238, SHA-1, 30 s) para um passo de tempo. */
+async function shakTotp(secretBytes, step) {
+  const key = await crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const msg = new Uint8Array(8); new DataView(msg.buffer).setUint32(4, step >>> 0); new DataView(msg.buffer).setUint32(0, Math.floor(step / 4294967296));
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg));
+  const o = mac[19] & 15;
+  const n = ((mac[o] & 127) << 24) | (mac[o + 1] << 16) | (mac[o + 2] << 8) | mac[o + 3];
+  return String(n % 1000000).padStart(6, "0");
+}
+const shakSameText = (a, b) => { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; };
+
+async function shakXuriKey(env) {
+  if (!env.XURI_KEY || String(env.XURI_KEY).length < 16) return null;
+  return crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode("shak-totp|" + env.XURI_KEY)), "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+async function shakSeal(env, bytes) {
+  const key = await shakXuriKey(env); const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes));
+  return shakHex(iv) + shakHex(ct);
+}
+async function shakOpen(env, text) {
+  const key = await shakXuriKey(env); const raw = new Uint8Array((String(text).match(/../g) || []).map(h => parseInt(h, 16)));
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)));
+}
+
+let xuriReady = false;
+async function ensureXuri(db) {
+  if (xuriReady) return;
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_authenticators (email TEXT PRIMARY KEY, secret_enc TEXT NOT NULL, confirmed INTEGER NOT NULL DEFAULT 0, last_step INTEGER NOT NULL DEFAULT 0, fails INTEGER NOT NULL DEFAULT 0, fail_start INTEGER NOT NULL DEFAULT 0, unlock_until INTEGER NOT NULL DEFAULT 0, recovery TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_works (id TEXT PRIMARY KEY, email TEXT NOT NULL, book_id TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (email, book_id))").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_versions (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, content_hash TEXT NOT NULL, bytes INTEGER NOT NULL, prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, signature TEXT, ts_proof TEXT, UNIQUE (work_id, seq))").run();
+  xuriReady = true;
+}
+
+const XURI_AUTH_SQL = "SELECT email, secret_enc, confirmed, last_step, fails, fail_start, unlock_until, recovery FROM shak_authenticators WHERE email = ?";
+const XURI_SAVE_SQL = "UPDATE shak_authenticators SET confirmed = ?, last_step = ?, fails = ?, fail_start = ?, unlock_until = ?, recovery = ? WHERE email = ?";
+
+/** Confere um código TOTP (ou de recuperação). Devolve { ok, auth, error } e já grava falhas, bloqueio e passo usado. */
+async function shakXuriCheck(db, env, email, auth, code, now, allowRecovery) {
+  const state = { confirmed: auth.confirmed, last_step: auth.last_step, fails: auth.fails, fail_start: auth.fail_start, unlock_until: auth.unlock_until, recovery: auth.recovery };
+  const save = () => db.prepare(XURI_SAVE_SQL).bind(state.confirmed, state.last_step, state.fails, state.fail_start, state.unlock_until, state.recovery, email).run();
+  if (state.fails >= XURI_MAX_FAILS && now - state.fail_start < XURI_FAIL_WINDOW_MS) return { ok: false, error: "locked", state };
+  const text = String(code || "").replace(/\s+/g, "");
+  let ok = false, usedRecovery = false;
+  if (/^\d{6}$/.test(text)) {
+    const secret = await shakOpen(env, auth.secret_enc);
+    const step = Math.floor(now / 30000);
+    for (const delta of [-1, 0, 1]) {
+      if (step + delta <= state.last_step) continue; // um código só vale uma vez
+      if (shakSameText(await shakTotp(secret, step + delta), text)) { ok = true; state.last_step = step + delta; break; }
+    }
+  } else if (allowRecovery && /^[0-9a-f]{4}-[0-9a-f]{4}$/i.test(text)) {
+    const hash = await shakSha256Hex("recovery|" + email + "|" + text.toLowerCase());
+    const list = JSON.parse(state.recovery || "[]");
+    if (list.indexOf(hash) !== -1) { ok = true; usedRecovery = true; state.recovery = JSON.stringify(list.filter(item => item !== hash)); }
+  }
+  if (ok) { state.fails = 0; state.fail_start = 0; }
+  else { if (!state.fail_start || now - state.fail_start >= XURI_FAIL_WINDOW_MS) { state.fails = 0; state.fail_start = now; } state.fails += 1; }
+  await save();
+  return { ok, usedRecovery, error: ok ? null : "invalid_code", state, save };
+}
+
+const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(shakStable({ protocol: "xuri-1", work: workId, seq, content: contentHash, prev: prevHash, at: createdAt }));
+
+/** Verifica a cadeia: cada entrada recalculada e ligada à anterior. */
+async function xuriVerifyChain(workId, rows) {
+  let prev = "0".repeat(64), seq = 0;
+  for (const row of rows) {
+    seq += 1;
+    if (row.seq !== seq || row.prev_hash !== prev || row.entry_hash !== await xuriEntryHash(workId, row.seq, row.content_hash, row.prev_hash, row.created_at)) return { valid: false, brokenAt: seq };
+    prev = row.entry_hash;
+  }
+  return { valid: true, brokenAt: null };
+}
+
+async function shakXuri(db, env, email, owner, path, req, now) {
+  await ensureXuri(db);
+  const json = (body, status = 200) => planJson(body, status);
+  const auth = await db.prepare(XURI_AUTH_SQL).bind(email).first();
+  const configured = !!(await shakXuriKey(env));
+  let body = {};
+  if (req.method === "POST") { try { body = await req.json(); } catch { body = {}; } }
+
+  if (path === "/api/xuri/status" && req.method === "GET") {
+    return json({ configured, enrolled: !!auth, confirmed: !!(auth && auth.confirmed), unlockedUntil: auth && auth.unlock_until > now ? new Date(auth.unlock_until).toISOString() : null, recoveryLeft: auth ? JSON.parse(auth.recovery || "[]").length : 0 });
+  }
+  if (!configured) return json({ error: "xuri_not_configured", message: "A proteção de autoria ainda não foi ativada neste servidor." }, 503);
+
+  if (path === "/api/xuri/totp/enroll" && req.method === "POST") {
+    if (auth && auth.confirmed) return json({ error: "already_enrolled", message: "O autenticador já está ativo. Para trocá-lo, remova o atual com um código." }, 409);
+    const secret = crypto.getRandomValues(new Uint8Array(20));
+    await db.prepare("INSERT OR REPLACE INTO shak_authenticators (email, secret_enc, confirmed, last_step, fails, fail_start, unlock_until, recovery, created_at) VALUES (?, ?, 0, 0, 0, 0, 0, '[]', ?)").bind(email, await shakSeal(env, secret), new Date(now).toISOString()).run();
+    const b32 = shakBase32(secret);
+    return json({ secret: b32, otpauthUrl: "otpauth://totp/Shakstory:" + encodeURIComponent(email) + "?secret=" + b32 + "&issuer=Shakstory&algorithm=SHA1&digits=6&period=30" });
+  }
+  if (path === "/api/xuri/totp/confirm" && req.method === "POST") {
+    if (!auth || auth.confirmed) return json({ error: "not_pending" }, 409);
+    const check = await shakXuriCheck(db, env, email, auth, body.code, now, false);
+    if (!check.ok) return json({ error: check.error, message: check.error === "locked" ? "Muitas tentativas. Aguarde alguns minutos." : "Código incorreto." }, check.error === "locked" ? 429 : 400);
+    const codes = Array.from({ length: 8 }, () => shakHex(crypto.getRandomValues(new Uint8Array(4))).replace(/^(.{4})(.{4})$/, "$1-$2"));
+    check.state.confirmed = 1; check.state.unlock_until = now + XURI_UNLOCK_MS;
+    check.state.recovery = JSON.stringify(await Promise.all(codes.map(code => shakSha256Hex("recovery|" + email + "|" + code))));
+    await check.save();
+    await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.totp_enabled", {});
+    return json({ ok: true, recoveryCodes: codes, unlockedUntil: new Date(check.state.unlock_until).toISOString() });
+  }
+  if (path === "/api/xuri/unlock" && req.method === "POST") {
+    if (!auth || !auth.confirmed) return json({ error: "totp_required", message: "Ative o autenticador primeiro." }, 428);
+    const check = await shakXuriCheck(db, env, email, auth, body.code, now, true);
+    if (!check.ok) return json({ error: check.error, message: check.error === "locked" ? "Muitas tentativas. Aguarde alguns minutos." : "Código incorreto." }, check.error === "locked" ? 429 : 400);
+    check.state.unlock_until = now + XURI_UNLOCK_MS; await check.save();
+    return json({ ok: true, unlockedUntil: new Date(check.state.unlock_until).toISOString(), recoveryLeft: JSON.parse(check.state.recovery || "[]").length });
+  }
+  if (path === "/api/xuri/totp/revoke" && req.method === "POST") {
+    if (!auth) return json({ error: "totp_required" }, 428);
+    const check = await shakXuriCheck(db, env, email, auth, body.code, now, true);
+    if (!check.ok) return json({ error: check.error, message: "Código incorreto." }, check.error === "locked" ? 429 : 400);
+    await db.prepare("DELETE FROM shak_authenticators WHERE email = ?").bind(email).run();
+    await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.totp_removed", {});
+    return json({ ok: true });
+  }
+
+  // Obras e versões: o hash é do livro como está salvo no servidor (library.json), nunca de um valor enviado pelo navegador.
+  const bookId = String(body.bookId || new URL(req.url).searchParams.get("bookId") || "");
+  if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(bookId)) return json({ error: "invalid_book" }, 400);
+  const prefix = owner ? "" : "u/" + (await userKey(email)) + "/";
+  const loadBook = async () => {
+    const row = await db.prepare("SELECT data_json FROM editorial_documents WHERE document_path = ?").bind(prefix + "library.json").first();
+    if (!row) return null;
+    let lib; try { lib = JSON.parse(row.data_json); } catch { return null; }
+    const book = (lib && Array.isArray(lib.books) ? lib.books : []).find(item => item && item.id === bookId);
+    if (!book) return null;
+    const text = shakStable(book);
+    return { title: String(book.title || "Sem título").slice(0, 200), hash: await shakSha256Hex(text), bytes: shakUtf8Bytes(text) };
+  };
+  const work = await db.prepare("SELECT id, title, created_at FROM shak_works WHERE email = ? AND book_id = ?").bind(email, bookId).first();
+
+  if (path === "/api/xuri/history" && req.method === "GET") {
+    if (!work) return json({ registered: false, versions: [] });
+    const rows = (await db.prepare("SELECT seq, content_hash, prev_hash, entry_hash, bytes, note, created_at FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
+    const current = await loadBook();
+    return json({ registered: true, workId: work.id, title: work.title, chain: await xuriVerifyChain(work.id, rows), matchesCurrent: !!(current && rows.length && rows[rows.length - 1].content_hash === current.hash), versions: rows.map(row => ({ seq: row.seq, contentHash: row.content_hash, entryHash: row.entry_hash, bytes: row.bytes, note: row.note, createdAt: row.created_at })) });
+  }
+  if (path === "/api/xuri/register" && req.method === "POST") {
+    if (!auth || !auth.confirmed) return json({ error: "totp_required", message: "Ative o Google Authenticator para registrar versões." }, 428);
+    if (!(auth.unlock_until > now)) return json({ error: "locked", message: "Digite o código do autenticador para registrar." }, 423);
+    const current = await loadBook();
+    if (!current) return json({ error: "book_not_found", message: "Este livro ainda não foi salvo no servidor. Aguarde a sincronização e tente de novo." }, 404);
+    const workId = work ? work.id : "w_" + shakHex(crypto.getRandomValues(new Uint8Array(10)));
+    if (!work) await db.prepare("INSERT OR IGNORE INTO shak_works (id, email, book_id, title, created_at) VALUES (?, ?, ?, ?, ?)").bind(workId, email, bookId, current.title, new Date(now).toISOString()).run();
+    const real = work ? work : await db.prepare("SELECT id, title, created_at FROM shak_works WHERE email = ? AND book_id = ?").bind(email, bookId).first();
+    const rows = (await db.prepare("SELECT seq, content_hash, prev_hash, entry_hash, bytes, note, created_at FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(real.id).all()).results || [];
+    const last = rows[rows.length - 1];
+    if (last && last.content_hash === current.hash) return json({ ok: true, unchanged: true, seq: last.seq, contentHash: last.content_hash, message: "Nada mudou desde a última versão registrada." });
+    const seq = rows.length + 1, prev = last ? last.entry_hash : "0".repeat(64), createdAt = new Date(now).toISOString();
+    const entry = await xuriEntryHash(real.id, seq, current.hash, prev, createdAt);
+    try {
+      await db.prepare("INSERT INTO shak_versions (id, work_id, seq, content_hash, bytes, prev_hash, entry_hash, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind("v_" + shakHex(crypto.getRandomValues(new Uint8Array(10))), real.id, seq, current.hash, current.bytes, prev, entry, String(body.note || "").slice(0, 200) || null, createdAt).run();
+    } catch { return json({ error: "conflict", message: "Outro registro foi feito ao mesmo tempo. Tente de novo." }, 409); }
+    await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.register", { bookId, seq, contentHash: current.hash });
+    return json({ ok: true, workId: real.id, seq, contentHash: current.hash, entryHash: entry, createdAt });
+  }
+  return json({ error: "not_found" }, 404);
 }
 
 // ===== Cobrança manual (Ton): ofertas, pedidos, confirmação pelo administrador, períodos e auditoria =====

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { fakeBillingDb } from "./fake-billing-d1";
 
 const load = async () => (await import(/* @vite-ignore */ new URL("../cloudflare-worker/plans.js", import.meta.url).href)) as any;
@@ -11,7 +11,7 @@ const PRICE = { economico: 34949, premium: 65340, vip: 100795 };
 const dnsOk = async (url: string) => { const type = new URL(url).searchParams.get("type"); return new Response(JSON.stringify({ Status: 0, Answer: type === "MX" ? [{ type: 15, data: "10 mx.example.com." }] : [] })); };
 async function send(mod: any, db: any, email: string, path: string, method = "GET", body?: unknown, now = Date.now(), extra: { headers?: Record<string, string>; dnsFetch?: any } = {}) {
   const r = new Request("https://x" + path, { method, headers: { "Cf-Access-Jwt-Assertion": "jwt", "content-type": "application/json", ...(extra.headers || {}) }, body: body ? JSON.stringify(body) : undefined });
-  const out = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => email, now, dnsFetch: extra.dnsFetch ?? dnsOk });
+  const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { verify: async () => email, now, dnsFetch: extra.dnsFetch ?? dnsOk });
   return { out, status: out.response?.status ?? 200, json: out.response ? await out.response.json() : null };
 }
 const setOffers = async (mod: any, db: any, now = Date.now()) => { for (const plan of ["economico", "premium", "vip"] as const) expect((await send(mod, db, OWNER, "/api/admin/offer", "POST", { plan, priceCents: PRICE[plan], currency: "BRL", checkoutUrl: URLS[plan] }, now)).status).toBe(200); };
@@ -470,5 +470,97 @@ describe("proteção do teste grátis", () => {
     const rel = await send(mod, db, OWNER, "/api/admin/plan", "POST", { email: "a@mailinator.com", plan: "trial" }, T0);
     expect(rel.json.user.plan).toBe("trial");
     expect(db.signups.some((r: any) => r.email === OWNER)).toBe(false);
+  });
+});
+
+describe("autoria e procedência (TOTP + histórico encadeado)", () => {
+  const T0 = Date.UTC(2026, 9, 23, 12);
+  const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const decode = (text: string) => { let bits = 0, value = 0; const out: number[] = []; for (const ch of text) { value = (value << 5) | B32.indexOf(ch); bits += 5; if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
+  const code = (secret: string, at: number) => {
+    const step = Math.floor(at / 30000); const msg = Buffer.alloc(8); msg.writeUInt32BE(Math.floor(step / 4294967296), 0); msg.writeUInt32BE(step >>> 0, 4);
+    const mac = createHmac("sha1", decode(secret)).update(msg).digest(); const o = mac[19] & 15;
+    return String((((mac[o] & 127) << 24) | (mac[o + 1] << 16) | (mac[o + 2] << 8) | mac[o + 3]) % 1000000).padStart(6, "0");
+  };
+  const api = (mod: any, db: any, email: string, path: string, body?: unknown, now = T0) => send(mod, db, email, "/api/xuri/" + path, body === undefined ? "GET" : "POST", body, now);
+  const setup = async (mod: any, db: any, email = OWNER, now = T0) => {
+    const enrolled = (await api(mod, db, email, "totp/enroll", {}, now)).json;
+    const confirmed = await api(mod, db, email, "totp/confirm", { code: code(enrolled.secret, now) }, now);
+    return { secret: enrolled.secret as string, confirmed };
+  };
+  const putLibrary = (db: any, email: string, books: any[]) => {
+    const prefix = email === OWNER ? "" : "u/" + createHash("sha256").update(email).digest("hex").slice(0, 24) + "/";
+    db.documents.set(prefix + "library.json", JSON.stringify({ books }));
+  };
+
+  it("sem a chave do servidor a proteção avisa que não está ativa", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const r = new Request("https://x/api/xuri/totp/enroll", { method: "POST", headers: { "Cf-Access-Jwt-Assertion": "jwt" }, body: "{}" });
+    const out = await mod.shakGate(r, { DB: db }, new URL(r.url), { verify: async () => OWNER, now: T0, dnsFetch: dnsOk });
+    expect(out.response.status).toBe(503);
+  });
+
+  it("cadastra o autenticador: código errado falha, certo confirma e entrega 8 códigos de recuperação", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const enrolled = (await api(mod, db, OWNER, "totp/enroll", {})).json;
+    expect(enrolled.otpauthUrl).toContain("otpauth://totp/Shakstory:");
+    expect(db.auths.get(OWNER).secret_enc).not.toContain(enrolled.secret); // segredo cifrado no banco
+    expect((await api(mod, db, OWNER, "totp/confirm", { code: "000000" })).status).toBe(400);
+    const ok = await api(mod, db, OWNER, "totp/confirm", { code: code(enrolled.secret, T0) });
+    expect(ok.status).toBe(200);
+    expect(ok.json.recoveryCodes).toHaveLength(8);
+    expect(JSON.stringify(db.auths.get(OWNER))).not.toContain(ok.json.recoveryCodes[0]); // só o hash é guardado
+    expect((await api(mod, db, OWNER, "totp/enroll", {})).status).toBe(409);
+  });
+
+  it("um código só vale uma vez e depois de 5 erros a conta é travada por alguns minutos", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const { secret } = await setup(mod, db);
+    expect((await api(mod, db, OWNER, "unlock", { code: code(secret, T0) })).status).toBe(400); // mesmo passo já usado na confirmação
+    expect((await api(mod, db, OWNER, "unlock", { code: code(secret, T0 + 30000) }, T0 + 30000)).status).toBe(200);
+    for (let i = 0; i < 5; i++) expect((await api(mod, db, OWNER, "unlock", { code: "111111" }, T0 + 60000)).status).toBe(400);
+    expect((await api(mod, db, OWNER, "unlock", { code: code(secret, T0 + 90000) }, T0 + 90000)).status).toBe(429);
+    expect((await api(mod, db, OWNER, "unlock", { code: code(secret, T0 + 11 * 60000) }, T0 + 11 * 60000)).status).toBe(200);
+  });
+
+  it("código de recuperação destrava uma única vez", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const { confirmed } = await setup(mod, db);
+    const rec = confirmed.json.recoveryCodes[0];
+    expect((await api(mod, db, OWNER, "unlock", { code: rec }, T0 + 1000)).status).toBe(200);
+    expect((await api(mod, db, OWNER, "unlock", { code: rec }, T0 + 2000)).status).toBe(400);
+    expect((await api(mod, db, OWNER, "status")).json.recoveryLeft).toBe(7);
+  });
+
+  it("registrar exige autenticador e janela aberta; o hash vem do servidor e a cadeia detecta adulteração", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "b1", title: "Meu livro", nodes: [{ id: "n1", content: "Era uma vez" }], updatedAt: 1 }]);
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1" })).status).toBe(428);
+    const { secret } = await setup(mod, db);
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 20 * 60000)).status).toBe(423); // janela de 15 min fechou
+    expect((await api(mod, db, OWNER, "register", { bookId: "inexistente" })).status).toBe(404);
+    expect((await api(mod, db, OWNER, "register", { bookId: "../x" })).status).toBe(400);
+    const first = (await api(mod, db, OWNER, "register", { bookId: "b1", note: "primeira" })).json;
+    expect(first).toMatchObject({ ok: true, seq: 1 });
+    expect((await api(mod, db, OWNER, "register", { bookId: "b1", hash: "forjado" })).json.unchanged).toBe(true);
+    putLibrary(db, OWNER, [{ id: "b1", title: "Meu livro", nodes: [{ id: "n1", content: "Era uma vez outra" }], updatedAt: 2 }]);
+    let h = (await api(mod, db, OWNER, "history?bookId=b1")).json;
+    expect(h.matchesCurrent).toBe(false);
+    const second = (await api(mod, db, OWNER, "register", { bookId: "b1" }, T0 + 5000)).json;
+    expect(second.seq).toBe(2);
+    h = (await api(mod, db, OWNER, "history?bookId=b1", undefined, T0 + 5000)).json;
+    expect(h.versions).toHaveLength(2); expect(h.chain.valid).toBe(true); expect(h.matchesCurrent).toBe(true);
+    db.versions[0].content_hash = "f".repeat(64);
+    expect((await api(mod, db, OWNER, "history?bookId=b1")).json.chain).toEqual({ valid: false, brokenAt: 1 });
+    expect(secret).toBeTruthy();
+  });
+
+  it("conta comum registra só o próprio livro e não enxerga o de outra conta", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, "ana@example.com", [{ id: "b1", title: "Do Ana", nodes: [], updatedAt: 1 }]);
+    putLibrary(db, "bia@example.com", [{ id: "b9", title: "Da Bia", nodes: [], updatedAt: 1 }]);
+    await setup(mod, db, "ana@example.com");
+    expect((await api(mod, db, "ana@example.com", "register", { bookId: "b1" })).status).toBe(200);
+    expect((await api(mod, db, "ana@example.com", "register", { bookId: "b9" })).status).toBe(404);
   });
 });
