@@ -4,11 +4,13 @@ const STORE = "shak:xuri-key";
 const ITERATIONS = 600000;
 export type StoredKey = { v: 1; publicKey: string; salt: string; iv: string; data: string; createdAt: string };
 
-const b64 = (bytes: ArrayBuffer | Uint8Array) => { let text = ""; for (const byte of new Uint8Array(bytes)) text += String.fromCharCode(byte); return btoa(text); };
+const b64 = (bytes: ArrayBuffer | Uint8Array) => { const view = new Uint8Array(bytes); let text = ""; for (let i = 0; i < view.length; i++) text += String.fromCharCode(view[i]); return btoa(text); };
+// Os tipos do TypeScript ainda não cobrem Ed25519 em todas as sobrecargas do WebCrypto.
+const subtle = crypto.subtle as unknown as { generateKey(algorithm: { name: string }, extractable: boolean, usages: string[]): Promise<CryptoKey | CryptoKeyPair> };
 const unb64 = (text: string) => Uint8Array.from(atob(text), ch => ch.charCodeAt(0));
 
 export async function ed25519Supported(): Promise<boolean> {
-  try { await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]); return true; } catch { return false; }
+  try { await subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]); return true; } catch { return false; }
 }
 
 async function wrapKey(passphrase: string, salt: Uint8Array) {
@@ -29,7 +31,7 @@ export function parseBackup(text: string): StoredKey {
 /** Gera o par de chaves, guarda a privada cifrada neste aparelho e devolve a chave pública (base64) e o arquivo de backup. */
 export async function createSigningKey(passphrase: string): Promise<{ publicKey: string; backup: string }> {
   if (passphrase.length < 8) throw new Error("Use uma frase-senha com pelo menos 8 caracteres.");
-  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
+  const pair = await subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
   const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await wrapKey(passphrase, salt), await crypto.subtle.exportKey("pkcs8", pair.privateKey));
   const stored: StoredKey = { v: 1, publicKey: b64(await crypto.subtle.exportKey("raw", pair.publicKey)), salt: b64(salt), iv: b64(iv), data: b64(data), createdAt: new Date().toISOString() };
