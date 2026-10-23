@@ -654,7 +654,7 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
     await setup(mod, db);
     expect((await api(mod, db, OWNER, "register", { bookId: "tsa-book" })).status).toBe(200);
-    const stamped = await api(mod, db, OWNER, "stamp", {}, T0, { tsaFetch: tsaOk });
+    const stamped = await api(mod, db, OWNER, "stamp", { bookId: "tsa-book" }, T0, { tsaFetch: tsaOk });
     expect(stamped.json).toMatchObject({ stamped: 1, pending: 0 });
     const dossier = (await api(mod, db, OWNER, "dossier?bookId=tsa-book")).json;
     expect(dossier.versions[0].timestamp.protocol).toBe("rfc3161-sha256");
