@@ -412,7 +412,43 @@ h1, h2, h3, .font-serif { font-feature-settings: "ss01"; letter-spacing: -0.01em
 .md-text > :first-child { margin-top: 0; }
 
 /* Cowila lateral: abre espaço à direita em telas largas */
-@media (min-width: 640px) { body.cowila-open .sk-app { padding-right: 380px; } }
+/* Reserve espaço para a Cowila apenas quando há largura suficiente para manter o editor utilizável. */
+@media (min-width: 1024px) { body.cowila-open .sk-app { padding-right: 380px; } }
+@media (max-width: 1023px) { body.cowila-open .sk-app { padding-right: 0; } }
+
+/* Proteções de responsividade: impedir filhos flex/grid e mídia de alargarem a viewport. */
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { overflow-x: clip; }
+.sk-app, .sk-main, .shakstory-workspace, .library-view,
+.library-intro, .sk-hero, .library-book-card {
+  min-width: 0;
+  max-width: 100%;
+}
+.sk-main { width: 100%; }
+.library-view h1, .library-view h2,
+.library-book-card p, .library-book-card h2 {
+  overflow-wrap: anywhere;
+}
+.library-book-card img, .sk-hero img,
+.shakstory-workspace img, .shakstory-workspace video,
+.shakstory-workspace canvas, .shakstory-workspace svg {
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  .shakstory-workspace { padding-left: 1rem; padding-right: 1rem; }
+  .library-book-card { padding: 14px; }
+  .library-book-card > .flex { min-width: 0; flex-wrap: wrap; }
+  .library-book-card .flex > * { min-width: 0; }
+  .library-view h1 { font-size: clamp(1.75rem, 7vw, 2.25rem); line-height: 1.15; }
+  .sk-hero { width: 100%; min-width: 0; padding: 1rem; gap: 1rem; }
+  .sk-hero > * { min-width: 0; max-width: 100%; }
+  .sk-nav { width: 100%; max-width: 100vw; }
+}
 
 
 /* Identidade editorial do site de apresentação, aplicada apenas à contingência.
