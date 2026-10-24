@@ -28,3 +28,12 @@ Limites: a prova mostra que aquele arquivo exato foi ligado, pela chave do autor
 A consulta pública (`/api/public/xuri/lookup?q=`) aceita: UID da obra ou da versão (com ou sem o prefixo `xuri:work:` / `xuri:version:`), SHA-256 da versão ou do arquivo exportado, e **ISBN-10 ou ISBN-13** (com ou sem hífens, conferido pelo dígito verificador).
 
 O ISBN é **declarado pelo autor** no livro (campo principal e por formato) e é copiado no momento da publicação; republicar atualiza a lista. Ele serve para localizar a obra, não prova autoria nem edição real. Se mais de uma obra publicada declara o mesmo ISBN, a rota responde 409 `ambiguous_isbn` e pede o UID ou o SHA-256. A resposta traz `match.kind` = `work`, `version`, `hash`, `file` ou `isbn`, para a interface não confundir os tipos de prova.
+
+## Pesquisa por nome, perfil do autor e capa (2026-10-24.4)
+
+- `GET /api/public/xuri/search?q=` (3 a 80 caracteres): obras **publicadas** cujo título ou nome público do autor contém o texto. Até 10 resultados com `id`, `title`, `author`, `publishedAt`, `isbns` e `cover`.
+- `GET /api/public/xuri/author?id=a_…`: perfil público (nome, mini biografia) e as obras publicadas desse autor.
+- `author.uid` é um identificador público derivado da conta com segredo do servidor (não é o e-mail e não permite descobri-lo). Quem publica escolhe nome e mini biografia (até 600 caracteres) no diálogo Autoria.
+- A consulta por UID/hash/ISBN passa a trazer `author { uid, displayName, bio }` e `work.cover`.
+- A capa só é publicada se for um endereço `https` curto; imagem embutida não é. Despublicar remove obra, perfil e capa da consulta.
+- Os três endpoints dividem o mesmo limite (30 consultas por minuto por endereço). O perfil não identifica a pessoa civil.

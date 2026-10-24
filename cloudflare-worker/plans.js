@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-24.3";
+export const SHAK_WORKER_VERSION = "2026-10-24.4";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -561,7 +561,7 @@ async function ensureXuri(db) {
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_versions (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, content_hash TEXT NOT NULL, bytes INTEGER NOT NULL, prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, signature TEXT, ts_proof TEXT, UNIQUE (work_id, seq))").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_keys (key_id TEXT PRIMARY KEY, email TEXT NOT NULL, public_key TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT)").run();
   // Publicação voluntária para a consulta pública: published_at nulo = privado.
-  for (const col of ["published_at TEXT", "public_name TEXT", "public_isbns TEXT"]) { try { await db.prepare("ALTER TABLE shak_works ADD COLUMN " + col).run(); } catch { /* coluna já existe */ } }
+  for (const col of ["published_at TEXT", "public_name TEXT", "public_isbns TEXT", "author_uid TEXT", "public_bio TEXT", "public_cover TEXT"]) { try { await db.prepare("ALTER TABLE shak_works ADD COLUMN " + col).run(); } catch { /* coluna já existe */ } }
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_xuri_lookups (k TEXT PRIMARY KEY, n INTEGER NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_exports (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, format TEXT NOT NULL, file_hash TEXT NOT NULL, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, signature TEXT NOT NULL, UNIQUE (work_id, file_hash))").run();
   xuriReady = true;
@@ -610,6 +610,9 @@ const xuriBookIsbns = book => {
   const all = [pub.isbn, ...Object.values((pub.copyright && pub.copyright.isbns) || {})].map(xuriIsbn).filter(Boolean);
   return [...new Set(all)].slice(0, 6);
 };
+/** Capa pública: só endereço https curto; imagem embutida (data:) ou endereço comprido não é publicada. */
+const xuriCover = book => { const url = String((book && book.publication && book.publication.coverImageUrl) || ""); return /^https:\/\/[^\s"'<>]{4,480}$/.test(url) ? url : null; };
+const xuriClean = (value, max) => String(value || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max);
 const XURI_EXPORT_FORMATS = ["pdf", "docx", "epub", "txt", "html", "json"];
 const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(xuriPayload(workId, seq, contentHash, prevHash, createdAt));
 
@@ -779,7 +782,7 @@ async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
     const book = (lib && Array.isArray(lib.books) ? lib.books : []).find(item => item && item.id === bookId);
     if (!book) return null;
     const text = shakStable(book);
-    return { title: String(book.title || "Sem título").slice(0, 200), hash: await shakSha256Hex(text), bytes: shakUtf8Bytes(text), isbns: xuriBookIsbns(book) };
+    return { title: String(book.title || "Sem título").slice(0, 200), hash: await shakSha256Hex(text), bytes: shakUtf8Bytes(text), isbns: xuriBookIsbns(book), cover: xuriCover(book) };
   };
   const work = await db.prepare("SELECT id, title, created_at, published_at, public_name FROM shak_works WHERE email = ? AND book_id = ?").bind(email, bookId).first();
 
@@ -793,14 +796,15 @@ async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
     if (!work) return json({ error: "not_registered", message: "Registre ao menos uma versão antes de publicar." }, 404);
     if (body.publish === true) {
       if (!auth || !auth.confirmed || !(auth.unlock_until > now)) return json({ error: "locked", message: "Digite o código do autenticador para publicar." }, 423);
-      const name = String(body.displayName || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 80);
+      const name = xuriClean(body.displayName, 80), bio = xuriClean(body.bio, 600);
       const book = await loadBook();
       const isbns = book ? book.isbns : [];
-      await db.prepare("UPDATE shak_works SET published_at = ?, public_name = ?, public_isbns = ? WHERE id = ?").bind(new Date(now).toISOString(), name || null, isbns.length ? JSON.stringify(isbns) : null, work.id).run();
+      const authorUid = "a_" + (await shakHash(email + "|xuri-author|" + (env.XURI_KEY || ""))).slice(0, 24);
+      await db.prepare("UPDATE shak_works SET published_at = ?, public_name = ?, public_isbns = ?, author_uid = ?, public_bio = ?, public_cover = ? WHERE id = ?").bind(new Date(now).toISOString(), name || null, isbns.length ? JSON.stringify(isbns) : null, authorUid, bio || null, book ? book.cover : null, work.id).run();
       await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.published", { work: work.id });
-      return json({ ok: true, published: true, publicName: name || null, isbns });
+      return json({ ok: true, published: true, publicName: name || null, isbns, authorUid });
     }
-    await db.prepare("UPDATE shak_works SET published_at = NULL, public_name = NULL, public_isbns = NULL WHERE id = ?").bind(work.id).run();
+    await db.prepare("UPDATE shak_works SET published_at = NULL, public_name = NULL, public_isbns = NULL, author_uid = NULL, public_bio = NULL, public_cover = NULL WHERE id = ?").bind(work.id).run();
     await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.unpublished", { work: work.id });
     return json({ ok: true, published: false });
   }
@@ -1257,6 +1261,38 @@ async function shakStripeWebhook(req, env, now) {
 }
 
 const XURI_UID_RE = /^[A-Za-z0-9_.:-]{8,120}$/;
+const XURI_WORK_COLS = "w.id AS id, w.title AS title, w.published_at AS published_at, w.public_name AS public_name, w.public_isbns AS public_isbns, w.author_uid AS author_uid, w.public_bio AS public_bio, w.public_cover AS public_cover";
+/** Limite por endereço (hash) e por minuto, compartilhado por todas as consultas públicas. */
+async function xuriRateLimited(db, req, env, now) {
+  const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "anon";
+  const win = Math.floor(now / 60000);
+  const k = (await shakHash(ip + "|xuri-lookup|" + (env.TURNSTILE_SECRET_KEY || ""))) + ":" + win;
+  await db.prepare("INSERT INTO shak_xuri_lookups (k, n) VALUES (?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1").bind(k).run();
+  const used = await db.prepare("SELECT n FROM shak_xuri_lookups WHERE k = ?").bind(k).first();
+  await db.prepare("DELETE FROM shak_xuri_lookups WHERE k NOT LIKE ?").bind("%:" + win).run();
+  return !!(used && used.n > XURI_LOOKUP_PER_MINUTE);
+}
+/** Pesquisa por nome da obra ou do autor, e perfil público do autor. Só o que o autor publicou. */
+async function shakXuriIndex(req, env, now, mode) {
+  const json = (body, status = 200) => planJson(body, status);
+  if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+  const db = env.DB;
+  if (!db) return json({ error: "unavailable" }, 503);
+  const q = String(new URL(req.url).searchParams.get(mode === "author" ? "id" : "q") || "").trim();
+  if (mode === "author" ? !/^a_[a-f0-9]{24}$/.test(q) : (q.length < 3 || q.length > 80)) return json({ error: "invalid_query" }, 400);
+  await ensureXuri(db);
+  if (await xuriRateLimited(db, req, env, now)) return json({ error: "rate_limited" }, 429);
+  const brief = row => ({ id: row.id, title: row.title, author: row.public_name ? { uid: row.author_uid || null, displayName: row.public_name } : null, publishedAt: row.published_at, isbns: row.public_isbns ? JSON.parse(row.public_isbns) : [], cover: row.public_cover || null });
+  if (mode === "author") {
+    const rows = (await db.prepare("SELECT " + XURI_WORK_COLS + " FROM shak_works w WHERE w.published_at IS NOT NULL AND w.author_uid = ? ORDER BY w.published_at DESC LIMIT 50").bind(q).all()).results || [];
+    if (!rows.length) return json({ error: "not_found" }, 404);
+    const named = rows.find(row => row.public_name), withBio = rows.find(row => row.public_bio);
+    return json({ author: { uid: q, displayName: named ? named.public_name : null, bio: withBio ? withBio.public_bio : null }, works: rows.map(brief), notice: "Perfil montado só com o que o autor escolheu publicar. Não identifica a pessoa civil." });
+  }
+  const like = "%" + q.replace(/[\\%_]/g, "\\$&") + "%";
+  const rows = (await db.prepare("SELECT " + XURI_WORK_COLS + " FROM shak_works w WHERE w.published_at IS NOT NULL AND (w.title LIKE ? ESCAPE '\\' OR w.public_name LIKE ? ESCAPE '\\') ORDER BY w.published_at DESC LIMIT 10").bind(like, like).all()).results || [];
+  return json({ query: q, results: rows.map(brief) });
+}
 const XURI_LOOKUP_PER_MINUTE = 30;
 /** Consulta pública (sem login): só obras que o autor publicou. Nunca devolve e-mail, nota, segredo ou texto da obra. */
 async function shakXuriLookup(req, env, now) {
@@ -1270,14 +1306,8 @@ async function shakXuriLookup(req, env, now) {
   const isHash = !isbn && /^[a-f0-9]{64}$/i.test(q);
   if (!isbn && !isHash && !XURI_UID_RE.test(q)) return json({ error: "invalid_query" }, 400);
   await ensureXuri(db);
-  const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "anon";
-  const win = Math.floor(now / 60000);
-  const k = (await shakHash(ip + "|xuri-lookup|" + (env.TURNSTILE_SECRET_KEY || ""))) + ":" + win;
-  await db.prepare("INSERT INTO shak_xuri_lookups (k, n) VALUES (?, 1) ON CONFLICT(k) DO UPDATE SET n = n + 1").bind(k).run();
-  const used = await db.prepare("SELECT n FROM shak_xuri_lookups WHERE k = ?").bind(k).first();
-  if (used && used.n > XURI_LOOKUP_PER_MINUTE) return json({ error: "rate_limited" }, 429);
-  await db.prepare("DELETE FROM shak_xuri_lookups WHERE k NOT LIKE ?").bind("%:" + win).run();
-  const WORK_COLS = "w.id AS id, w.title AS title, w.published_at AS published_at, w.public_name AS public_name, w.public_isbns AS public_isbns";
+  if (await xuriRateLimited(db, req, env, now)) return json({ error: "rate_limited" }, 429);
+  const WORK_COLS = XURI_WORK_COLS;
   let work = null, kind = "work";
   if (isbn) {
     // ISBN é declarado pelo autor: serve para localizar, não prova autoria. Se mais de uma obra publicada o declara, não escolhemos por ninguém.
@@ -1310,7 +1340,7 @@ async function shakXuriLookup(req, env, now) {
   const match = kind === "file" ? exportRows.find(row => row.file_hash === q.toLowerCase()) : isHash ? rows.find(row => row.content_hash === q.toLowerCase() || row.entry_hash === q.toLowerCase()) : kind === "version" ? rows.find(row => row.id === q) : null;
   return json({
     protocol: "xuri-1", generatedAt: new Date(now).toISOString(),
-    work: { id: work.id, title: work.title, isbns: work.public_isbns ? JSON.parse(work.public_isbns) : [] }, author: work.public_name ? { displayName: work.public_name } : null, publishedAt: work.published_at,
+    work: { id: work.id, title: work.title, isbns: work.public_isbns ? JSON.parse(work.public_isbns) : [], cover: work.public_cover || null }, author: work.public_name || work.public_bio ? { uid: work.author_uid || null, displayName: work.public_name || null, bio: work.public_bio || null } : null, publishedAt: work.published_at,
     chain, keys, exports,
     versions: rows.map(row => ({ id: row.id, seq: row.seq, createdAt: row.created_at, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null, signature: row.signature ? JSON.parse(row.signature) : null })),
     ...(work.public_isbns ? { isbnNotice: "ISBN informado pelo autor; identifica a edição, não comprova autoria." } : {}),
@@ -1320,6 +1350,9 @@ async function shakXuriLookup(req, env, now) {
 }
 
 export async function shakGate(req, env, u, options = {}) {
+  if (u.pathname === "/api/public/xuri/search" || u.pathname === "/api/public/xuri/author") {
+    try { return { response: await shakXuriIndex(req, env, options.now ?? Date.now(), u.pathname.endsWith("/author") ? "author" : "search") }; } catch { return { response: planJson({ error: "unavailable" }, 503) }; }
+  }
   if (u.pathname === "/api/public/xuri/lookup" || u.pathname === "/api/xuri/public/lookup") {
     try { return { response: await shakXuriLookup(req, env, options.now ?? Date.now()) }; } catch { return { response: planJson({ error: "unavailable" }, 503) }; }
   }

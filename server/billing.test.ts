@@ -671,7 +671,7 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     for (const q of [workId, version.id, version.content_hash, version.entry_hash.toUpperCase()]) {
       const r = await lookup(q);
       expect(r.status).toBe(200);
-      expect(r.json.work).toEqual({ id: workId, title: "Obra Pública", isbns: [] });
+      expect(r.json.work).toEqual({ id: workId, title: "Obra Pública", isbns: [], cover: null });
       expect(r.json.versions).toHaveLength(1);
       expect(r.json.chain.valid).toBe(true);
       expect(r.json.author.displayName).toBe("Ana bAutora/b");
@@ -779,6 +779,59 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     expect((await lookup("9788535902778", "203.0.113.74")).status).toBe(200);
     expect((await api(mod, db, OWNER, "publish", { bookId: "isb1", publish: false })).status).toBe(200);
     expect((await lookup("9788535902778", "203.0.113.75")).status).toBe(404);
+  });
+
+  it("pesquisa por nome e perfil público do autor: só o que foi publicado, com bio e capa https, sem e-mail", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const OTHER = "outra@example.com";
+    const get = async (path: string, ip: string, now = T0) => {
+      const r = new Request("https://x" + path, { headers: { "CF-Connecting-IP": ip } });
+      const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { now });
+      return { status: out.response.status, json: await out.response.json() };
+    };
+    const publishBook = async (email: string, bookId: string, title: string, extra: any, body: any = {}) => {
+      putLibrary(db, email, [{ id: bookId, title, nodes: [{ id: "n", content: "texto privado " + bookId }], updatedAt: 1, publication: extra }]);
+      if (!db.auths.get(email)) await setup(mod, db, email);
+      expect((await api(mod, db, email, "register", { bookId })).status).toBe(200);
+      return (await api(mod, db, email, "publish", { bookId, publish: true, ...body })).json;
+    };
+    const first = await publishBook(OWNER, "p1", "A Casa Sombria", { coverImageUrl: "https://img.example.com/capa.jpg" }, { displayName: "Ana Autora", bio: "  Escrevo ficção gótica. <script>x</script> " });
+    expect(first.authorUid).toMatch(/^a_[a-f0-9]{24}$/);
+    await publishBook(OTHER, "p2", "Outra Casa", { coverImageUrl: "data:image/png;base64,AAAA" }, { displayName: "Bia Escritora" });
+    // um terceiro livro do mesmo autor, não publicado, não aparece
+    putLibrary(db, OWNER, [{ id: "p1", title: "A Casa Sombria", nodes: [{ id: "n", content: "texto privado p1" }], updatedAt: 1, publication: {} }, { id: "p3", title: "Rascunho Privado", nodes: [{ id: "n", content: "rascunho" }], updatedAt: 1 }]);
+    expect((await api(mod, db, OWNER, "register", { bookId: "p3" })).status).toBe(200);
+    // pesquisa por nome da obra e do autor, sem diferenciar maiúsculas
+    const byTitle = await get("/api/public/xuri/search?q=casa", "203.0.113.80");
+    expect(byTitle.status).toBe(200);
+    expect(byTitle.json.results.map((r: any) => r.title).sort()).toEqual(["A Casa Sombria", "Outra Casa"]);
+    const byAuthor = await get("/api/public/xuri/search?q=" + encodeURIComponent("ana aut"), "203.0.113.80");
+    expect(byAuthor.json.results).toHaveLength(1);
+    expect(byAuthor.json.results[0]).toMatchObject({ title: "A Casa Sombria", cover: "https://img.example.com/capa.jpg", author: { displayName: "Ana Autora" } });
+    expect((await get("/api/public/xuri/search?q=Rascunho", "203.0.113.80")).json.results).toEqual([]); // não publicado
+    expect((await get("/api/public/xuri/search?q=%25%25%25", "203.0.113.80")).json.results).toEqual([]); // coringa não vira "tudo"
+    expect((await get("/api/public/xuri/search?q=ab", "203.0.113.80")).status).toBe(400);
+    // capa embutida (data:) não é publicada
+    expect((await get("/api/public/xuri/search?q=Outra", "203.0.113.80")).json.results[0].cover).toBeNull();
+    // perfil do autor
+    const prof = await get("/api/public/xuri/author?id=" + first.authorUid, "203.0.113.81");
+    expect(prof.status).toBe(200);
+    expect(prof.json.author).toMatchObject({ uid: first.authorUid, displayName: "Ana Autora" });
+    expect(prof.json.author.bio).toBe("Escrevo ficção gótica. scriptx/script");
+    expect(prof.json.works.map((w: any) => w.title)).toEqual(["A Casa Sombria"]);
+    expect((await get("/api/public/xuri/author?id=a_" + "0".repeat(24), "203.0.113.81")).status).toBe(404);
+    expect((await get("/api/public/xuri/author?id=xyz", "203.0.113.81")).status).toBe(400);
+    // a consulta por UID traz o autor com uid e bio e a capa
+    const look = await get("/api/public/xuri/lookup?q=" + db.works[0].id, "203.0.113.82");
+    expect(look.json.author).toMatchObject({ uid: first.authorUid, displayName: "Ana Autora" });
+    expect(look.json.work.cover).toBe("https://img.example.com/capa.jpg");
+    // nada privado nas respostas
+    const text = JSON.stringify([byTitle.json, byAuthor.json, prof.json, look.json]);
+    expect(text).not.toContain(OWNER); expect(text).not.toContain(OTHER); expect(text).not.toContain("texto privado");
+    // despublicar tira do índice e do perfil
+    expect((await api(mod, db, OWNER, "publish", { bookId: "p1", publish: false })).status).toBe(200);
+    expect((await get("/api/public/xuri/author?id=" + first.authorUid, "203.0.113.83")).status).toBe(404);
+    expect((await get("/api/public/xuri/search?q=Sombria", "203.0.113.83")).json.results).toEqual([]);
   });
 
   it("consulta pública: limite de consultas por minuto por endereço", async () => {
