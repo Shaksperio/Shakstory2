@@ -32,6 +32,27 @@ export default function XuriPassportVerify() {
   const [result, setResult] = useState<PassportResult | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+
+  async function lookup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const term = query.trim();
+    if (!term) { setError("Informe o UID da obra/versão ou o SHA-256."); return; }
+    setBusy(true); setError(""); setPassport(null); setResult(null);
+    try {
+      const response = await fetch(`/api/xuri/public/lookup?q=${encodeURIComponent(term)}`, { headers: { Accept: "application/json" } });
+      if (response.status === 404) throw new Error("Nenhum passaporte público encontrado para esta consulta.");
+      if (response.status === 400) throw new Error("UID ou SHA-256 em formato inválido.");
+      if (response.status === 429) throw new Error("Muitas consultas em sequência. Aguarde e tente novamente.");
+      if (!response.ok) throw new Error("A consulta pública está indisponível no momento.");
+      const data = await response.json() as Passport & { passport?: Passport };
+      const parsed = data.passport || data;
+      const verification = await verifyPassport(parsed);
+      setPassport(parsed); setResult(verification);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível consultar este passaporte.");
+    } finally { setBusy(false); }
+  }
 
   async function load(file?: File) {
     if (!file) return;
@@ -60,10 +81,10 @@ export default function XuriPassportVerify() {
       <p className="mt-3 text-sm leading-6 text-muted-foreground">Confira localmente a integridade da cadeia e as assinaturas Ed25519 de um dossiê exportado pelo Shakstory. O arquivo é processado neste navegador e não é enviado para um servidor.</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">Atenção: o dossiê exportado inclui o e-mail associado à conta. Antes de compartilhar o arquivo, confira os dados pessoais que ele contém.</p>
     </header>
-    <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">
-      <label className="block text-sm font-medium" htmlFor="passport-file">Arquivo de passaporte (.json)</label>
+    <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">\n      <form onSubmit={e => void lookup(e)} className="mb-6 rounded-xl border border-border p-4">\n        <label htmlFor="passport-query" className="block text-sm font-semibold">Consultar passaporte público</label>\n        <p className="mt-1 text-xs text-muted-foreground">Pesquise pelo UID da obra/versão ou pelo SHA-256 publicado.</p>\n        <div className="mt-3 flex flex-col gap-2 sm:flex-row">\n          <input id="passport-query" value={query} onChange={e => setQuery(e.target.value)} placeholder="book-… ou hash SHA-256" className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={busy} />\n          <button type="submit" disabled={busy || !query.trim()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? "Consultando…" : "Consultar"}</button>\n        </div>\n      </form>
+      <details className="mb-4"><summary className="cursor-pointer text-sm font-medium">Ou verificar um dossiê JSON local</summary>\n      <label className="mt-3 block text-sm font-medium" htmlFor="passport-file">Arquivo de passaporte (.json)</label>
       <input id="passport-file" className="mt-2 block w-full min-w-0 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-primary-foreground" type="file" accept="application/json,.json" disabled={busy} onChange={e => void load(e.target.files?.[0])} />
-      {busy && <p className="mt-3 text-sm" role="status">Verificando integridade e assinaturas…</p>}
+      </details>\n      {busy && <p className="mt-3 text-sm" role="status">Consultando e verificando integridade e assinaturas…</p>}
       {error && <p className="mt-3 rounded-lg border border-destructive/40 p-3 text-sm" role="alert">{error}</p>}
       {passport && result && <>
         <div className="mt-5 rounded-xl border border-border p-4">
