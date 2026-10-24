@@ -22,3 +22,9 @@ Depois de exportar o livro (PDF, DOCX, EPUB, TXT, HTML ou JSON), o autor escolhe
 A prova fica ligada à **última versão registrada**; se o livro mudou desde então, o servidor recusa (409) até haver uma nova versão. Rotas: `POST /api/xuri/export/prepare` e `/export/register` (exigem autenticador aberto e chave de assinatura). O dossiê do autor e a consulta pública (`/api/public/xuri/lookup?q=<SHA-256 do arquivo>`, só obras publicadas) passam a trazer `exports[]`, com `payload` e assinatura para conferência fora do Shakstory.
 
 Limites: a prova mostra que aquele arquivo exato foi ligado, pela chave do autor, a uma versão registrada naquela data. Qualquer alteração no arquivo muda o SHA-256. Ainda não há passaporte embutido dentro do EPUB/DOCX/PDF.
+
+## Consulta por ISBN e UID com prefixo (2026-10-24.3)
+
+A consulta pública (`/api/public/xuri/lookup?q=`) aceita: UID da obra ou da versão (com ou sem o prefixo `xuri:work:` / `xuri:version:`), SHA-256 da versão ou do arquivo exportado, e **ISBN-10 ou ISBN-13** (com ou sem hífens, conferido pelo dígito verificador).
+
+O ISBN é **declarado pelo autor** no livro (campo principal e por formato) e é copiado no momento da publicação; republicar atualiza a lista. Ele serve para localizar a obra, não prova autoria nem edição real. Se mais de uma obra publicada declara o mesmo ISBN, a rota responde 409 `ambiguous_isbn` e pede o UID ou o SHA-256. A resposta traz `match.kind` = `work`, `version`, `hash`, `file` ou `isbn`, para a interface não confundir os tipos de prova.

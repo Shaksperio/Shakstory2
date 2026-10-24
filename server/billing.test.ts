@@ -671,7 +671,7 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     for (const q of [workId, version.id, version.content_hash, version.entry_hash.toUpperCase()]) {
       const r = await lookup(q);
       expect(r.status).toBe(200);
-      expect(r.json.work).toEqual({ id: workId, title: "Obra Pública" });
+      expect(r.json.work).toEqual({ id: workId, title: "Obra Pública", isbns: [] });
       expect(r.json.versions).toHaveLength(1);
       expect(r.json.chain.valid).toBe(true);
       expect(r.json.author.displayName).toBe("Ana bAutora/b");
@@ -739,6 +739,46 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     // se o livro mudar, é preciso registrar nova versão antes de provar outra exportação
     putLibrary(db, OWNER, [{ id: "ex1", title: "Obra Exportada", nodes: [{ id: "n", content: "texto novo" }], updatedAt: 2 }]);
     expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "pdf", fileHash })).status).toBe(409);
+  });
+
+  it("consulta pública por ISBN (declarado pelo autor) e por UID com prefixo xuri:", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const OTHER = "outra@example.com";
+    const lookup = async (q: string, ip: string, now = T0) => {
+      const r = new Request("https://x/api/public/xuri/lookup?q=" + encodeURIComponent(q), { headers: { "CF-Connecting-IP": ip } });
+      const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { now });
+      return { status: out.response.status, json: await out.response.json() };
+    };
+    const publishBook = async (email: string, bookId: string, publication: any) => {
+      putLibrary(db, email, [{ id: bookId, title: "Livro " + bookId, nodes: [{ id: "n", content: "x" + bookId }], updatedAt: 1, publication }]);
+      await setup(mod, db, email);
+      expect((await api(mod, db, email, "register", { bookId })).status).toBe(200);
+      return (await api(mod, db, email, "publish", { bookId, publish: true })).json;
+    };
+    // 9788535902778 e 8535902775 são o mesmo livro (13 e 10 dígitos válidos); 9788535902770 tem dígito verificador errado
+    const pub = await publishBook(OWNER, "isb1", { isbn: "978-85-359-0277-8", copyright: { isbns: { epub: "9780306406157" } } });
+    expect(pub.isbns).toEqual(["9788535902778", "9780306406157"]);
+    const byIsbn = await lookup("978-85-359-0277-8", "203.0.113.70");
+    expect(byIsbn.status).toBe(200);
+    expect(byIsbn.json.work.title).toBe("Livro isb1");
+    expect(byIsbn.json.work.isbns).toContain("9788535902778");
+    expect(byIsbn.json.match).toEqual({ kind: "isbn" });
+    expect(byIsbn.json.isbnNotice).toContain("não comprova autoria");
+    expect((await lookup("9780306406157", "203.0.113.70")).status).toBe(200); // ISBN do formato
+    expect((await lookup("9788535902770", "203.0.113.71")).status).toBe(404); // dígito inválido não é ISBN: cai como UID inexistente
+    expect((await lookup("9781234567897", "203.0.113.71")).status).toBe(404); // ISBN válido, mas ninguém declarou
+    // UID com prefixo xuri:work:
+    const workId = db.works[0].id;
+    expect((await lookup("xuri:work:" + workId, "203.0.113.72")).status).toBe(200);
+    // mais de uma obra publicada com o mesmo ISBN: não escolhe por ninguém
+    await publishBook(OTHER, "isb2", { isbn: "9788535902778" });
+    const dup = await lookup("9788535902778", "203.0.113.73");
+    expect(dup.status).toBe(409); expect(dup.json.error).toBe("ambiguous_isbn");
+    // despublicar remove o ISBN da consulta
+    expect((await api(mod, db, OTHER, "publish", { bookId: "isb2", publish: false })).status).toBe(200);
+    expect((await lookup("9788535902778", "203.0.113.74")).status).toBe(200);
+    expect((await api(mod, db, OWNER, "publish", { bookId: "isb1", publish: false })).status).toBe(200);
+    expect((await lookup("9788535902778", "203.0.113.75")).status).toBe(404);
   });
 
   it("consulta pública: limite de consultas por minuto por endereço", async () => {

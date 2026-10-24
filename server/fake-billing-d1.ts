@@ -71,18 +71,19 @@ export function fakeBillingDb() {
         if (/^DELETE FROM shak_authenticators/.test(sql)) { auths.delete(args[0]); return {}; }
         if (/^ALTER TABLE shak_works ADD COLUMN/.test(sql) || /^CREATE TABLE IF NOT EXISTS shak_(xuri_lookups|exports)/.test(sql)) return {};
         if (/^INSERT OR IGNORE INTO shak_exports/.test(sql)) { const [id, work_id, seq, format, file_hash, content_hash, created_at, signature] = args; if (!exportsRows.some(x => x.work_id === work_id && x.file_hash === file_hash)) exportsRows.push({ id, work_id, seq, format, file_hash, content_hash, created_at, signature }); return {}; }
-        if (/FROM shak_exports x JOIN shak_works w/.test(sql)) { const hit = exportsRows.find(x => x.file_hash === args[0]); const w = hit && works.find(y => y.id === hit.work_id); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null; }
+        if (/FROM shak_exports x JOIN shak_works w/.test(sql)) { const hit = exportsRows.find(x => x.file_hash === args[0]); const w = hit && works.find(y => y.id === hit.work_id); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null, public_isbns: w.public_isbns ?? null } : null; }
         if (/FROM shak_exports WHERE work_id/.test(sql)) return { results: exportsRows.filter(x => x.work_id === args[0]).sort((p, q) => p.created_at.localeCompare(q.created_at)) };
         if (/^INSERT INTO shak_xuri_lookups/.test(sql)) { lookups.set(args[0], (lookups.get(args[0]) ?? 0) + 1); return {}; }
         if (/^SELECT n FROM shak_xuri_lookups/.test(sql)) return lookups.has(args[0]) ? { n: lookups.get(args[0]) } : null;
         if (/^DELETE FROM shak_xuri_lookups/.test(sql)) { const suffix = String(args[0]).slice(1); lookups.forEach((_n, k) => { if (!k.endsWith(suffix)) lookups.delete(k); }); return {}; }
-        if (/^UPDATE shak_works SET published_at/.test(sql)) { const w = works.find(x => x.id === args[args.length - 1]); if (w) { w.published_at = /= NULL/.test(sql) ? null : args[0]; w.public_name = /= NULL/.test(sql) ? null : args[1]; } return {}; }
+        if (/^UPDATE shak_works SET published_at/.test(sql)) { const w = works.find(x => x.id === args[args.length - 1]); if (w) { const clear = /published_at = NULL/.test(sql); w.published_at = clear ? null : args[0]; w.public_name = clear ? null : args[1]; w.public_isbns = clear ? null : args[2]; } return {}; }
+        if (/FROM shak_works w WHERE w\.published_at IS NOT NULL AND w\.public_isbns LIKE \?/.test(sql)) { const needle = String(args[0]).slice(1, -1); return { results: works.filter(w => w.published_at != null && w.public_isbns && String(w.public_isbns).includes(needle)).map(w => ({ id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null, public_isbns: w.public_isbns })) }; }
         if (/FROM shak_versions v JOIN shak_works w/.test(sql)) {
           const hit = /v\.id = \?/.test(sql) ? versions.find(v => v.id === args[0]) : versions.find(v => v.content_hash === args[0] || v.entry_hash === args[1]);
           const w = hit && works.find(x => x.id === hit.work_id);
-          return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null;
+          return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null, public_isbns: w.public_isbns ?? null } : null;
         }
-        if (/FROM shak_works w WHERE w\.published_at IS NOT NULL AND w\.id = \?/.test(sql)) { const w = works.find(x => x.id === args[0]); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null; }
+        if (/FROM shak_works w WHERE w\.published_at IS NOT NULL AND w\.id = \?/.test(sql)) { const w = works.find(x => x.id === args[0]); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null, public_isbns: w.public_isbns ?? null } : null; }
         if (/FROM shak_keys WHERE key_id = \?/.test(sql)) return keys.find(k => k.key_id === args[0]) ?? null;
         if (/FROM shak_works WHERE email = \? AND book_id = \?/.test(sql)) return works.find(w => w.email === args[0] && w.book_id === args[1]) ?? null;
         if (/^INSERT OR IGNORE INTO shak_works/.test(sql)) { const [id, email, book_id, title, created_at] = args; if (!works.some(w => w.email === email && w.book_id === book_id)) works.push({ id, email, book_id, title, created_at }); return {}; }
