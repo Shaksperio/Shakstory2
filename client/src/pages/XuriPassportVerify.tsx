@@ -47,6 +47,13 @@ export default function XuriPassportVerify() {
       if (!response.ok) throw new Error("A consulta pública está indisponível no momento.");
       const data = await response.json() as Passport & { passport?: Passport };
       const parsed = data.passport || data;
+      if (!parsed || parsed.protocol !== "xuri-1" || !parsed.work?.id || !Array.isArray(parsed.versions)) throw new Error("O serviço retornou um passaporte em formato inválido.");
+      if (/^[a-f0-9]{64}$/i.test(term)) {
+        const found = parsed.versions.some(v => v.contentHash?.toLowerCase() === term.toLowerCase() || v.entryHash?.toLowerCase() === term.toLowerCase());
+        if (!found) throw new Error("O hash consultado não corresponde a nenhuma versão deste passaporte.");
+      } else if (parsed.work.id !== term && !parsed.versions.some(v => (v as Passport["versions"][number] & { id?: string }).id === term)) {
+        throw new Error("O UID consultado não corresponde à obra nem a uma versão deste passaporte.");
+      }
       const verification = await verifyPassport(parsed);
       setPassport(parsed); setResult(verification);
     } catch (e) {
@@ -78,7 +85,7 @@ export default function XuriPassportVerify() {
     <header className="mt-6">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">X-URI · Passaporte v1</p>
       <h1 className="mt-2 font-serif text-3xl sm:text-4xl">Verificação de procedência</h1>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">Confira localmente a integridade da cadeia e as assinaturas Ed25519 de um dossiê exportado pelo Shakstory. O arquivo é processado neste navegador e não é enviado para um servidor.</p>
+      <p className="mt-3 text-sm leading-6 text-muted-foreground">Consulte um registro público por UID ou SHA-256, ou confira localmente um dossiê JSON. A consulta envia apenas o identificador pesquisado; o dossiê escolhido manualmente é processado neste navegador.</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">Atenção: o dossiê exportado inclui o e-mail associado à conta. Antes de compartilhar o arquivo, confira os dados pessoais que ele contém.</p>
     </header>
     <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">\n      <form onSubmit={e => void lookup(e)} className="mb-6 rounded-xl border border-border p-4">\n        <label htmlFor="passport-query" className="block text-sm font-semibold">Consultar passaporte público</label>\n        <p className="mt-1 text-xs text-muted-foreground">Pesquise pelo UID da obra/versão ou pelo SHA-256 publicado.</p>\n        <div className="mt-3 flex flex-col gap-2 sm:flex-row">\n          <input id="passport-query" value={query} onChange={e => setQuery(e.target.value)} placeholder="book-… ou hash SHA-256" className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={busy} />\n          <button type="submit" disabled={busy || !query.trim()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? "Consultando…" : "Consultar"}</button>\n        </div>\n      </form>
