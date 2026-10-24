@@ -51,7 +51,7 @@ export default function XuriPassportVerify() {
       if (/^[a-f0-9]{64}$/i.test(term)) {
         const found = parsed.versions.some(v => v.contentHash?.toLowerCase() === term.toLowerCase() || v.entryHash?.toLowerCase() === term.toLowerCase());
         if (!found) throw new Error("O hash consultado não corresponde a nenhuma versão deste passaporte.");
-      } else if (parsed.work.id !== term && !parsed.versions.some(v => (v as Passport["versions"][number] & { id?: string }).id === term)) {
+      } else if (parsed.work.id !== term && !parsed.versions.some(v => (v as NonNullable<Passport["versions"]>[number] & { id?: string }).id === term)) {
         throw new Error("O UID consultado não corresponde à obra nem a uma versão deste passaporte.");
       }
       const verification = await verifyPassport(parsed);
@@ -88,10 +88,20 @@ export default function XuriPassportVerify() {
       <p className="mt-3 text-sm leading-6 text-muted-foreground">Consulte um registro público por UID ou SHA-256, ou confira localmente um dossiê JSON. A consulta envia apenas o identificador pesquisado; o dossiê escolhido manualmente é processado neste navegador.</p>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">Atenção: o dossiê exportado inclui o e-mail associado à conta. Antes de compartilhar o arquivo, confira os dados pessoais que ele contém.</p>
     </header>
-    <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">\n      <form onSubmit={e => void lookup(e)} className="mb-6 rounded-xl border border-border p-4">\n        <label htmlFor="passport-query" className="block text-sm font-semibold">Consultar passaporte público</label>\n        <p className="mt-1 text-xs text-muted-foreground">Pesquise pelo UID da obra/versão ou pelo SHA-256 publicado.</p>\n        <div className="mt-3 flex flex-col gap-2 sm:flex-row">\n          <input id="passport-query" value={query} onChange={e => setQuery(e.target.value)} placeholder="book-… ou hash SHA-256" className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={busy} />\n          <button type="submit" disabled={busy || !query.trim()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? "Consultando…" : "Consultar"}</button>\n        </div>\n      </form>
-      <details className="mb-4"><summary className="cursor-pointer text-sm font-medium">Ou verificar um dossiê JSON local</summary>\n      <label className="mt-3 block text-sm font-medium" htmlFor="passport-file">Arquivo de passaporte (.json)</label>
+    <section className="mt-6 rounded-2xl border border-border bg-card p-4 sm:p-6">
+      <form onSubmit={e => void lookup(e)} className="mb-6 rounded-xl border border-border p-4">
+        <label htmlFor="passport-query" className="block text-sm font-semibold">Consultar passaporte público</label>
+        <p className="mt-1 text-xs text-muted-foreground">Pesquise pelo UID da obra/versão ou pelo SHA-256 publicado.</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input id="passport-query" value={query} onChange={e => setQuery(e.target.value)} placeholder="book-… ou hash SHA-256" className="min-w-0 flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={busy} />
+          <button type="submit" disabled={busy || !query.trim()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? "Consultando…" : "Consultar"}</button>
+        </div>
+      </form>
+      <details className="mb-4"><summary className="cursor-pointer text-sm font-medium">Ou verificar um dossiê JSON local</summary>
+      <label className="mt-3 block text-sm font-medium" htmlFor="passport-file">Arquivo de passaporte (.json)</label>
       <input id="passport-file" className="mt-2 block w-full min-w-0 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-primary-foreground" type="file" accept="application/json,.json" disabled={busy} onChange={e => void load(e.target.files?.[0])} />
-      </details>\n      {busy && <p className="mt-3 text-sm" role="status">Consultando e verificando integridade e assinaturas…</p>}
+      </details>
+      {busy && <p className="mt-3 text-sm" role="status">Consultando e verificando integridade e assinaturas…</p>}
       {error && <p className="mt-3 rounded-lg border border-destructive/40 p-3 text-sm" role="alert">{error}</p>}
       {passport && result && <>
         <div className="mt-5 rounded-xl border border-border p-4">
