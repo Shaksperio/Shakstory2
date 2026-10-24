@@ -22,6 +22,7 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
   const [supported, setSupported] = useState(true);
   const [stored, setStored] = useState(readStoredKey());
   const [publicName, setPublicName] = useState("");
+  const [publicBio, setPublicBio] = useState("");
   useEffect(() => { void ed25519Supported().then(setSupported); }, []);
 
   const reload = useCallback(async () => {
@@ -136,10 +137,12 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
           <p className="mt-1 text-muted-foreground">{history.published ? "Esta obra pode ser consultada por qualquer pessoa, sem login, pelo UID ou SHA-256, em /verificar/xuri. Aparecem título, hashes, assinaturas e carimbos; nunca o texto, a nota nem o seu e-mail." : "Privada. Se você publicar, qualquer pessoa poderá conferir o registro pelo UID ou SHA-256, sem ver o texto da obra."}</p>
           {history.workId && <p className="mt-1 break-all font-mono text-[10px]">UID da obra: {history.workId}</p>}
           {!history.published && <label className="mt-2 block">Nome público (opcional)<input className="mt-1 block w-full rounded-md border bg-background px-2 py-1" maxLength={80} value={publicName} onChange={e => setPublicName(e.target.value)} disabled={busy} /></label>}
+          {!history.published && <label className="mt-2 block">Mini biografia pública (opcional, até 600 caracteres)<textarea className="mt-1 block w-full rounded-md border bg-background px-2 py-1" rows={3} maxLength={600} value={publicBio} onChange={e => setPublicBio(e.target.value)} disabled={busy} /></label>}
+          {!history.published && <p className="mt-1 text-muted-foreground">Ao publicar, também ficam públicos o título, o ISBN declarado no livro e a capa (se for um endereço https). Seu e-mail nunca é publicado.</p>}
           <div className="mt-2 flex flex-wrap gap-2">
             {history.published
               ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => { await xuriPublish(bookId, false); setMessage("Consulta pública desativada."); await reload(); })}>Tornar privada</Button>
-              : <Button size="sm" variant="outline" disabled={busy || !unlocked} onClick={() => void run(async () => { await xuriPublish(bookId, true, publicName); setMessage("Registro publicado para consulta."); await reload(); })}>Publicar para consulta</Button>}
+              : <Button size="sm" variant="outline" disabled={busy || !unlocked} onClick={() => void run(async () => { await xuriPublish(bookId, true, publicName, publicBio); setMessage("Registro publicado para consulta."); await reload(); })}>Publicar para consulta</Button>}
             {!history.published && !unlocked && <span className="text-muted-foreground">Digite o código do autenticador acima para publicar.</span>}
           </div>
         </div>
