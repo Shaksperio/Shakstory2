@@ -12,3 +12,13 @@
 ## Consulta pública (2026-10-24.1)
 
 O autor decide, obra por obra, se o registro pode ser consultado sem login (botão "Publicar para consulta" no diálogo Autoria, com a janela do autenticador aberta). Qualquer pessoa consulta pelo UID da obra, UID da versão ou SHA-256 em `/verificar/xuri`. A resposta é uma lista fechada de campos: título, nome público opcional, hashes, `entryPayload`, assinaturas, chaves públicas e carimbos. Nunca saem e-mail da conta, notas, segredos do autenticador ou o texto da obra. "Tornar privada" remove a obra da consulta na hora. O resultado é evidência técnica de que o conteúdo existia na data registrada; não prova autoria jurídica nem originalidade.
+
+## Prova de exportação (2026-10-24.2)
+
+Depois de exportar o livro (PDF, DOCX, EPUB, TXT, HTML ou JSON), o autor escolhe o arquivo no diálogo Autoria. O navegador calcula o SHA-256 do arquivo (ele não é enviado) e o autor assina, com a chave Ed25519, o texto:
+
+`{"at":…,"content":<hash da versão>,"file":<SHA-256 do arquivo>,"format":…,"protocol":"xuri-1-export","seq":…,"work":…}` (chaves em ordem alfabética).
+
+A prova fica ligada à **última versão registrada**; se o livro mudou desde então, o servidor recusa (409) até haver uma nova versão. Rotas: `POST /api/xuri/export/prepare` e `/export/register` (exigem autenticador aberto e chave de assinatura). O dossiê do autor e a consulta pública (`/api/public/xuri/lookup?q=<SHA-256 do arquivo>`, só obras publicadas) passam a trazer `exports[]`, com `payload` e assinatura para conferência fora do Shakstory.
+
+Limites: a prova mostra que aquele arquivo exato foi ligado, pela chave do autor, a uma versão registrada naquela data. Qualquer alteração no arquivo muda o SHA-256. Ainda não há passaporte embutido dentro do EPUB/DOCX/PDF.

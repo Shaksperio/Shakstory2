@@ -13,9 +13,10 @@ export function fakeBillingDb() {
   const auths = new Map<string, any>();
   const works: any[] = [];
   const lookups = new Map<string, number>();
+  const exportsRows: any[] = [];
   const versions: any[] = [];
   const keys: any[] = [];
-  const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions, keys };
+  const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions, keys, exportsRows };
   const unique = (what: string) => { const e: any = new Error("UNIQUE constraint failed: " + what); return e; };
   const sortDesc = (rows: any[], key: string) => [...rows].sort((a, b) => String(b[key]).localeCompare(String(a[key])));
   db.prepare = (sql: string) => {
@@ -68,7 +69,10 @@ export function fakeBillingDb() {
         if (/^INSERT OR REPLACE INTO shak_authenticators/.test(sql)) { const [email, secret_enc, created_at] = args; auths.set(email, { email, secret_enc, confirmed: 0, last_step: 0, fails: 0, fail_start: 0, unlock_until: 0, recovery: "[]", created_at }); return {}; }
         if (/^UPDATE shak_authenticators/.test(sql)) { const [confirmed, last_step, fails, fail_start, unlock_until, recovery, email] = args; Object.assign(auths.get(email), { confirmed, last_step, fails, fail_start, unlock_until, recovery }); return {}; }
         if (/^DELETE FROM shak_authenticators/.test(sql)) { auths.delete(args[0]); return {}; }
-        if (/^ALTER TABLE shak_works ADD COLUMN/.test(sql) || /^CREATE TABLE IF NOT EXISTS shak_xuri_lookups/.test(sql)) return {};
+        if (/^ALTER TABLE shak_works ADD COLUMN/.test(sql) || /^CREATE TABLE IF NOT EXISTS shak_(xuri_lookups|exports)/.test(sql)) return {};
+        if (/^INSERT OR IGNORE INTO shak_exports/.test(sql)) { const [id, work_id, seq, format, file_hash, content_hash, created_at, signature] = args; if (!exportsRows.some(x => x.work_id === work_id && x.file_hash === file_hash)) exportsRows.push({ id, work_id, seq, format, file_hash, content_hash, created_at, signature }); return {}; }
+        if (/FROM shak_exports x JOIN shak_works w/.test(sql)) { const hit = exportsRows.find(x => x.file_hash === args[0]); const w = hit && works.find(y => y.id === hit.work_id); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null; }
+        if (/FROM shak_exports WHERE work_id/.test(sql)) return { results: exportsRows.filter(x => x.work_id === args[0]).sort((p, q) => p.created_at.localeCompare(q.created_at)) };
         if (/^INSERT INTO shak_xuri_lookups/.test(sql)) { lookups.set(args[0], (lookups.get(args[0]) ?? 0) + 1); return {}; }
         if (/^SELECT n FROM shak_xuri_lookups/.test(sql)) return lookups.has(args[0]) ? { n: lookups.get(args[0]) } : null;
         if (/^DELETE FROM shak_xuri_lookups/.test(sql)) { const suffix = String(args[0]).slice(1); lookups.forEach((_n, k) => { if (!k.endsWith(suffix)) lookups.delete(k); }); return {}; }

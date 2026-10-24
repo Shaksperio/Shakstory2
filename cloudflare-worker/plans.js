@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-24.1";
+export const SHAK_WORKER_VERSION = "2026-10-24.2";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -563,6 +563,7 @@ async function ensureXuri(db) {
   // Publicação voluntária para a consulta pública: published_at nulo = privado.
   for (const col of ["published_at TEXT", "public_name TEXT"]) { try { await db.prepare("ALTER TABLE shak_works ADD COLUMN " + col).run(); } catch { /* coluna já existe */ } }
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_xuri_lookups (k TEXT PRIMARY KEY, n INTEGER NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS shak_exports (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, format TEXT NOT NULL, file_hash TEXT NOT NULL, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, signature TEXT NOT NULL, UNIQUE (work_id, file_hash))").run();
   xuriReady = true;
 }
 
@@ -594,6 +595,9 @@ async function shakXuriCheck(db, env, email, auth, code, now, allowRecovery) {
   return { ok, usedRecovery, error: ok ? null : "invalid_code", state, save };
 }
 
+/** Texto exato que o autor assina para provar um arquivo exportado (PDF, DOCX, EPUB...) ligado a uma versão registrada. */
+const xuriExportPayload = (workId, seq, format, fileHash, contentHash, createdAt) => shakStable({ protocol: "xuri-1-export", work: workId, seq, format, file: fileHash, content: contentHash, at: createdAt });
+const XURI_EXPORT_FORMATS = ["pdf", "docx", "epub", "txt", "html", "json"];
 const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(xuriPayload(workId, seq, contentHash, prevHash, createdAt));
 
 /** Verifica a cadeia: cada entrada recalculada e ligada à anterior. */
@@ -797,7 +801,32 @@ async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
     const rows = (await db.prepare("SELECT id, seq, content_hash, prev_hash, entry_hash, bytes, note, created_at, ts_proof, signature FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
     const chain = await xuriVerifyChain(work.id, rows);
     const keys = ((await db.prepare("SELECT key_id, public_key, created_at, revoked_at FROM shak_keys WHERE email = ? ORDER BY created_at").bind(email).all()).results || []).map(k => { const raw = xuriB64Decode(k.public_key); return { keyId: k.key_id, algorithm: "ed25519", publicKey: k.public_key, publicKeySpkiBase64: raw ? btoa(String.fromCharCode(...XURI_SPKI_PREFIX, ...raw)) : null, createdAt: k.created_at, revokedAt: k.revoked_at }; });
-    return json({ protocol: "xuri-1", generatedAt: new Date(now).toISOString(), account: email, work: { id: work.id, bookId, title: work.title }, chain, keys, howToVerify: ["1. Para cada versão, SHA-256 do texto de entryPayload deve ser igual a entryHash e prev deve ser o entryHash da versão anterior (a primeira usa 64 zeros).", "2. contentHash é o SHA-256 do livro em JSON com chaves ordenadas, como estava salvo no servidor naquele momento.", "3. Se houver timestamp, salve o token (base64) em um arquivo .tsr e confira com: openssl ts -verify -in arquivo.tsr -digest <entryHash> -sha256 -CAfile <certificado da autoridade>.", "4. Se houver assinatura: grave entryPayload em um arquivo (sem quebra de linha final), a assinatura (base64) decodificada em outro, a chave publicKeySpkiBase64 em PEM (BEGIN PUBLIC KEY) e confira com: openssl pkeyutl -verify -rawin -pubin -inkey chave.pem -in payload.txt -sigfile assinatura.bin.", "Isto é evidência de que o conteúdo existia na data registrada; não prova quem o escreveu."], versions: rows.map(row => ({ seq: row.seq, createdAt: row.created_at, note: row.note, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null, signature: row.signature ? JSON.parse(row.signature) : null })) });
+    const exportRows = (await db.prepare("SELECT id, seq, format, file_hash, content_hash, created_at, signature FROM shak_exports WHERE work_id = ? ORDER BY created_at").bind(work.id).all()).results || [];
+    return json({ protocol: "xuri-1", generatedAt: new Date(now).toISOString(), account: email, exports: exportRows.map(row => ({ id: row.id, seq: row.seq, format: row.format, fileHash: row.file_hash, contentHash: row.content_hash, createdAt: row.created_at, payload: xuriExportPayload(work.id, row.seq, row.format, row.file_hash, row.content_hash, row.created_at), signature: JSON.parse(row.signature) })), work: { id: work.id, bookId, title: work.title }, chain, keys, howToVerify: ["1. Para cada versão, SHA-256 do texto de entryPayload deve ser igual a entryHash e prev deve ser o entryHash da versão anterior (a primeira usa 64 zeros).", "2. contentHash é o SHA-256 do livro em JSON com chaves ordenadas, como estava salvo no servidor naquele momento.", "3. Se houver timestamp, salve o token (base64) em um arquivo .tsr e confira com: openssl ts -verify -in arquivo.tsr -digest <entryHash> -sha256 -CAfile <certificado da autoridade>.", "4. Se houver assinatura: grave entryPayload em um arquivo (sem quebra de linha final), a assinatura (base64) decodificada em outro, a chave publicKeySpkiBase64 em PEM (BEGIN PUBLIC KEY) e confira com: openssl pkeyutl -verify -rawin -pubin -inkey chave.pem -in payload.txt -sigfile assinatura.bin.", "Isto é evidência de que o conteúdo existia na data registrada; não prova quem o escreveu."], versions: rows.map(row => ({ seq: row.seq, createdAt: row.created_at, note: row.note, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null, signature: row.signature ? JSON.parse(row.signature) : null })) });
+  }
+  if ((path === "/api/xuri/export/prepare" || path === "/api/xuri/export/register") && req.method === "POST") {
+    // Prova de exportação: o autor assina o SHA-256 do arquivo gerado, ligado à versão registrada mais recente.
+    if (!auth || !auth.confirmed) return json({ error: "totp_required", message: "Ative o Google Authenticator para provar exportações." }, 428);
+    if (!(auth.unlock_until > now)) return json({ error: "locked", message: "Digite o código do autenticador para provar a exportação." }, 423);
+    if (!work) return json({ error: "not_registered", message: "Registre uma versão antes de provar uma exportação." }, 404);
+    const fileHash = String(body.fileHash || "").toLowerCase(), format = String(body.format || "").toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(fileHash) || !XURI_EXPORT_FORMATS.includes(format)) return json({ error: "invalid_export", message: "Informe o formato (pdf, docx, epub, txt, html ou json) e o SHA-256 do arquivo." }, 400);
+    const key = await db.prepare(XURI_KEY_SQL).bind(email).first();
+    if (!key) return json({ error: "key_required", message: "Cadastre a chave de assinatura para provar exportações." }, 428);
+    const rows = (await db.prepare("SELECT seq, content_hash, created_at FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
+    const last = rows[rows.length - 1];
+    const current = await loadBook();
+    if (!last || !current || last.content_hash !== current.hash) return json({ error: "version_outdated", message: "O livro mudou desde a última versão registrada. Registre uma nova versão antes de provar a exportação." }, 409);
+    let createdAt = new Date(now).toISOString();
+    if (path === "/api/xuri/export/prepare") return json({ ok: true, seq: last.seq, createdAt, payload: xuriExportPayload(work.id, last.seq, format, fileHash, last.content_hash, createdAt), keyId: key.key_id });
+    const claimed = Date.parse(String(body.createdAt || ""));
+    if (!body.signature || !Number.isFinite(claimed) || Math.abs(now - claimed) > 5 * 60000 || claimed < Date.parse(last.created_at)) return json({ error: "signature_required", message: "Prepare e assine de novo." }, 428);
+    createdAt = new Date(claimed).toISOString();
+    if (!(await xuriVerifySignature(key.public_key, body.signature, xuriExportPayload(work.id, last.seq, format, fileHash, last.content_hash, createdAt)))) return json({ error: "bad_signature", message: "A assinatura não confere com a chave cadastrada." }, 400);
+    const exportId = "x_" + shakHex(crypto.getRandomValues(new Uint8Array(10)));
+    await db.prepare("INSERT OR IGNORE INTO shak_exports (id, work_id, seq, format, file_hash, content_hash, created_at, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(exportId, work.id, last.seq, format, fileHash, last.content_hash, createdAt, JSON.stringify({ keyId: key.key_id, alg: "ed25519", sig: String(body.signature) })).run();
+    await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.export", { bookId, seq: last.seq, format, fileHash });
+    return json({ ok: true, exportId, seq: last.seq, format, fileHash, createdAt });
   }
   if ((path === "/api/xuri/register" || path === "/api/xuri/prepare") && req.method === "POST") {
     if (!auth || !auth.confirmed) return json({ error: "totp_required", message: "Ative o Google Authenticator para registrar versões." }, 428);
@@ -1237,6 +1266,7 @@ async function shakXuriLookup(req, env, now) {
     const hash = q.toLowerCase();
     work = await db.prepare("SELECT " + WORK_COLS + " FROM shak_versions v JOIN shak_works w ON w.id = v.work_id WHERE w.published_at IS NOT NULL AND (v.content_hash = ? OR v.entry_hash = ?) LIMIT 1").bind(hash, hash).first();
     kind = "hash";
+    if (!work) { work = await db.prepare("SELECT " + WORK_COLS + " FROM shak_exports x JOIN shak_works w ON w.id = x.work_id WHERE w.published_at IS NOT NULL AND x.file_hash = ? LIMIT 1").bind(hash).first(); if (work) kind = "file"; }
   } else {
     work = await db.prepare("SELECT " + WORK_COLS + " FROM shak_works w WHERE w.published_at IS NOT NULL AND w.id = ?").bind(q).first();
     if (!work) { work = await db.prepare("SELECT " + WORK_COLS + " FROM shak_versions v JOIN shak_works w ON w.id = v.work_id WHERE w.published_at IS NOT NULL AND v.id = ?").bind(q).first(); kind = "version"; }
@@ -1244,7 +1274,10 @@ async function shakXuriLookup(req, env, now) {
   if (!work) return json({ error: "not_found" }, 404);
   const rows = (await db.prepare("SELECT id, seq, content_hash, prev_hash, entry_hash, bytes, created_at, ts_proof, signature FROM shak_versions WHERE work_id = ? ORDER BY seq").bind(work.id).all()).results || [];
   const chain = await xuriVerifyChain(work.id, rows);
-  const keyIds = [...new Set(rows.map(row => { try { return row.signature ? JSON.parse(row.signature).keyId : null; } catch { return null; } }).filter(Boolean))].slice(0, 20);
+  const exportRows = (await db.prepare("SELECT id, seq, format, file_hash, content_hash, created_at, signature FROM shak_exports WHERE work_id = ? ORDER BY created_at").bind(work.id).all()).results || [];
+  const exports = exportRows.map(row => ({ id: row.id, seq: row.seq, format: row.format, fileHash: row.file_hash, contentHash: row.content_hash, createdAt: row.created_at, payload: xuriExportPayload(work.id, row.seq, row.format, row.file_hash, row.content_hash, row.created_at), signature: JSON.parse(row.signature) }));
+  const sigKey = raw => { try { return raw ? JSON.parse(raw).keyId : null; } catch { return null; } };
+  const keyIds = [...new Set([...rows.map(row => sigKey(row.signature)), ...exportRows.map(row => sigKey(row.signature))].filter(Boolean))].slice(0, 20);
   const keys = [];
   for (const keyId of keyIds) {
     const row = await db.prepare("SELECT key_id, public_key, created_at, revoked_at FROM shak_keys WHERE key_id = ?").bind(keyId).first();
@@ -1252,11 +1285,11 @@ async function shakXuriLookup(req, env, now) {
     const raw = xuriB64Decode(row.public_key);
     keys.push({ keyId: row.key_id, algorithm: "ed25519", publicKey: row.public_key, publicKeySpkiBase64: raw ? btoa(String.fromCharCode(...XURI_SPKI_PREFIX, ...raw)) : null, createdAt: row.created_at, revokedAt: row.revoked_at });
   }
-  const match = isHash ? rows.find(row => row.content_hash === q.toLowerCase() || row.entry_hash === q.toLowerCase()) : kind === "version" ? rows.find(row => row.id === q) : null;
+  const match = kind === "file" ? exportRows.find(row => row.file_hash === q.toLowerCase()) : isHash ? rows.find(row => row.content_hash === q.toLowerCase() || row.entry_hash === q.toLowerCase()) : kind === "version" ? rows.find(row => row.id === q) : null;
   return json({
     protocol: "xuri-1", generatedAt: new Date(now).toISOString(),
     work: { id: work.id, title: work.title }, author: work.public_name ? { displayName: work.public_name } : null, publishedAt: work.published_at,
-    chain, keys,
+    chain, keys, exports,
     versions: rows.map(row => ({ id: row.id, seq: row.seq, createdAt: row.created_at, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null, signature: row.signature ? JSON.parse(row.signature) : null })),
     match: match ? { kind, seq: match.seq } : { kind },
     notice: "Evidência técnica de que o conteúdo existia na data registrada; não prova, por si só, autoria jurídica nem originalidade."
