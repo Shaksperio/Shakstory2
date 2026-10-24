@@ -2,6 +2,17 @@ import React, { useState } from "react";
 import { Link } from "wouter";
 import { verifyPassport, type Passport, type PassportResult, type VersionCheck } from "@/lib/xuriPassport";
 
+type PublicExportProof = Record<string, unknown>;
+type PublicPassport = Passport & { exports?: PublicExportProof[] };
+
+function exportHash(proof: PublicExportProof): string {
+  for (const key of ["sha256", "fileHash", "exportHash", "contentHash", "hash"]) {
+    const value = proof[key];
+    if (typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)) return value;
+  }
+  return "";
+}
+
 function signatureSummary(result: PassportResult) {
   switch (result.signatureSummary) {
     case "unsigned": return "Nenhuma versão contém assinatura Ed25519. Este dossiê não confirma assinatura do autor.";
@@ -28,7 +39,7 @@ function keyStatusLabel(check: VersionCheck) {
 }
 
 export default function XuriPassportVerify() {
-  const [passport, setPassport] = useState<Passport | null>(null);
+  const [passport, setPassport] = useState<PublicPassport | null>(null);
   const [result, setResult] = useState<PassportResult | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,12 +56,13 @@ export default function XuriPassportVerify() {
       if (response.status === 400) throw new Error("UID ou SHA-256 em formato inválido.");
       if (response.status === 429) throw new Error("Muitas consultas em sequência. Aguarde e tente novamente.");
       if (!response.ok) throw new Error("A consulta pública está indisponível no momento.");
-      const data = await response.json() as Passport & { passport?: Passport };
+      const data = await response.json() as PublicPassport & { passport?: PublicPassport };
       const parsed = data.passport || data;
       if (!parsed || parsed.protocol !== "xuri-1" || !parsed.work?.id || !Array.isArray(parsed.versions)) throw new Error("O serviço retornou um passaporte em formato inválido.");
       if (/^[a-f0-9]{64}$/i.test(term)) {
-        const found = parsed.versions.some(v => v.contentHash?.toLowerCase() === term.toLowerCase() || v.entryHash?.toLowerCase() === term.toLowerCase());
-        if (!found) throw new Error("O hash consultado não corresponde a nenhuma versão deste passaporte.");
+        const foundVersion = parsed.versions.some(v => v.contentHash?.toLowerCase() === term.toLowerCase() || v.entryHash?.toLowerCase() === term.toLowerCase());
+        const foundExport = Array.isArray(parsed.exports) && parsed.exports.some(proof => exportHash(proof).toLowerCase() === term.toLowerCase());
+        if (!foundVersion && !foundExport) throw new Error("O hash consultado não corresponde a nenhuma versão nem a um arquivo exportado publicado neste passaporte.");
       } else if (parsed.work.id !== term && !parsed.versions.some(v => (v as NonNullable<Passport["versions"]>[number] & { id?: string }).id === term)) {
         throw new Error("O UID consultado não corresponde à obra nem a uma versão deste passaporte.");
       }
@@ -68,7 +80,7 @@ export default function XuriPassportVerify() {
     setPassport(null);
     setResult(null);
     try {
-      const parsed = JSON.parse(await file.text()) as Passport;
+      const parsed = JSON.parse(await file.text()) as PublicPassport;
       const verification = await verifyPassport(parsed);
       setPassport(parsed);
       setResult(verification);
@@ -118,6 +130,23 @@ export default function XuriPassportVerify() {
           {result.revokedKeyCount > 0 && <p className="mt-2 text-sm">Atenção: {result.revokedKeyCount} versão(ões) usam chave atualmente marcada como revogada. Isso é um estado separado da verificação matemática da assinatura.</p>}
           <p className="mt-3 text-xs leading-5 text-muted-foreground">Este resultado não valida criptograficamente os tokens RFC 3161. Um token incluído significa apenas que há dados de carimbo no dossiê; a validação requer OpenSSL e um certificado confiável da autoridade. Uma assinatura válida demonstra que a chave privada correspondente à chave pública incluída assinou o payload; não prova, sozinha, identidade civil ou quem escreveu o texto. A cadeia não é, por si só, prova de que o histórico nunca foi reconstruído.</p>
         </div>
+        {Array.isArray(passport.exports) && passport.exports.length > 0 && <section className="mt-6">
+          <h2 className="font-semibold">Provas de arquivos exportados</h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">Cada hash identifica os bytes exatos de um arquivo exportado. A prova é distinta do hash do conteúdo da versão. Esta tela exibe os dados assinados fornecidos pelo serviço, mas não valida ainda a assinatura Ed25519 específica da exportação de forma independente.</p>
+          <ul className="mt-3 space-y-3">{passport.exports.map((proof, index) => {
+            const hash = exportHash(proof);
+            return <li key={hash || index} className="rounded-xl border border-border p-4">
+              <p className="text-sm font-semibold">Arquivo exportado {index + 1}</p>
+              {hash && <><p className="mt-2 text-xs text-muted-foreground">SHA-256 do arquivo</p><p className="break-all font-mono text-xs">{hash}</p></>}
+              {typeof proof.format === "string" && <p className="mt-2 text-sm">Formato: {proof.format}</p>}
+              {typeof proof.createdAt === "string" && <p className="mt-1 text-xs text-muted-foreground">Registrado em {new Date(proof.createdAt).toLocaleString("pt-BR")}</p>}
+              {typeof proof.signedPayload === "string" && <><p className="mt-3 text-xs font-semibold">Texto assinado</p><pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{proof.signedPayload}</pre></>}
+              {typeof proof.payload === "string" && typeof proof.signedPayload !== "string" && <><p className="mt-3 text-xs font-semibold">Payload</p><pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{proof.payload}</pre></>}
+              {typeof proof.signature === "string" && <><p className="mt-3 text-xs font-semibold">Assinatura</p><p className="break-all font-mono text-xs">{proof.signature}</p></>}
+              {typeof proof.sig === "string" && typeof proof.signature !== "string" && <><p className="mt-3 text-xs font-semibold">Assinatura</p><p className="break-all font-mono text-xs">{proof.sig}</p></>}
+            </li>;
+          })}</ul>
+        </section>}
         <h2 className="mt-6 font-semibold">Versões</h2>
         <ol className="mt-2 space-y-3">{result.checks.map((check, i) => {
           const version = passport.versions![i];
