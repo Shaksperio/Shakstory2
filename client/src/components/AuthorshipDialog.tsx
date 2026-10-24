@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createSigningKey, ed25519Supported, parseBackup, readStoredKey, saveStoredKey, signText } from "@/lib/xuriKey";
-import { xuriConfirm, xuriEnroll, xuriDossier, xuriHistory, xuriPrepare, xuriRegister, xuriRegisterKey, xuriRegisterSigned, xuriRevokeKey, xuriStamp, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
+import { xuriConfirm, xuriEnroll, xuriDossier, xuriHistory, xuriPrepare, xuriPublish, xuriRegister, xuriRegisterKey, xuriRegisterSigned, xuriRevokeKey, xuriStamp, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const errorText = (error: unknown) => (error instanceof Error ? error.message : "Não foi possível concluir.");
@@ -21,6 +21,7 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
   const [pass2, setPass2] = useState("");
   const [supported, setSupported] = useState(true);
   const [stored, setStored] = useState(readStoredKey());
+  const [publicName, setPublicName] = useState("");
   useEffect(() => { void ed25519Supported().then(setSupported); }, []);
 
   const reload = useCallback(async () => {
@@ -116,6 +117,18 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
         <h3 className="text-sm font-semibold">Histórico</h3>
         <p className="mt-1 text-xs">{history.chain?.valid ? "Cadeia íntegra." : `Cadeia quebrada na versão ${history.chain?.brokenAt}.`} {history.matchesCurrent ? "O livro atual é igual à última versão registrada." : "O livro mudou desde a última versão registrada."}</p>
         <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void download()}>Baixar dossiê</Button>{history.versions.some(version => !version.stamped) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => { const done = await xuriStamp(bookId); setMessage(done.pending ? `${done.pending} registro(s) sem carimbo: a autoridade não respondeu. Tente mais tarde.` : "Carimbos de tempo obtidos."); await reload(); })}>Carimbar pendentes</Button>}</div>
+        <div className="mt-3 rounded-md border p-2 text-xs" aria-label="Consulta pública">
+          <strong>Consulta pública</strong>
+          <p className="mt-1 text-muted-foreground">{history.published ? "Esta obra pode ser consultada por qualquer pessoa, sem login, pelo UID ou SHA-256, em /verificar/xuri. Aparecem título, hashes, assinaturas e carimbos; nunca o texto, a nota nem o seu e-mail." : "Privada. Se você publicar, qualquer pessoa poderá conferir o registro pelo UID ou SHA-256, sem ver o texto da obra."}</p>
+          {history.workId && <p className="mt-1 break-all font-mono text-[10px]">UID da obra: {history.workId}</p>}
+          {!history.published && <label className="mt-2 block">Nome público (opcional)<input className="mt-1 block w-full rounded-md border bg-background px-2 py-1" maxLength={80} value={publicName} onChange={e => setPublicName(e.target.value)} disabled={busy} /></label>}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {history.published
+              ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => { await xuriPublish(bookId, false); setMessage("Consulta pública desativada."); await reload(); })}>Tornar privada</Button>
+              : <Button size="sm" variant="outline" disabled={busy || !unlocked} onClick={() => void run(async () => { await xuriPublish(bookId, true, publicName); setMessage("Registro publicado para consulta."); await reload(); })}>Publicar para consulta</Button>}
+            {!history.published && !unlocked && <span className="text-muted-foreground">Digite o código do autenticador acima para publicar.</span>}
+          </div>
+        </div>
         <ol className="mt-2 space-y-1 text-xs">{[...history.versions].reverse().map(version => <li key={version.seq} className="rounded-md border p-2"><strong>Versão {version.seq}</strong> · {fmt(version.createdAt)}{version.note ? ` · ${version.note}` : ""} · {version.signed ? "assinada" : "sem assinatura"} · {version.stamped ? "carimbo de tempo externo" : "sem carimbo externo"}<br /><span className="break-all font-mono text-[10px] text-muted-foreground">{version.contentHash}</span></li>)}</ol>
       </section>}
     </div></div>;

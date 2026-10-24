@@ -12,6 +12,7 @@ export function fakeBillingDb() {
   const documents = new Map<string, string>();
   const auths = new Map<string, any>();
   const works: any[] = [];
+  const lookups = new Map<string, number>();
   const versions: any[] = [];
   const keys: any[] = [];
   const db: any = { ...base, offers, purchases, payments, periods, audit, signups, documents, auths, works, versions, keys };
@@ -67,6 +68,18 @@ export function fakeBillingDb() {
         if (/^INSERT OR REPLACE INTO shak_authenticators/.test(sql)) { const [email, secret_enc, created_at] = args; auths.set(email, { email, secret_enc, confirmed: 0, last_step: 0, fails: 0, fail_start: 0, unlock_until: 0, recovery: "[]", created_at }); return {}; }
         if (/^UPDATE shak_authenticators/.test(sql)) { const [confirmed, last_step, fails, fail_start, unlock_until, recovery, email] = args; Object.assign(auths.get(email), { confirmed, last_step, fails, fail_start, unlock_until, recovery }); return {}; }
         if (/^DELETE FROM shak_authenticators/.test(sql)) { auths.delete(args[0]); return {}; }
+        if (/^ALTER TABLE shak_works ADD COLUMN/.test(sql) || /^CREATE TABLE IF NOT EXISTS shak_xuri_lookups/.test(sql)) return {};
+        if (/^INSERT INTO shak_xuri_lookups/.test(sql)) { lookups.set(args[0], (lookups.get(args[0]) ?? 0) + 1); return {}; }
+        if (/^SELECT n FROM shak_xuri_lookups/.test(sql)) return lookups.has(args[0]) ? { n: lookups.get(args[0]) } : null;
+        if (/^DELETE FROM shak_xuri_lookups/.test(sql)) { const suffix = String(args[0]).slice(1); lookups.forEach((_n, k) => { if (!k.endsWith(suffix)) lookups.delete(k); }); return {}; }
+        if (/^UPDATE shak_works SET published_at/.test(sql)) { const w = works.find(x => x.id === args[args.length - 1]); if (w) { w.published_at = /= NULL/.test(sql) ? null : args[0]; w.public_name = /= NULL/.test(sql) ? null : args[1]; } return {}; }
+        if (/FROM shak_versions v JOIN shak_works w/.test(sql)) {
+          const hit = /v\.id = \?/.test(sql) ? versions.find(v => v.id === args[0]) : versions.find(v => v.content_hash === args[0] || v.entry_hash === args[1]);
+          const w = hit && works.find(x => x.id === hit.work_id);
+          return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null;
+        }
+        if (/FROM shak_works w WHERE w\.published_at IS NOT NULL AND w\.id = \?/.test(sql)) { const w = works.find(x => x.id === args[0]); return w && w.published_at != null ? { id: w.id, title: w.title, published_at: w.published_at, public_name: w.public_name ?? null } : null; }
+        if (/FROM shak_keys WHERE key_id = \?/.test(sql)) return keys.find(k => k.key_id === args[0]) ?? null;
         if (/FROM shak_works WHERE email = \? AND book_id = \?/.test(sql)) return works.find(w => w.email === args[0] && w.book_id === args[1]) ?? null;
         if (/^INSERT OR IGNORE INTO shak_works/.test(sql)) { const [id, email, book_id, title, created_at] = args; if (!works.some(w => w.email === email && w.book_id === book_id)) works.push({ id, email, book_id, title, created_at }); return {}; }
         if (/FROM shak_versions WHERE work_id/.test(sql)) return { results: versions.filter(v => v.work_id === args[0]).sort((a, b) => a.seq - b.seq) };
