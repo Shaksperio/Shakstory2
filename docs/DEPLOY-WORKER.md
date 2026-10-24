@@ -25,6 +25,10 @@ O app avisa quando isso acontece: o painel **Pagamentos** mostra "O Worker em pr
 - Conta comum: não consegue abrir `/api/admin/*` (recebe recusa do servidor, não 404).
 - Pagamento: o pedido só vira plano depois da confirmação com o ID da transação (nenhum link ativa plano sozinho).
 
+## Central de Contas e privacidade
+
+`cloudflare-worker/account-center.js` define `cowilaPrivacy` (`/api/privacy/requests`) e `ACCOUNT_CENTER_HTML` (`/account-center`). O patcher instala esse arquivo logo depois de `plans.js`; um upgrade nunca deve apagar o trecho entre o bloco de planos e a entrada do Worker. Depois de publicar, confira que `/account-center` abre e que `/api/privacy/requests` responde (401 sem login, lista com login).
+
 ## Desfazer
 
 Republique o `worker-atual.js` guardado no passo 1 (ou use Deployments → versão anterior, na Cloudflare). Os dados no D1 não são apagados por nenhuma das duas direções.
