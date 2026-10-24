@@ -638,6 +638,74 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     expect((await api(mod, db, OWNER, "dossier?bookId=b1")).json.keys[0].revokedAt).toBeTruthy();
   });
 
+  it("consulta pública: só obras publicadas pelo autor, por UID da obra/versão ou SHA-256, sem vazar dados privados", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "pub1", title: "Obra Pública", nodes: [{ id: "n", content: "segredo do texto" }], updatedAt: 1 }]);
+    const lookup = async (q: string, now = T0, ip = "203.0.113.9") => {
+      const r = new Request("https://x/api/public/xuri/lookup?q=" + encodeURIComponent(q), { headers: { "CF-Connecting-IP": ip } });
+      const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { now });
+      return { status: out.response.status, json: await out.response.json() };
+    };
+    await setup(mod, db);
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
+    const raw = Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64");
+    await api(mod, db, OWNER, "key", { publicKey: raw });
+    const prep = (await api(mod, db, OWNER, "prepare", { bookId: "pub1" })).json;
+    const sig = Buffer.from(await crypto.subtle.sign("Ed25519", pair.privateKey, new TextEncoder().encode(prep.entryPayload))).toString("base64");
+    expect((await api(mod, db, OWNER, "register", { bookId: "pub1", note: "nota privada", createdAt: prep.createdAt, signature: sig })).status).toBe(200);
+    const version = db.versions[0]; const workId = db.works[0].id;
+    // privado por padrão: nada é encontrado, nem por UID, nem por hash
+    expect((await lookup(workId)).status).toBe(404);
+    expect((await lookup(version.content_hash)).status).toBe(404);
+    // consultas inválidas
+    expect((await lookup("")).status).toBe(400);
+    expect((await lookup("curto")).status).toBe(400);
+    expect((await lookup("a b c d e f g h")).status).toBe(400);
+    // publicar exige a janela do autenticador; despublicar não
+    expect((await api(mod, db, OWNER, "publish", { bookId: "pub1", publish: true }, T0 + 20 * 60000)).status).toBe(423);
+    expect((await api(mod, db, OWNER, "publish", { bookId: "naoexiste", publish: true })).status).toBe(404);
+    const pub = await api(mod, db, OWNER, "publish", { bookId: "pub1", publish: true, displayName: "  Ana <b>Autora</b>  " });
+    expect(pub.json).toMatchObject({ ok: true, published: true });
+    expect((await api(mod, db, OWNER, "history?bookId=pub1")).json).toMatchObject({ published: true });
+    // encontra pela obra, pela versão e pelos dois hashes
+    for (const q of [workId, version.id, version.content_hash, version.entry_hash.toUpperCase()]) {
+      const r = await lookup(q);
+      expect(r.status).toBe(200);
+      expect(r.json.work).toEqual({ id: workId, title: "Obra Pública" });
+      expect(r.json.versions).toHaveLength(1);
+      expect(r.json.chain.valid).toBe(true);
+      expect(r.json.author.displayName).toBe("Ana bAutora/b");
+    }
+    const found = await lookup(version.content_hash);
+    expect(found.json.match).toMatchObject({ kind: "hash", seq: 1 });
+    // a assinatura e a chave públicas conferem fora do Shakstory
+    const v = found.json.versions[0];
+    const spki = Buffer.from(found.json.keys[0].publicKeySpkiBase64, "base64");
+    const pub2 = await crypto.subtle.importKey("spki", spki, { name: "Ed25519" }, false, ["verify"]);
+    expect(await crypto.subtle.verify("Ed25519", pub2, Buffer.from(v.signature.sig, "base64"), new TextEncoder().encode(v.entryPayload))).toBe(true);
+    // nada privado na resposta
+    const text = JSON.stringify(found.json);
+    expect(text).not.toContain(OWNER); expect(text).not.toContain("nota privada"); expect(text).not.toContain("segredo do texto");
+    expect(text).not.toContain("secret"); expect(text).not.toContain("recovery");
+    // hash que não corresponde a nada continua 404
+    expect((await lookup("e".repeat(64))).status).toBe(404);
+    // despublicar volta a ser privado
+    expect((await api(mod, db, OWNER, "publish", { bookId: "pub1", publish: false }, T0 + 20 * 60000)).json).toMatchObject({ ok: true, published: false });
+    expect((await lookup(workId)).status).toBe(404);
+  });
+
+  it("consulta pública: limite de consultas por minuto por endereço", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    const hit = async (now: number, ip: string) => {
+      const r = new Request("https://x/api/public/xuri/lookup?q=" + "b".repeat(64), { headers: { "CF-Connecting-IP": ip } });
+      return (await mod.shakGate(r, { DB: db }, new URL(r.url), { now })).response.status;
+    };
+    for (let i = 0; i < 30; i++) expect(await hit(T0, "198.51.100.1")).toBe(404);
+    expect(await hit(T0, "198.51.100.1")).toBe(429);
+    expect(await hit(T0, "198.51.100.2")).toBe(404); // outro endereço não é afetado
+    expect(await hit(T0 + 61000, "198.51.100.1")).toBe(404); // nova janela
+  });
+
   it("não aceita resposta RFC 3161 truncada nem a apresenta como carimbo recebido", async () => {
     const mod = await load(); const db = fakeBillingDb();
     putLibrary(db, OWNER, [{ id: "tsa-book", title: "Livro TSA", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
