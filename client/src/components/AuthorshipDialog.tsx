@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createSigningKey, ed25519Supported, parseBackup, readStoredKey, saveStoredKey, signText } from "@/lib/xuriKey";
-import { xuriConfirm, xuriEnroll, xuriDossier, xuriHistory, xuriPrepare, xuriPublish, xuriRegister, xuriRegisterKey, xuriRegisterSigned, xuriRevokeKey, xuriStamp, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
+import { EXPORT_FORMATS, sha256File, xuriConfirm, xuriEnroll, xuriDossier, xuriHistory, xuriExportPrepare, xuriExportRegister, xuriPrepare, xuriPublish, xuriRegister, xuriRegisterKey, xuriRegisterSigned, xuriRevokeKey, xuriStamp, xuriStatus, xuriUnlock, type XuriHistory, type XuriStatus } from "@/lib/xuri";
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 const errorText = (error: unknown) => (error instanceof Error ? error.message : "Não foi possível concluir.");
@@ -117,6 +117,20 @@ export function AuthorshipDialog({ bookId, title, onClose }: { bookId: string; t
         <h3 className="text-sm font-semibold">Histórico</h3>
         <p className="mt-1 text-xs">{history.chain?.valid ? "Cadeia íntegra." : `Cadeia quebrada na versão ${history.chain?.brokenAt}.`} {history.matchesCurrent ? "O livro atual é igual à última versão registrada." : "O livro mudou desde a última versão registrada."}</p>
         <div className="mt-2 flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void download()}>Baixar dossiê</Button>{history.versions.some(version => !version.stamped) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => { const done = await xuriStamp(bookId); setMessage(done.pending ? `${done.pending} registro(s) sem carimbo: a autoridade não respondeu. Tente mais tarde.` : "Carimbos de tempo obtidos."); await reload(); })}>Carimbar pendentes</Button>}</div>
+        {status?.signingKey && <div className="mt-3 rounded-md border p-2 text-xs" aria-label="Prova de exportação">
+          <strong>Provar arquivo exportado</strong>
+          <p className="mt-1 text-muted-foreground">Escolha o PDF, DOCX ou EPUB que você exportou. O arquivo não sai do seu aparelho: só o SHA-256 é assinado com a sua chave e ligado à última versão registrada. Se o livro mudou, registre uma nova versão antes.</p>
+          <input className="mt-2 block w-full min-w-0" type="file" accept=".pdf,.docx,.epub,.txt,.html,.json" disabled={busy || !unlocked || !keyHere} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; void run(async () => {
+            const format = (file.name.split(".").pop() || "").toLowerCase();
+            if (!(EXPORT_FORMATS as readonly string[]).includes(format)) throw new Error("Formato não suportado. Use PDF, DOCX, EPUB, TXT, HTML ou JSON.");
+            const fileHash = await sha256File(file);
+            const prep = await xuriExportPrepare(bookId, format, fileHash);
+            const signature = await signText(pass, prep.payload);
+            await xuriExportRegister(bookId, format, fileHash, prep.createdAt, signature);
+            setMessage(`Exportação ${format.toUpperCase()} provada para a versão ${prep.seq}. SHA-256: ${fileHash}`); setPass("");
+          }); }} />
+          {(!unlocked || !keyHere) && <span className="text-muted-foreground">{!unlocked ? "Digite o código do autenticador acima." : "A chave de assinatura precisa estar neste aparelho."}</span>}
+        </div>}
         <div className="mt-3 rounded-md border p-2 text-xs" aria-label="Consulta pública">
           <strong>Consulta pública</strong>
           <p className="mt-1 text-muted-foreground">{history.published ? "Esta obra pode ser consultada por qualquer pessoa, sem login, pelo UID ou SHA-256, em /verificar/xuri. Aparecem título, hashes, assinaturas e carimbos; nunca o texto, a nota nem o seu e-mail." : "Privada. Se você publicar, qualquer pessoa poderá conferir o registro pelo UID ou SHA-256, sem ver o texto da obra."}</p>

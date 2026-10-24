@@ -694,6 +694,53 @@ describe("autoria e procedência (TOTP + histórico encadeado)", () => {
     expect((await lookup(workId)).status).toBe(404);
   });
 
+  it("prova de exportação: o autor assina o SHA-256 do arquivo ligado à última versão, e o arquivo é achado na consulta pública", async () => {
+    const mod = await load(); const db = fakeBillingDb();
+    putLibrary(db, OWNER, [{ id: "ex1", title: "Obra Exportada", nodes: [{ id: "n", content: "texto" }], updatedAt: 1 }]);
+    const fileHash = createHash("sha256").update("conteudo do epub").digest("hex");
+    const lookup = async (q: string, now = T0) => {
+      const r = new Request("https://x/api/public/xuri/lookup?q=" + q, { headers: { "CF-Connecting-IP": "203.0.113.50" } });
+      const out = await mod.shakGate(r, { DB: db, XURI_KEY: "chave-de-teste-xuri-0123456789" }, new URL(r.url), { now });
+      return { status: out.response.status, json: await out.response.json() };
+    };
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "epub", fileHash })).status).toBe(428); // sem autenticador
+    await setup(mod, db);
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "epub", fileHash })).status).toBe(404); // sem versão registrada
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]) as CryptoKeyPair;
+    const sign = async (text: string) => Buffer.from(await crypto.subtle.sign("Ed25519", pair.privateKey, new TextEncoder().encode(text))).toString("base64");
+    const prep0 = (await api(mod, db, OWNER, "prepare", { bookId: "ex1" })).json;
+    expect((await api(mod, db, OWNER, "register", { bookId: "ex1" })).status).toBe(200); // ainda sem chave: registro sem assinatura
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "epub", fileHash })).status).toBe(428); // exige chave
+    await api(mod, db, OWNER, "key", { publicKey: Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64") });
+    expect(prep0.ok).toBe(true);
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "exe", fileHash })).status).toBe(400);
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "epub", fileHash: "curto" })).status).toBe(400);
+    const prep = (await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "epub", fileHash })).json;
+    expect(prep.payload).toContain("xuri-1-export"); expect(prep.seq).toBe(1);
+    // assinatura de outro texto, formato trocado ou hash trocado é recusada
+    expect((await api(mod, db, OWNER, "export/register", { bookId: "ex1", format: "epub", fileHash, createdAt: prep.createdAt, signature: await sign(prep.payload + " ") })).status).toBe(400);
+    expect((await api(mod, db, OWNER, "export/register", { bookId: "ex1", format: "pdf", fileHash, createdAt: prep.createdAt, signature: await sign(prep.payload) })).status).toBe(400);
+    const ok = await api(mod, db, OWNER, "export/register", { bookId: "ex1", format: "epub", fileHash, createdAt: prep.createdAt, signature: await sign(prep.payload) });
+    expect(ok.status).toBe(200); expect(ok.json).toMatchObject({ ok: true, seq: 1, format: "epub", fileHash });
+    // privado até publicar; depois o arquivo é achado pelo próprio hash
+    expect((await lookup(fileHash)).status).toBe(404);
+    expect((await api(mod, db, OWNER, "publish", { bookId: "ex1", publish: true })).status).toBe(200);
+    const found = await lookup(fileHash);
+    expect(found.status).toBe(200);
+    expect(found.json.match).toMatchObject({ kind: "file", seq: 1 });
+    expect(found.json.exports).toHaveLength(1);
+    const exp = found.json.exports[0];
+    const spki = Buffer.from(found.json.keys[0].publicKeySpkiBase64, "base64");
+    const pub = await crypto.subtle.importKey("spki", spki, { name: "Ed25519" }, false, ["verify"]);
+    expect(await crypto.subtle.verify("Ed25519", pub, Buffer.from(exp.signature.sig, "base64"), new TextEncoder().encode(exp.payload))).toBe(true);
+    expect(exp.contentHash).toBe(found.json.versions[0].contentHash);
+    // o dossiê do autor também traz a prova
+    expect((await api(mod, db, OWNER, "dossier?bookId=ex1")).json.exports).toHaveLength(1);
+    // se o livro mudar, é preciso registrar nova versão antes de provar outra exportação
+    putLibrary(db, OWNER, [{ id: "ex1", title: "Obra Exportada", nodes: [{ id: "n", content: "texto novo" }], updatedAt: 2 }]);
+    expect((await api(mod, db, OWNER, "export/prepare", { bookId: "ex1", format: "pdf", fileHash })).status).toBe(409);
+  });
+
   it("consulta pública: limite de consultas por minuto por endereço", async () => {
     const mod = await load(); const db = fakeBillingDb();
     const hit = async (now: number, ip: string) => {

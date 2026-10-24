@@ -24,3 +24,11 @@ export const xuriStamp = (bookId: string) => call<{ stamped: number; pending: nu
 export const xuriDossier = (bookId: string) => call<Record<string, unknown>>("dossier?bookId=" + encodeURIComponent(bookId));
 export const xuriHistory = (bookId: string) => call<XuriHistory>("history?bookId=" + encodeURIComponent(bookId));
 export const xuriPublish = (bookId: string, publish: boolean, displayName = "") => call<{ ok: true; published: boolean; publicName?: string | null }>("publish", { bookId, publish, displayName });
+export const xuriExportPrepare = (bookId: string, format: string, fileHash: string) => call<{ ok: true; seq: number; createdAt: string; payload: string; keyId: string }>("export/prepare", { bookId, format, fileHash });
+export const xuriExportRegister = (bookId: string, format: string, fileHash: string, createdAt: string, signature: string) => call<{ ok: true; exportId: string; seq: number; format: string; fileHash: string; createdAt: string }>("export/register", { bookId, format, fileHash, createdAt, signature });
+/** SHA-256 (hex) dos bytes do arquivo, calculado no navegador; o arquivo não é enviado. */
+export async function sha256File(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+export const EXPORT_FORMATS = ["pdf", "docx", "epub", "txt", "html", "json"] as const;
