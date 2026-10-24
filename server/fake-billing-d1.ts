@@ -71,7 +71,7 @@ export function fakeBillingDb() {
         if (/^ALTER TABLE shak_works ADD COLUMN/.test(sql) || /^CREATE TABLE IF NOT EXISTS shak_xuri_lookups/.test(sql)) return {};
         if (/^INSERT INTO shak_xuri_lookups/.test(sql)) { lookups.set(args[0], (lookups.get(args[0]) ?? 0) + 1); return {}; }
         if (/^SELECT n FROM shak_xuri_lookups/.test(sql)) return lookups.has(args[0]) ? { n: lookups.get(args[0]) } : null;
-        if (/^DELETE FROM shak_xuri_lookups/.test(sql)) { const suffix = String(args[0]).slice(1); for (const k of [...lookups.keys()]) if (!k.endsWith(suffix)) lookups.delete(k); return {}; }
+        if (/^DELETE FROM shak_xuri_lookups/.test(sql)) { const suffix = String(args[0]).slice(1); lookups.forEach((_n, k) => { if (!k.endsWith(suffix)) lookups.delete(k); }); return {}; }
         if (/^UPDATE shak_works SET published_at/.test(sql)) { const w = works.find(x => x.id === args[args.length - 1]); if (w) { w.published_at = /= NULL/.test(sql) ? null : args[0]; w.public_name = /= NULL/.test(sql) ? null : args[1]; } return {}; }
         if (/FROM shak_versions v JOIN shak_works w/.test(sql)) {
           const hit = /v\.id = \?/.test(sql) ? versions.find(v => v.id === args[0]) : versions.find(v => v.content_hash === args[0] || v.entry_hash === args[1]);
