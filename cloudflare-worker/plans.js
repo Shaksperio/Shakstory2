@@ -10,7 +10,7 @@
 import { verifyAccessJwt, MIRROR_EMAILS } from "./mirror-token.js";
 
 /** Versão do código de contas/planos que está no Worker. O app compara com a versão esperada e avisa se a produção ficou para trás. Mude junto com EXPECTED_WORKER_VERSION em client/src/lib/plans.ts. */
-export const SHAK_WORKER_VERSION = "2026-10-24.2";
+export const SHAK_WORKER_VERSION = "2026-10-24.3";
 export const TRIAL_DAYS = 7;
 const DAY_MS = 86400000;
 
@@ -561,7 +561,7 @@ async function ensureXuri(db) {
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_versions (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, content_hash TEXT NOT NULL, bytes INTEGER NOT NULL, prev_hash TEXT NOT NULL, entry_hash TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, signature TEXT, ts_proof TEXT, UNIQUE (work_id, seq))").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_keys (key_id TEXT PRIMARY KEY, email TEXT NOT NULL, public_key TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT)").run();
   // Publicação voluntária para a consulta pública: published_at nulo = privado.
-  for (const col of ["published_at TEXT", "public_name TEXT"]) { try { await db.prepare("ALTER TABLE shak_works ADD COLUMN " + col).run(); } catch { /* coluna já existe */ } }
+  for (const col of ["published_at TEXT", "public_name TEXT", "public_isbns TEXT"]) { try { await db.prepare("ALTER TABLE shak_works ADD COLUMN " + col).run(); } catch { /* coluna já existe */ } }
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_xuri_lookups (k TEXT PRIMARY KEY, n INTEGER NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS shak_exports (id TEXT PRIMARY KEY, work_id TEXT NOT NULL, seq INTEGER NOT NULL, format TEXT NOT NULL, file_hash TEXT NOT NULL, content_hash TEXT NOT NULL, created_at TEXT NOT NULL, signature TEXT NOT NULL, UNIQUE (work_id, file_hash))").run();
   xuriReady = true;
@@ -597,6 +597,19 @@ async function shakXuriCheck(db, env, email, auth, code, now, allowRecovery) {
 
 /** Texto exato que o autor assina para provar um arquivo exportado (PDF, DOCX, EPUB...) ligado a uma versão registrada. */
 const xuriExportPayload = (workId, seq, format, fileHash, contentHash, createdAt) => shakStable({ protocol: "xuri-1-export", work: workId, seq, format, file: fileHash, content: contentHash, at: createdAt });
+/** ISBN normalizado (sem hífens, X maiúsculo) e conferido pelo dígito verificador; "" se inválido. */
+function xuriIsbn(value) {
+  const code = String(value || "").replace(/[\s-]/g, "").toUpperCase();
+  if (/^\d{9}[\dX]$/.test(code)) return code.split("").reduce((sum, ch, i) => sum + (ch === "X" ? 10 : Number(ch)) * (10 - i), 0) % 11 === 0 ? code : "";
+  if (/^\d{13}$/.test(code)) return code.split("").reduce((sum, ch, i) => sum + Number(ch) * (i % 2 === 0 ? 1 : 3), 0) % 10 === 0 ? code : "";
+  return "";
+}
+/** ISBNs que o autor declarou no livro (principal e por formato). Declarados, não verificados. */
+const xuriBookIsbns = book => {
+  const pub = (book && book.publication) || {};
+  const all = [pub.isbn, ...Object.values((pub.copyright && pub.copyright.isbns) || {})].map(xuriIsbn).filter(Boolean);
+  return [...new Set(all)].slice(0, 6);
+};
 const XURI_EXPORT_FORMATS = ["pdf", "docx", "epub", "txt", "html", "json"];
 const xuriEntryHash = (workId, seq, contentHash, prevHash, createdAt) => shakSha256Hex(xuriPayload(workId, seq, contentHash, prevHash, createdAt));
 
@@ -766,7 +779,7 @@ async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
     const book = (lib && Array.isArray(lib.books) ? lib.books : []).find(item => item && item.id === bookId);
     if (!book) return null;
     const text = shakStable(book);
-    return { title: String(book.title || "Sem título").slice(0, 200), hash: await shakSha256Hex(text), bytes: shakUtf8Bytes(text) };
+    return { title: String(book.title || "Sem título").slice(0, 200), hash: await shakSha256Hex(text), bytes: shakUtf8Bytes(text), isbns: xuriBookIsbns(book) };
   };
   const work = await db.prepare("SELECT id, title, created_at, published_at, public_name FROM shak_works WHERE email = ? AND book_id = ?").bind(email, bookId).first();
 
@@ -781,11 +794,13 @@ async function shakXuri(db, env, email, owner, path, req, now, doFetch) {
     if (body.publish === true) {
       if (!auth || !auth.confirmed || !(auth.unlock_until > now)) return json({ error: "locked", message: "Digite o código do autenticador para publicar." }, 423);
       const name = String(body.displayName || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 80);
-      await db.prepare("UPDATE shak_works SET published_at = ?, public_name = ? WHERE id = ?").bind(new Date(now).toISOString(), name || null, work.id).run();
+      const book = await loadBook();
+      const isbns = book ? book.isbns : [];
+      await db.prepare("UPDATE shak_works SET published_at = ?, public_name = ?, public_isbns = ? WHERE id = ?").bind(new Date(now).toISOString(), name || null, isbns.length ? JSON.stringify(isbns) : null, work.id).run();
       await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.published", { work: work.id });
-      return json({ ok: true, published: true, publicName: name || null });
+      return json({ ok: true, published: true, publicName: name || null, isbns });
     }
-    await db.prepare("UPDATE shak_works SET published_at = NULL, public_name = NULL WHERE id = ?").bind(work.id).run();
+    await db.prepare("UPDATE shak_works SET published_at = NULL, public_name = NULL, public_isbns = NULL WHERE id = ?").bind(work.id).run();
     await shakEnsureBilling(db); await shakAudit(db, now, email, "xuri.unpublished", { work: work.id });
     return json({ ok: true, published: false });
   }
@@ -1249,9 +1264,11 @@ async function shakXuriLookup(req, env, now) {
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   const db = env.DB;
   if (!db) return json({ error: "unavailable" }, 503);
-  const q = String(new URL(req.url).searchParams.get("q") || "").trim();
-  const isHash = /^[a-f0-9]{64}$/i.test(q);
-  if (!isHash && !XURI_UID_RE.test(q)) return json({ error: "invalid_query" }, 400);
+  const rawQ = String(new URL(req.url).searchParams.get("q") || "").trim();
+  const isbn = xuriIsbn(rawQ);
+  const q = isbn || rawQ.replace(/^xuri:(?:work|version):/i, "");
+  const isHash = !isbn && /^[a-f0-9]{64}$/i.test(q);
+  if (!isbn && !isHash && !XURI_UID_RE.test(q)) return json({ error: "invalid_query" }, 400);
   await ensureXuri(db);
   const ip = req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "anon";
   const win = Math.floor(now / 60000);
@@ -1260,9 +1277,14 @@ async function shakXuriLookup(req, env, now) {
   const used = await db.prepare("SELECT n FROM shak_xuri_lookups WHERE k = ?").bind(k).first();
   if (used && used.n > XURI_LOOKUP_PER_MINUTE) return json({ error: "rate_limited" }, 429);
   await db.prepare("DELETE FROM shak_xuri_lookups WHERE k NOT LIKE ?").bind("%:" + win).run();
-  const WORK_COLS = "w.id AS id, w.title AS title, w.published_at AS published_at, w.public_name AS public_name";
+  const WORK_COLS = "w.id AS id, w.title AS title, w.published_at AS published_at, w.public_name AS public_name, w.public_isbns AS public_isbns";
   let work = null, kind = "work";
-  if (isHash) {
+  if (isbn) {
+    // ISBN é declarado pelo autor: serve para localizar, não prova autoria. Se mais de uma obra publicada o declara, não escolhemos por ninguém.
+    const found = (await db.prepare("SELECT " + WORK_COLS + " FROM shak_works w WHERE w.published_at IS NOT NULL AND w.public_isbns LIKE ? LIMIT 3").bind('%"' + isbn + '"%').all()).results || [];
+    if (found.length > 1) return json({ error: "ambiguous_isbn", message: "Mais de uma obra publicada declara este ISBN. Consulte pelo UID ou pelo SHA-256." }, 409);
+    work = found[0] || null; kind = "isbn";
+  } else if (isHash) {
     const hash = q.toLowerCase();
     work = await db.prepare("SELECT " + WORK_COLS + " FROM shak_versions v JOIN shak_works w ON w.id = v.work_id WHERE w.published_at IS NOT NULL AND (v.content_hash = ? OR v.entry_hash = ?) LIMIT 1").bind(hash, hash).first();
     kind = "hash";
@@ -1288,9 +1310,10 @@ async function shakXuriLookup(req, env, now) {
   const match = kind === "file" ? exportRows.find(row => row.file_hash === q.toLowerCase()) : isHash ? rows.find(row => row.content_hash === q.toLowerCase() || row.entry_hash === q.toLowerCase()) : kind === "version" ? rows.find(row => row.id === q) : null;
   return json({
     protocol: "xuri-1", generatedAt: new Date(now).toISOString(),
-    work: { id: work.id, title: work.title }, author: work.public_name ? { displayName: work.public_name } : null, publishedAt: work.published_at,
+    work: { id: work.id, title: work.title, isbns: work.public_isbns ? JSON.parse(work.public_isbns) : [] }, author: work.public_name ? { displayName: work.public_name } : null, publishedAt: work.published_at,
     chain, keys, exports,
     versions: rows.map(row => ({ id: row.id, seq: row.seq, createdAt: row.created_at, bytes: row.bytes, contentHash: row.content_hash, prevHash: row.prev_hash, entryHash: row.entry_hash, entryPayload: xuriPayload(work.id, row.seq, row.content_hash, row.prev_hash, row.created_at), timestamp: row.ts_proof ? JSON.parse(row.ts_proof) : null, signature: row.signature ? JSON.parse(row.signature) : null })),
+    ...(work.public_isbns ? { isbnNotice: "ISBN informado pelo autor; identifica a edição, não comprova autoria." } : {}),
     match: match ? { kind, seq: match.seq } : { kind },
     notice: "Evidência técnica de que o conteúdo existia na data registrada; não prova, por si só, autoria jurídica nem originalidade."
   });
